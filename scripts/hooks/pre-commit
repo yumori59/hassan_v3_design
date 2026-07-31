@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# pre-commit hook — 設計ドキュメントの機械検証を強制 (rules/05-harness.md)
+#
+# `make install-hooks` で .git/hooks/pre-commit にシンボリックリンクされる。
+# 二層化: 差分のみ手元 (staged の .md を doc-lint) / 全体は CI (docs-ci.yml)。
+# 失敗するとコミット不可。`--no-verify` での回避はユーザー明示指示がない限り禁止。
+set -uo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+staged=$(git diff --cached --name-only --diff-filter=ACM || true)
+md_staged=$(echo "$staged" | grep -E '\.md$' || true)
+sh_staged=$(echo "$staged" | grep -E '\.sh$|^scripts/hooks/' || true)
+inception_staged=$(echo "$staged" | grep -E '^aidlc-docs/inception/' || true)
+# テーブル件数の照合対象。**ファイルを絞らない** (2026-07-31 変更) —
+# 照合対象の文書を増やしたときにこのフィルタの更新漏れが「手元では緑・CI で赤」を生むため。
+# 所要時間はミリ秒オーダーでフィルタする価値が無い。`.md` が 1 つでも staged なら実行する。
+tables_staged="$md_staged"
+
+if [[ -n "$md_staged" ]]; then
+  echo "[pre-commit] doc-lint (staged Markdown)"
+  # shellcheck disable=SC2086
+  if ! bash scripts/doc-lint.sh $md_staged; then
+    echo "[pre-commit] FAIL: doc-lint — リンク切れ/参照先不在を修正してから再コミットしてください" >&2
+    exit 1
+  fi
+else
+  echo "[pre-commit] Markdown 変更なし — doc-lint スキップ"
+fi
+
+if [[ -n "$inception_staged" ]]; then
+  echo "[pre-commit] check-traceability (AC-ID 照合)"
+  if ! bash scripts/check-traceability.sh; then
+    echo "[pre-commit] FAIL: 未カバーの AC があります — plan.md / docs/design/ で参照するか AC を削ってください" >&2
+    exit 1
+  fi
+fi
+
+if [[ -n "$tables_staged" ]]; then
+  echo "[pre-commit] check-table-counts (テーブル件数の整合)"
+  if ! bash scripts/check-table-counts.sh; then
+    echo "[pre-commit] FAIL: テーブル件数の記述がずれています — 表を数えた実測値に全箇所を揃えてください" >&2
+    echo "[pre-commit]       連動箇所の実例: docs/design/API/idea-boards.md §8.2 (1 テーブルの追加で 15 箇所)" >&2
+    exit 1
+  fi
+fi
+
+if [[ -n "$sh_staged" ]]; then
+  echo "[pre-commit] bash -n (staged シェルスクリプト)"
+  while IFS= read -r f; do
+    [[ -z "$f" || ! -f "$f" ]] && continue
+    if ! bash -n "$f"; then
+      echo "[pre-commit] FAIL: 構文エラー $f" >&2
+      exit 1
+    fi
+  done <<< "$sh_staged"
+fi
+
+# --- 実装リポ雛形の変更に対する注意喚起 (非ブロック) -----------------------
+tmpl_staged=$(echo "$staged" | grep -E '^templates/impl-repo/' || true)
+if [[ -n "$tmpl_staged" ]]; then
+  echo "[pre-commit] 注意: 実装リポジトリ雛形を変更しています。既に切り出し済みの実装リポがある場合、"
+  echo "[pre-commit] 　　　 同じ変更を向こうにも反映する必要があります (雛形は SSOT ではなく初期値)。"
+fi
+
+echo "[pre-commit] OK"

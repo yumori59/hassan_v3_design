@@ -1,0 +1,426 @@
+# .golangci.yml — <backend-repo-name> (バックエンド) の層規約の機械強制
+#
+# 設計リポ (hassan_v3) の docs/design/architecture.md が正。転記元:
+#   §3.5.1  依存規則 L-1〜L-6 と depguard での表現
+#   §3.5.2  適用範囲の一覧 (v3 新規ドメイン / 共通層 / v2 移植分)
+#   §3.9④  肥大化を締める lint (dupl 主役・cyclop・funlen 補助)
+#   §3.3    各層の禁止事項
+#
+# 【実装リポで必ず行う置換・追記】
+#   1. `<module-path>` を go.mod の module パスに一括置換する
+#   2. L5-no-external-sdk の deny リストに、実際に依存する外部 SDK の import パスを追記する
+#   3. `service/<domain>` / `usecase/<domain>` / `repository/<domain>` を新設したら、同一 PR で
+#      (a) L-2 / L-3 の規則 (b) L5-no-external-sdk の files (c) 下の exclusions の対象パス
+#      (d) `layering-scopes.yml` の v3_domains / ported_domains
+#      をすべて追記し、あわせて設計リポの architecture.md §3.5.2 の対象パス表も更新する。
+#      追記漏れは「新規ドメインが除外側に落ちて無検査になる」形の事故になるため、二重に検出する:
+#        - 未登録の `service/<domain>` は L2-service-unregistered-domain で落ちる
+#        - 実ディレクトリ / layering-scopes.yml / 本ファイルの 3 者の不一致は
+#          CI の D-2⑦ (scripts/check-layer-scopes.sh) で落ちる
+#
+# depguard は import パス単位でしか deny できない (型・メソッド呼び出しは deny できない)。
+# L-6 が「接続プールのパッケージの import を deny」という形になっているのはこのため。
+# **L-6 の主たる担保は depguard ではなく型** — Service / ツールハンドラへは
+# `Begin` / `Commit` / `Rollback` を持たない narrow IF (Exec / Query / QueryRow の 3 メソッド) を渡す
+# (architecture.md §3.7 の 2)。`pgx.Tx` は Begin / Commit / Rollback を公開しているため
+# (hassan-v2-backend/vendor/github.com/jackc/pgx/v5/tx.go:122・:124・:130・:137)、
+# `pgx.Tx` をそのまま渡すと「呼べない」が成立しない。
+#
+# 【重要: list-mode: lax の意味】
+# lax は「deny に書いていない import をすべて許可する」。したがって
+# **禁止したい方向は必ず deny に列挙しなければならない**。
+# L-1 の依存連鎖 (controller → usecase → {service, repository, gateway} → entity) の
+# **全逆流方向**を deny する規則の対応は下表のとおり (規則を追加・削除するときはこの表も更新する):
+#
+#   逆流方向                    | 規則
+#   ---------------------------|--------------------------------------------
+#   entity → 他 5 層           | L1-entity-no-other-layers
+#   entity → DB / HTTP / SDK   | L1-entity-no-side-effects (層ではないが entity の禁止事項)
+#   usecase → controller       | L1-usecase-no-controller
+#   service → usecase          | L1-service-no-upper-layers
+#   service → controller       | L1-service-no-upper-layers
+#   repository → controller    | L1-repository-no-upper-layers
+#   repository → usecase       | L1-repository-no-upper-layers
+#   repository → service       | L1-repository-no-upper-layers
+#   repository → gateway       | L1-repository-no-upper-layers (同階層。SQL 実行のみの責務)
+#   gateway → controller       | L4-gateway-no-upper-layers
+#   gateway → usecase          | L4-gateway-no-upper-layers
+#   gateway → service          | L4-gateway-no-upper-layers
+#   gateway → repository       | L4-gateway-no-upper-layers
+#   controller → service       | L1-controller-no-adapters
+#   controller → repository    | L1-controller-no-adapters
+#   controller → gateway       | L1-controller-no-adapters
+#   service/A → service/B      | L2-service-no-cross-domain-<domain> / L2-service-unregistered-domain
+#   usecase → repository (具体) | L4-L5-no-concrete-adapters (IF は利用側で定義。実装の代入は di/)
+#   usecase → gateway (具体)    | L4-L5-no-concrete-adapters
+#   service → repository (具体) | L4-L5-no-concrete-adapters
+#   service → gateway (具体)    | L4-L5-no-concrete-adapters
+#   上位層 → sqlc 生成パッケージ | L3-no-sqlc-outside-repository (repository/** のみ許可)
+#
+# **`di/**` はどの規則の `files` にも含めない** — 具体パッケージを import する唯一の層だからである
+# (architecture.md §3.3 の di 行)。
+#
+# **L-3 (service が扱えるデータは自ドメインのみ) はこの表に無い** — L4-L5-no-concrete-adapters により
+# service は repository を一切 import しないため、**import グラフに現れず depguard では検査できない**。
+# L-3 の担保は 3 段 (architecture.md §3.5.1 の「L-3 の担保 (3 段)」: IF のメソッド / di の配線レビュー /
+# A-4 の CI 検査)。**`repository/<domain>/` を分割する根拠も「di の配線可読性」に差し替わっている** (D-A'''')。
+#
+# **規則数は 18** (L-ID と規則名は 1 対 1 ではない)。
+# architecture.md §3.5.1 が「全 18 規則それぞれについて違反サンプルで CI が落ちることを確認する」と
+# 定めているので、**規則を追加・削除したらこの数と上の表を同じ PR で更新する**。
+#
+# **`service` → `usecase` を deny しないと L-2 が迂回できる** —
+# service/A → usecase/B → service/B の経路で「跨ぎ禁止」が無効化され、
+# 異ドメインなので Go のコンパイラも弾かない。L1-service-no-upper-layers がこれを塞ぐ。
+#
+# 設定スキーマは golangci-lint v2 系 (`version: "2"`)。
+# 違反した PR はマージできない (.github/workflows/ci.yml の golangci-lint ジョブが必須チェック)。
+
+version: "2"
+
+linters:
+  enable:
+    - depguard # L-1〜L-6 (architecture.md §3.5.1)
+    - dupl # §3.9④ 主役
+    - cyclop # §3.9④
+    - funlen # §3.9④ 補助
+
+  settings:
+    # ---- §3.9④ 肥大化を締める lint (重複検出を主役、行数は補助) ----------------
+    # 対象パスは §3.5.2 の「v3 新規ドメイン」区分のみ (下の exclusions.rules で限定する)。
+    dupl:
+      # 主役。v2 の実害を直接狙う — hassan-v2-backend/usecase/idea/web_search.go の
+      # 150 行重複と business_plan/detailed/brush_up_business_plan_detailed.go の
+      # 6 関数の同一骨格は、どちらも重複として検出される。
+      threshold: 150
+
+    cyclop:
+      # 長さではなく分岐の多さを締める。
+      max-complexity: 15
+
+    funlen:
+      # 補助。明確な外れ値のみを止める。80 行にしない根拠は §3.9④ の実測分布
+      # (hassan-v2-backend/usecase/ 配下の非テスト関数 573 個のうち 80 行以上が 40 個 = 7.0%。
+      #  UseCase は手続きなので行数は自然に伸び、80 行では「順に呼ぶだけの長い手続き」を大量に誤検知する)。
+      # ファイル行数の上限は設けない (別ファイルへ移すだけで回避でき、抑止力にならない)。
+      lines: 150
+      statements: 80
+
+    depguard:
+      rules:
+        # ===== L-1: 依存方向 controller → usecase → {service, entity}。逆流禁止 =====
+        # entity は「副作用のない計算」の層なので、他層すべてを deny する。
+        L1-entity-no-other-layers:
+          list-mode: lax
+          files:
+            - "**/entity/**"
+          deny:
+            - pkg: "<module-path>/controller"
+              desc: "L-1 (§3.5.1): entity は他層に依存しない"
+            - pkg: "<module-path>/usecase"
+              desc: "L-1 (§3.5.1): entity は他層に依存しない"
+            - pkg: "<module-path>/service"
+              desc: "L-1 (§3.5.1): entity は他層に依存しない"
+            - pkg: "<module-path>/repository"
+              desc: "L-1 / §3.3: entity は SQL を実行しない"
+            - pkg: "<module-path>/gateway"
+              desc: "L-1 / §3.3: entity は外部 API を呼ばない"
+
+        # §3.3 の entity の禁止事項「SQL 実行・外部 API 呼び出し」を機械強制する。
+        # 上の規則は自リポの層しか deny しないため、DB ドライバ・HTTP・外部 SDK は別途塞ぐ。
+        # **entity/toolresult がツール結果の型の唯一の宣言場所になった (§3.8.5) ため、
+        #   entity は「読み手・書き手が共有する中心」であり、ここに副作用が混入すると
+        #   entity のテストが DB・外部 API を要求し始める** (C-L5 の却下理由そのもの)。
+        # 実装リポで依存が確定した外部 SDK は L5-no-external-sdk と併せてここにも追記する。
+        L1-entity-no-side-effects:
+          list-mode: lax
+          files:
+            - "**/entity/**"
+          deny:
+            - pkg: "database/sql"
+              desc: "§3.3: entity は SQL を実行しない (副作用のない計算・変換・バリデーションのみ)"
+            - pkg: "github.com/jackc/pgx/v5"
+              desc: "§3.3: entity は SQL を実行しない。DB アクセスは repository/<domain>/ の責務"
+            - pkg: "net/http"
+              desc: "§3.3: entity は外部 API を呼ばない。HTTP は gateway/<外部システム>/ の責務"
+            - pkg: "github.com/anthropics/anthropic-sdk-go"
+              desc: "§3.3: entity は外部 SDK に依存しない (テストが外部 API を要求し始める)"
+
+        # UseCase → Controller は逆流。
+        L1-usecase-no-controller:
+          list-mode: lax
+          files:
+            - "**/usecase/**"
+          deny:
+            - pkg: "<module-path>/controller"
+              desc: "L-1 (§3.5.1) / §3.3: UseCase は Controller に依存しない"
+
+        # Service → UseCase / Controller は逆流。
+        # **この規則が無いと L-2 (service/A → service/B 禁止) を
+        #   service/A → usecase/B → service/B の経路で完全に迂回できる**
+        # (L2-service-no-cross-domain-<domain> は list-mode: lax なので、deny に無い usecase の import を許してしまう)。
+        # 対象は登録済み・未登録を問わず `service/**` 全体にする。
+        L1-service-no-upper-layers:
+          list-mode: lax
+          files:
+            - "**/service/**"
+          deny:
+            - pkg: "<module-path>/usecase"
+              desc: "L-1 (§3.5.1) / §3.4: Service は UseCase に依存しない。跨ぐ協調は UseCase の責務であり、service/A → usecase/B → service/B は L-2 の迂回になる。トランザクションは UseCase が張り引数 (narrow IF) で渡す (§3.7)"
+            - pkg: "<module-path>/controller"
+              desc: "L-1 (§3.5.1) / §3.3: Service は HTTP / Controller に依存しない"
+
+        # Controller の禁止事項 (§3.3): Repository / gateway の直接使用。
+        L1-controller-no-adapters:
+          list-mode: lax
+          files:
+            - "**/controller/**"
+          deny:
+            - pkg: "<module-path>/service"
+              desc: "L-1 / §3.3: Controller は Service を直接使わない (UseCase のみを呼ぶ。直接呼ぶと所有者スコープの確定とトランザクション境界を飛ばせる)"
+            - pkg: "<module-path>/repository"
+              desc: "§3.3: Controller は Repository を直接使わない (UseCase 経由)"
+            - pkg: "<module-path>/gateway"
+              desc: "§3.3: Controller は gateway を直接使わない (UseCase 経由)"
+
+        # Repository の禁止事項 (§3.3): 上位層への依存 + 外部 API 呼び出し。
+        L1-repository-no-upper-layers:
+          list-mode: lax
+          files:
+            - "**/repository/**"
+          deny:
+            - pkg: "<module-path>/controller"
+              desc: "L-1 (§3.5.1) / §3.3: Repository は上位層に依存しない"
+            - pkg: "<module-path>/usecase"
+              desc: "L-1 (§3.5.1) / §3.3: Repository は上位層に依存しない"
+            - pkg: "<module-path>/service"
+              desc: "L-1 (§3.5.1) / §3.3: Repository は上位層に依存しない"
+            - pkg: "<module-path>/gateway"
+              desc: "§3.3: Repository の責務は SQL 実行と entity 変換のみ。外部 API 呼び出しを混ぜない (同階層の adapter を呼ぶと、DB アクセスと外部 API のどちらで失敗したか切り分けられなくなる)"
+
+        # UseCase / Service は HTTP に依存しない (§3.3 の `*gin.Context` への依存禁止)。
+        L1-no-gin-outside-controller:
+          list-mode: lax
+          files:
+            - "**/usecase/**"
+            - "**/service/**"
+          deny:
+            - pkg: "github.com/gin-gonic/gin"
+              desc: "§3.3: UseCase / Service は *gin.Context に依存しない (HTTP は Controller に閉じる)"
+
+        # ===== L-2: service/A → service/B の import 禁止 ==================
+        # 跨ぐ協調は UseCase の責務 (UseCase が両方を呼んで結果を引き渡す)。
+        # allow は deny より優先されるため、自ドメイン (サブパッケージ) のみを allow に載せる。
+        #
+        # **L-3 (service が扱えるデータは自ドメインのみ) は depguard では検査できない** —
+        # L4-L5-no-concrete-adapters により service/** は repository を一切 import しないため、
+        # 「自ドメインの repository のみ」は import グラフに現れない。
+        # L-3 の担保は 3 段 (architecture.md §3.5.1 の「L-3 の担保 (3 段)」):
+        #   1. service が宣言する repository IF のメソッドが自ドメインのものだけであること (レビュー)
+        #   2. di/ の配線レビュー (repository/<domain> をドメイン別に分けている理由がこれ)
+        #   3. A-4 の所有者スコープ CI 検査 (越境した場合の実害を捕まえる最終防壁)
+        L2-service-no-cross-domain-theme:
+          list-mode: lax
+          files:
+            - "**/service/theme/**"
+          allow:
+            - "<module-path>/service/theme"
+          deny:
+            - pkg: "<module-path>/service"
+              desc: "L-2 (§3.5.1): service/theme は他ドメインの service を import しない。跨ぐ協調は UseCase が両方を呼んで結果を引き渡す"
+
+        L2-service-no-cross-domain-asset:
+          list-mode: lax
+          files:
+            - "**/service/asset/**"
+          allow:
+            - "<module-path>/service/asset"
+          deny:
+            - pkg: "<module-path>/service"
+              desc: "L-2 (§3.5.1): service/asset は他ドメインの service を import しない"
+
+        L2-service-no-cross-domain-conversation:
+          list-mode: lax
+          files:
+            - "**/service/conversation/**"
+          allow:
+            - "<module-path>/service/conversation"
+          deny:
+            - pkg: "<module-path>/service"
+              desc: "L-2 (§3.5.1): service/conversation は他ドメインの service を import しない。A-6 の構造的な保証 (§3.8.2): Runner は asset / idea / plan / theme のパッケージを import しないため、他ドメインへの経路は UseCase が注入したハンドラの中にしか存在しない"
+
+        L2-service-no-cross-domain-idea:
+          list-mode: lax
+          files:
+            - "**/service/idea/**"
+          allow:
+            - "<module-path>/service/idea"
+          deny:
+            - pkg: "<module-path>/service"
+              desc: "L-2 (§3.5.1): service/idea は他ドメインの service を import しない"
+
+        L2-service-no-cross-domain-plan:
+          list-mode: lax
+          files:
+            - "**/service/plan/**"
+          allow:
+            - "<module-path>/service/plan"
+          deny:
+            - pkg: "<module-path>/service"
+              desc: "L-2 (§3.5.1): service/plan は他ドメインの service を import しない"
+
+        # 上記に登録の無い service/<domain> を検出する番犬。
+        # §3.5.2 の運用ルール「本表に無いパッケージを新設する PR は本表への追記を同一 PR に含める」を
+        # 機械側から担保する (追記漏れが「無検査で通る」形にならないようにする)。
+        L2-service-unregistered-domain:
+          list-mode: lax
+          files:
+            - "**/service/**"
+            - "!**/service/theme/**"
+            - "!**/service/asset/**"
+            - "!**/service/conversation/**"
+            - "!**/service/idea/**"
+            - "!**/service/plan/**"
+          deny:
+            - pkg: "<module-path>/"
+              desc: "L-2 / L-3 (§3.5.2): この service/<domain> は .golangci.yml に登録されていない。L2-service-no-cross-domain-<domain> 規則と exclusions の対象パスを追加し、architecture.md §3.5.2 の対象パス表を同一 PR で更新すること"
+
+        # ===== L-3 の続き: sqlc 生成パッケージは repository/** の内側に閉じる =====
+        # sqlc の生成パッケージは **全ドメインの全クエリを 1 パッケージに含む**。
+        # これを service/theme から import できる限り rdb.New(tx).GetAssetByID(...) の形で
+        # 他ドメインへ到達でき、L-2 / L-3・§3.3 (SQL 実行は Repository)・A-4 / A-6 の所有者条件・
+        # BE-11 (採番の閉じ込め) がその経路で一斉に無効化される。
+        # repository/<domain>/ を分割した目的 (import 制約で L-3 を機械強制する。D-A'''') が
+        # 崩れるため、生成パッケージ自体の import を repository/** 以外から禁止する。
+        #
+        # v2 の実測 (2026-07-30): hassan-v2-backend/db/rdb を repository/ 以外から import している
+        # ファイルは 44 件 (usecase/ 39 / controller/ 3 / entity/ 1 / auth/ 1。vendor・テスト除く)。
+        # rdb.New( の repository/ 外の出現は 0 件で、用途は enum / モデル型 / params 構造体の参照。
+        # = **この方向は既定で発生する**ので、import の段階で塞ぐ。
+        # enum とドメイン型は entity/ で定義し、Repository が変換して返す (§3.6。L-5 と同じ論理)。
+        #
+        # 【実装リポで必ず行う置換】<module-path>/db/rdb を実際の sqlc 出力先パスに合わせる
+        # (出力先を 1 パッケージにするか複数に分けるかはデータモデル増分で決まる。
+        #  複数に分ける場合は共通の親パスを指定すれば足りる)。
+        # 対象は v3 新規ドメインと共通層のみ — **v2 移植分 (usecase/<移植ドメイン>) は files に含めない**
+        # (移植コードは 44 ファイルが生成型を参照しており、現状維持で持ち込む。Q-L3=A)。
+        L3-no-sqlc-outside-repository:
+          list-mode: lax
+          files:
+            - "**/usecase/theme/**"
+            - "**/usecase/asset/**"
+            - "**/usecase/conversation/**"
+            - "**/usecase/idea/**"
+            - "**/usecase/plan/**"
+            - "**/service/**"
+            - "**/controller/**"
+            - "**/entity/**"
+            # gateway も対象 — §3.3 は gateway の DB アクセスを禁止し、observability.md の O-C は
+            # 「L-4 により gateway は repository を呼べない」を明細の永続化を呼び出し元に置く根拠に
+            # している。生成パッケージを直接 import されるとその根拠が機械的に裏付けられない
+            # (design-reviewer の中 A 指摘 2026-07-30)。
+            - "**/gateway/**"
+          deny:
+            - pkg: "<module-path>/db/rdb"
+              desc: "L-3 (§3.5.1 の「sqlc 生成パッケージの扱い」): sqlc 生成パッケージを import できるのは repository/** だけ。全ドメインの全クエリを含むため、ここから他ドメインのデータへ到達できてしまう (L-2 / L-3 / A-4 / A-6 / BE-11 の迂回路)。enum・モデル型・params 構造体は entity/ で定義し、Repository が変換して返す (§3.6)"
+
+        # ===== L-4: gateway は上位層と repository を import しない ==========
+        L4-gateway-no-upper-layers:
+          list-mode: lax
+          files:
+            - "**/gateway/**"
+          deny:
+            - pkg: "<module-path>/controller"
+              desc: "L-4 (§3.5.1): gateway は上位層を import しない"
+            - pkg: "<module-path>/usecase"
+              desc: "L-4 (§3.5.1): gateway は上位層を import しない"
+            - pkg: "<module-path>/service"
+              desc: "L-4 (§3.5.1) / §3.3: gateway は停止条件・安全弁などのビジネスロジックを持たない"
+            - pkg: "<module-path>/repository"
+              desc: "L-4 (§3.5.1) / §3.8.3: gateway は明細を永続化しない (永続化は呼び出し元の UseCase が行う)"
+            # §3.3 の禁止事項「DB アクセス」は repository の deny だけでは塞げない —
+            # ドライバを直接使う経路が残る (design-reviewer の中 A 指摘 2026-07-30)。
+            - pkg: "database/sql"
+              desc: "§3.3: gateway は DB アクセスを持たない (明細の永続化は呼び出し元 = usecase。observability.md の O-C がこれを永続化点の根拠にしている)"
+            - pkg: "github.com/jackc/pgx/v5"
+              desc: "§3.3: gateway は DB アクセスを持たない (同上)"
+
+        # ===== L-4 / L-5: 上位層は具体アダプタを import しない ==============
+        # §3.6 の決定「IF は利用側 (usecase / service) のパッケージで定義し、gateway / repository は
+        # 実装のみを持つ」に従うと、**usecase / service は repository も gateway も一切 import しない**。
+        # 具体パッケージを import してよいのは di/ だけである (§3.3 の di 行)。
+        #
+        # v2 の実測 (2026-07-30) — この形は既に成立している:
+        #   grep -rl "hassan-v2-backend/repository" usecase/  → 0 件
+        #   grep -rl "hassan-v2-backend/repository" controller/ → 0 件
+        #   具体パッケージを import するのは hassan-v2-backend/di/wire.go だけ
+        #   (自リポジトリ import 29 件: usecase 系 20 / repository 1 / controller 1 / entity 1 /
+        #    auth 1 / llm 1 / ogp 1 / prompt 1 / hassanresend 1 / aws 1)
+        #
+        # **files に di/** を含めないので誤検知は起きない**。
+        # wire の provider / 生成物を usecase/ や service/ 配下に置くと本規則に当たる —
+        # それは「配線を di/ に集約する」設計 (§3.3) に反するので、当たるのが正しい挙動である。
+        L4-L5-no-concrete-adapters:
+          list-mode: lax
+          files:
+            - "**/usecase/**"
+            - "**/service/**"
+          deny:
+            - pkg: "<module-path>/repository"
+              desc: "L-4 / L-5 (§3.5.1) / §3.6: usecase / service は repository の具体パッケージを import しない。IF は利用側のパッケージで定義し、実装の代入は di/ が行う (§3.3 の di 行)。自ドメインの repository も対象 — 直接依存すると差し替え時に公開 IF が壊れ、テストのモック境界を repository 側が決めることになる"
+            - pkg: "<module-path>/gateway"
+              desc: "L-4 / L-5 (§3.5.1) / §3.6: usecase / service は gateway の具体パッケージを import しない。IF は利用側のパッケージで定義し、実装の代入は di/ が行う"
+
+        # ===== L-5: 外部 SDK の型を usecase / service の公開 IF に露出させない ==
+        # IF は利用側 (usecase / service) のパッケージで定義するため、SDK の import は不要。
+        # 対象は §3.5.2 の「v3 新規ドメイン」区分 (v2 移植分は L-5 の強制対象外)。
+        # 実装リポで依存が確定した外部 SDK (検索 API・ストレージ・他プロバイダの LLM SDK 等) を
+        # この deny リストに追記する。
+        L5-no-external-sdk:
+          list-mode: lax
+          files:
+            - "**/usecase/theme/**"
+            - "**/usecase/asset/**"
+            - "**/usecase/conversation/**"
+            - "**/usecase/idea/**"
+            - "**/usecase/plan/**"
+            - "**/service/**"
+          deny:
+            - pkg: "github.com/anthropics/anthropic-sdk-go"
+              desc: "L-5 (§3.5.1): 外部 SDK の型を usecase / service の公開 IF に露出させない。SDK 呼び出しは gateway/<外部システム>/ に置き、IF は利用側で定義する"
+
+        # ===== L-6: tx は UseCase が張り、narrow IF で引数として渡す ========
+        # **主たる担保は型** — Service / ツールハンドラが受け取る tx は、利用側パッケージで定義した
+        # `Exec` / `Query` / `QueryRow` の 3 メソッドだけを持つ IF (architecture.md §3.7 の 2)。
+        # `pgx.Tx` を渡すと Begin / Commit / Rollback が呼べてしまうため、実型を渡さない
+        # (hassan-v2-backend/vendor/github.com/jackc/pgx/v5/tx.go:122 の Tx interface が
+        #  Begin(:124) / Commit(:130) / Rollback(:137) を公開している)。
+        # depguard で表現できるのは「接続プールの入手経路を塞ぐ」ところまで。
+        # narrow IF でも SQL は実行できるので、その残余は CI の D-2⑨ (Exec/Query/QueryRow 呼び出しの検出) で見る。
+        L6-service-no-connection-pool:
+          list-mode: lax
+          files:
+            - "**/service/**"
+          deny:
+            - pkg: "github.com/jackc/pgx/v5/pgxpool"
+              desc: "L-6 (§3.5.1 / §3.7): Service は接続プールを受け取らない。tx は UseCase が張り、Begin / Commit / Rollback を持たない narrow IF として引数で渡す (Service は Repository の XxxWithTx へそのまま渡すだけ)"
+
+  exclusions:
+    rules:
+      # §3.9④: dupl / cyclop / funlen の対象は **v3 で新規に書くコード全体**。
+      # v3 新規ドメイン (usecase/{5 ドメイン} / service / repository/{5 ドメイン}) に加え、
+      # **共通層 (controller / gateway / entity / config) も対象に含める**。
+      # 除外するのは v2 移植分だけ (usecase/<移植ドメイン> と repository/*.go のフラット構成)。
+      #
+      # 共通層を除外しない理由 (重複の実害が観測されたのがまさにその 2 箇所だから):
+      #   - gateway: F14 — LLM プロバイダ 4 種で HTTP/JSON 送受信が重複
+      #     (hassan-v2-backend/docs/refactoring-plan.md:68)。v3 でこのコードは gateway/ に移るため、
+      #     除外すると dupl が最も効くべき場所を外すことになる
+      #   - controller: F5 — CodedError → HTTP 変換が 8 ファイル 61 箇所にコピペ
+      #     (hassan-v2-backend/docs/refactoring-plan.md:545)。D-2④ は型アサーションの所在を見るだけで、
+      #     変換ロジック自体の重複は dupl が見る
+      - path-except: '(^|/)(usecase/(theme|asset|conversation|idea|plan)|service|repository/(theme|asset|conversation|idea|plan)|controller|gateway|entity|config)/'
+        linters:
+          - dupl
+          - cyclop
+          - funlen

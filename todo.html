@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HASSAN v3 — 本番化タスクボード</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #f2efe6;
+    --paper-deep: #e9e5d8;
+    --line: #d8d3c2;
+    --ink: #1c1a15;
+    --ink-soft: #6b6557;
+    --ink-faint: #9b957f;
+    --infra: #b4530a;
+    --infra-bg: #f7e8d8;
+    --be: #1d4ed8;
+    --be-bg: #e2e9fb;
+    --fe: #15803d;
+    --fe-bg: #ddefe0;
+    --design: #be185d;
+    --design-bg: #f9e2ec;
+    --done: #9b957f;
+    --card: #faf8f1;
+    --shadow: 0 1px 0 rgba(28,26,21,.06), 0 6px 18px -8px rgba(28,26,21,.18);
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+    --sans: "IBM Plex Sans JP", "Hiragino Kaku Gothic ProN", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background:
+      linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 100% 32px,
+      linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 32px 100%,
+      var(--paper);
+    background-blend-mode: soft-light, soft-light, normal;
+    min-height: 100vh;
+    padding-bottom: 80px;
+  }
+
+  /* ── header ─────────────────────────── */
+  header {
+    border-bottom: 2px solid var(--ink);
+    background: var(--paper);
+    padding: 28px 32px 0;
+    position: relative;
+  }
+  .overline {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .22em;
+    color: var(--ink-soft);
+    text-transform: uppercase;
+  }
+  h1 {
+    font-size: clamp(26px, 4vw, 40px);
+    font-weight: 700;
+    letter-spacing: .01em;
+    margin: 4px 0 2px;
+  }
+  h1 .v3 { color: var(--infra); }
+  .subtitle { font-size: 13px; color: var(--ink-soft); margin-bottom: 18px; }
+
+  .header-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 18px;
+  }
+  .total-progress { min-width: 260px; flex: 1; max-width: 420px; }
+  .total-progress .nums {
+    font-family: var(--mono);
+    font-size: 12px;
+    display: flex;
+    justify-content: space-between;
+    color: var(--ink-soft);
+    margin-bottom: 5px;
+  }
+  .total-progress .nums b { color: var(--ink); font-weight: 600; }
+  .bar {
+    height: 8px;
+    background: var(--paper-deep);
+    border: 1px solid var(--line);
+    display: flex;
+    overflow: hidden;
+  }
+  .bar i { display: block; height: 100%; transition: width .35s ease; }
+  .bar .seg-design { background: var(--design); }
+  .bar .seg-infra { background: var(--infra); }
+  .bar .seg-be   { background: var(--be); }
+  .bar .seg-fe   { background: var(--fe); }
+
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: .04em;
+    padding: 7px 13px;
+    background: var(--card);
+    border: 1px solid var(--ink);
+    color: var(--ink);
+    cursor: pointer;
+    box-shadow: 2px 2px 0 var(--ink);
+    transition: transform .08s ease, box-shadow .08s ease;
+    user-select: none;
+  }
+  .btn:hover { transform: translate(-1px,-1px); box-shadow: 3px 3px 0 var(--ink); }
+  .btn:active { transform: translate(1px,1px); box-shadow: 0 0 0 var(--ink); }
+  .btn.toggled { background: var(--ink); color: var(--paper); }
+  .btn.danger:hover { background: #fbe4e4; }
+
+  /* ── board ─────────────────────────── */
+  .board {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 20px;
+    padding: 28px 32px;
+    max-width: 1720px;
+    margin: 0 auto;
+  }
+  @media (max-width: 1360px) { .board { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 1100px; } }
+  @media (max-width: 768px) { .board { grid-template-columns: 1fr; max-width: 720px; } }
+
+  /* ── kanban view ─────────────────────── */
+  .board.kanban-view { grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: 1280px; }
+  @media (max-width: 1100px) { .board.kanban-view { grid-template-columns: 1fr; max-width: 720px; } }
+  .filter-row { grid-column: 1 / -1; display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .05em;
+    padding: 5px 12px;
+    border: 1px solid var(--ink-faint);
+    background: transparent;
+    color: var(--ink-soft);
+    cursor: pointer;
+  }
+  .chip:hover { border-color: var(--ink); color: var(--ink); }
+  .chip.active { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  .chip.active[data-cat="design"] { background: var(--design); border-color: var(--design); }
+  .chip.active[data-cat="infra"]  { background: var(--infra);  border-color: var(--infra); }
+  .chip.active[data-cat="be"]     { background: var(--be);     border-color: var(--be); }
+  .chip.active[data-cat="fe"]     { background: var(--fe);     border-color: var(--fe); }
+  .col.lane { --cat-color: var(--ink); --cat-bg: var(--paper-deep); }
+  .col.lane[data-status="0"] { --cat-color: var(--ink-soft); }
+  .col.lane[data-status="2"] { --cat-color: var(--done); }
+  .kanban-view .tasks { min-height: 140px; }
+  .kanban-view .tag.status-tag { display: none; }
+  .tag.cat-tag { cursor: default; }
+
+  .col { min-width: 0; }
+  .col-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    border-bottom: 2px solid var(--cat-color);
+    padding-bottom: 8px;
+    margin-bottom: 6px;
+  }
+  .col-title { display: flex; align-items: baseline; gap: 10px; }
+  .col-title .jp { font-size: 19px; font-weight: 700; }
+  .col-title .en {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .18em;
+    color: var(--cat-color);
+    text-transform: uppercase;
+  }
+  .col-count { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+  .col-count b { color: var(--cat-color); font-weight: 600; }
+  .col-bar { height: 4px; background: var(--paper-deep); margin-bottom: 14px; }
+  .col-bar i { display: block; height: 100%; background: var(--cat-color); transition: width .35s ease; }
+
+  .col[data-cat="design"] { --cat-color: var(--design); --cat-bg: var(--design-bg); }
+  .col[data-cat="infra"] { --cat-color: var(--infra); --cat-bg: var(--infra-bg); }
+  .col[data-cat="be"]    { --cat-color: var(--be);    --cat-bg: var(--be-bg); }
+  .col[data-cat="fe"]    { --cat-color: var(--fe);    --cat-bg: var(--fe-bg); }
+
+  /* ── tasks ─────────────────────────── */
+  .tasks { list-style: none; display: flex; flex-direction: column; gap: 7px; min-height: 40px; }
+  .task {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--cat-color);
+    padding: 9px 10px 9px 11px;
+    box-shadow: var(--shadow);
+    cursor: grab;
+    position: relative;
+    animation: pop .18s ease;
+  }
+  @keyframes pop { from { opacity: 0; transform: translateY(4px); } }
+  .task.dragging { opacity: .35; cursor: grabbing; }
+  .task.drop-above::before, .task.drop-below::after {
+    content: "";
+    position: absolute;
+    left: -3px; right: 0;
+    height: 2px;
+    background: var(--cat-color);
+  }
+  .task.drop-above::before { top: -5px; }
+  .task.drop-below::after { bottom: -5px; }
+
+  .status-btn {
+    flex: none;
+    width: 18px; height: 18px;
+    margin-top: 2px;
+    border: 1.5px solid var(--ink-soft);
+    border-radius: 50%;
+    background: transparent;
+    cursor: pointer;
+    position: relative;
+    transition: all .15s ease;
+  }
+  .task[data-status="1"] .status-btn {
+    border-color: var(--cat-color);
+    background: linear-gradient(90deg, var(--cat-color) 50%, transparent 50%);
+  }
+  .task[data-status="2"] .status-btn { border-color: var(--cat-color); background: var(--cat-color); }
+  .task[data-status="2"] .status-btn::after {
+    content: "";
+    position: absolute; inset: 3px 4px 5px 4px;
+    border-left: 2px solid var(--card);
+    border-bottom: 2px solid var(--card);
+    transform: rotate(-45deg);
+  }
+
+  .task-main { flex: 1; min-width: 0; }
+  .task-tags { display: flex; gap: 5px; margin-bottom: 3px; flex-wrap: wrap; }
+  .tag {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: .08em;
+    padding: 1.5px 6px;
+    border: 1px solid var(--cat-color);
+    color: var(--cat-color);
+    background: var(--cat-bg);
+    cursor: pointer;
+    user-select: none;
+  }
+  .tag.status-tag { border-color: var(--ink-faint); color: var(--ink-soft); background: transparent; }
+  .task[data-status="1"] .tag.status-tag { border-color: var(--ink); color: var(--ink); font-weight: 600; }
+  .task[data-status="2"] .tag.status-tag { border-style: dashed; }
+
+  .task-title {
+    font-size: 13.5px;
+    line-height: 1.5;
+    word-break: break-word;
+    outline: none;
+    border-radius: 2px;
+  }
+  .task-title:focus { background: #fff; box-shadow: 0 0 0 2px var(--cat-color); padding: 0 3px; }
+  .task[data-status="2"] .task-title { color: var(--done); text-decoration: line-through; text-decoration-color: rgba(28,26,21,.35); }
+  .task[data-status="2"] { border-left-style: dashed; }
+  .task[data-status="2"] .tag:not(.status-tag) { opacity: .55; }
+
+  .del-btn {
+    flex: none;
+    border: none;
+    background: transparent;
+    color: var(--ink-faint);
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1;
+    padding: 3px 4px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .12s ease, color .12s ease;
+  }
+  .task:hover .del-btn { opacity: 1; }
+  .del-btn:hover { color: #b4230a; }
+
+  /* ── add row ─────────────────────────── */
+  .add-row { display: flex; gap: 6px; margin-top: 10px; }
+  .add-row select, .add-row input {
+    font-family: var(--sans);
+    font-size: 12.5px;
+    border: 1px dashed var(--ink-faint);
+    background: transparent;
+    color: var(--ink);
+    padding: 8px 9px;
+    outline: none;
+  }
+  .add-row select { font-family: var(--mono); font-size: 11px; flex: none; cursor: pointer; }
+  .add-row input { flex: 1; min-width: 0; }
+  .add-row input:focus, .add-row select:focus { border-style: solid; border-color: var(--cat-color); background: var(--card); }
+  .add-row input::placeholder { color: var(--ink-faint); }
+  .add-btn {
+    flex: none;
+    font-family: var(--mono);
+    font-size: 15px;
+    width: 34px;
+    border: 1px dashed var(--ink-faint);
+    background: transparent;
+    color: var(--ink-soft);
+    cursor: pointer;
+  }
+  .add-btn:hover { border-style: solid; border-color: var(--cat-color); color: var(--cat-color); background: var(--cat-bg); }
+
+  body.hide-done .task[data-status="2"] { display: none; }
+
+  .hint {
+    max-width: 1500px;
+    margin: 0 auto;
+    padding: 0 32px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-faint);
+    letter-spacing: .03em;
+  }
+  footer {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-faint);
+    background: linear-gradient(transparent, var(--paper) 40%);
+    text-align: right;
+    padding: 14px 32px 10px;
+    pointer-events: none;
+    letter-spacing: .05em;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="overline">Productionization Task Board</div>
+  <h1>HASSAN <span class="v3">v3</span> やることリスト</h1>
+  <div class="subtitle">設計リポの残作業 + インフラ / バックエンド / フロントエンド の機能単位タスク</div>
+  <div class="header-row">
+    <div class="total-progress">
+      <div class="nums"><span>TOTAL PROGRESS</span><span><b id="total-done">0</b> / <span id="total-all">0</span> done</span></div>
+      <div class="bar" id="total-bar"></div>
+    </div>
+    <div class="toolbar">
+      <button class="btn" id="view-btn">▦ かんばん表示</button>
+      <button class="btn" id="toggle-done">✓ 完了を隠す</button>
+      <button class="btn" id="export-btn">↓ JSON書き出し</button>
+      <button class="btn" id="import-btn">↑ JSON読み込み</button>
+      <button class="btn danger" id="reset-btn">⟲ 初期データに戻す</button>
+      <input type="file" id="import-file" accept=".json" hidden>
+    </div>
+  </div>
+</header>
+
+<div class="board" id="board"></div>
+
+<p class="hint">操作: ○クリックで 未着手→進行中→完了 / かんばん表示ではレーン間ドラッグでステータス変更 / タイトルクリックでその場編集 (Enterで確定) / タグクリックで工程切替 / 変更はこのブラウザに自動保存</p>
+
+<footer>hassan_v3 / saved in localStorage</footer>
+
+<script>
+"use strict";
+
+const STORAGE_KEY = "hassan-v3-taskboard-v1";
+const CATS = [
+  { id: "design", jp: "設計 (このリポ)", tag: "設計リポ", en: "Design Repo", phases: ["調査", "設計", "レビュー", "引き渡し"] },
+  { id: "infra", jp: "インフラ", tag: "インフラ", en: "Infrastructure", phases: ["設計", "構築"] },
+  { id: "be",    jp: "バックエンド", tag: "BE", en: "Backend / Go",  phases: ["設計", "実装"] },
+  { id: "fe",    jp: "フロントエンド", tag: "FE", en: "Frontend / Next.js", phases: ["設計", "実装"] },
+];
+const catOf = id => CATS.find(c => c.id === id);
+const STATUS_LABEL = ["未着手", "進行中", "完了"];
+const STATUS_META = [
+  { s: 0, jp: "未着手", en: "Backlog" },
+  { s: 1, jp: "進行中", en: "In Progress" },
+  { s: 2, jp: "完了", en: "Done" },
+];
+
+/* 初期データ: docs/design/design_memo.md の機能一覧・決定ログ +
+   .claude/rules/08-production-gates.md (D-1〜D-8) を元に作成。
+   設計列は aidlc-docs/inception/productionization/plan.md と aidlc-state.md の残タスク (2026-07-30 時点)。
+   運用: タスク・検討が完了したらこの SEED を更新する (status を 2 に / 新タスクは t(...) を追記。
+   既存タスクの title は localStorage との合流キーなので変えない — ルート CLAUDE.md 参照) */
+const SEED = [
+  // ── 設計 (hassan_v3 リポでの残作業) ──
+  t("design", "設計", "実装リポの AI 駆動開発ワークフロー確定 (construction-workflow: 作業ループ S-1〜S-10 / issue 粒度・DoD / モデル運用 / 人間承認点 → templates/shared/.claude/rules 01〜04 + issue/PR テンプレート + infra-reviewer 新設)", 2),
+  t("design", "レビュー", "construction-workflow の design-reviewer レビュー (3 巡・重大 2 含む指摘 14 件全解消 → Design Freeze 可)", 2),
+  t("design", "引き渡し", "Task-8 (先送り): 実装リポ立ち上げ後、最初の 5 issue で作業ループの上限値 (15 ファイル/800 行・差し戻し 2 巡) を実測して見直す"),
+  t("design", "レビュー", "レビュー B の重大 7 件を修正 (auth.md / API/ — 起草側セッションで対応)", 1),
+  t("design", "レビュー", "レビュー A の中 16 件・軽微 9 件を判断して反映"),
+  t("design", "設計", "Q-1 (データモデル・引き継ぎ範囲) の回答確定 — Task-2f の既存データ量が判断材料", 1),
+  t("design", "設計", "Q-3 (v3 のスコープ) の回答確定", 1),
+  t("design", "設計", "Q-8 (機能フラグの実装方式) の回答確定 → requirements.md へ [Answer] 書き戻し"),
+  t("design", "調査", "Task-2d: PoC プロンプト資産の棚卸し (どのプロンプトがどの経路で使われるか)", 2),
+  t("design", "調査", "Task-2f: v2 本番 DB の既存データ量の確認 (DB 接続が必要・ユーザー側作業)"),
+  t("design", "調査", "インフラ必要要素の一覧をあるふぁさんに確認 (design_memo の TODO。本ボードのインフラ列が叩き台)"),
+  t("design", "設計", "Task-3a: data-model.md 起草 (全テーブルの所有者カラム・マイグレーション方式・ロールバック)", 2),
+  t("design", "設計", "Task-3d: operations.md 起草 (シークレット管理・Agent 発行込みデプロイ手順・段階リリース・DB 自動適用範囲)", 2),
+  t("design", "設計", "Task-3e: infrastructure.md 起草 (インフラ構成要素と Terraform 管理範囲)", 2),
+  t("design", "レビュー", "operations.md / infrastructure.md の design-reviewer レビュー (起草完了後・別セッション)", 2),
+  t("design", "レビュー", "operations.md / infrastructure.md の指摘 18 件を反映 (雛形 deploy.yml / rollback.yml / 04 ルール / observability.md も是正)", 2),
+  t("infra", "設計", "Anthropic の Environment を dev / prod で分けるかの確認 (暫定既定 = 分ける。Anthropic 側の複数作成可否の確認が前提)", 2),
+  t("design", "設計", "Task-3h: llm-migration.md 起草 (機能別の v3 実装形態・使用モデルの見直し)", 2),
+  t("design", "設計", "Task-3j: API/knowledge.md の KN-Q2 行を llm-migration.md 参照へ更新 (RAG は直接 API と確定)", 2),
+  t("design", "設計", "Task-3n: プロトタイプ更新 (2026-07-30) の設計反映 — リネーム・引用行番号の全面更新・画面差分の追記・再確認事項の起票 (themes §6 / settings §7.1 / idea-boards §6.1 / knowledge KN-Q8〜10)", 2),
+  t("design", "設計", "プロトタイプ更新で起票した [Answer] × 9 の回答確定 (TH-Q6〜Q9 / ST-Q8〜Q9 / IB-Q11〜Q13 ほか) — API 設計の再レビュー前が望ましい", 2),
+  t("design", "設計", "残ユーザー判断の一括回答 (19 件反映: psqldef / アカウント二重化 / Agent 統合 3 本化 / リサーチシート廃止 / RAG 第 1 リリース / E2E 方針 / Vercel Pro ほか)", 2),
+  t("design", "設計", "Task-3i: 認証・アカウント基盤 API の起草 (auth-accounts.md 37 本。v2 の重大欠陥 V2-D1〜D3 を構造で潰す)", 2),
+  t("design", "レビュー", "auth-accounts.md の design-reviewer レビュー (別セッション) — auth.md への是正要求 R-AA-1〜9 の妥当性判定を含む", 2),
+  t("design", "レビュー", "auth-accounts.md のレビュー指摘 17 件の反映 (重大 3: 401 と FE 強制ログアウトの衝突 / 公開ホワイトリストの乖離 / §2.3.1 の FE 画面不在)", 2),
+  t("design", "レビュー", "auth-accounts.md の 1 巡目レビュー指摘の反映 (重大 6/中 11/軽微 7。CodedError 値域・監査記録の NULL 可・トークンのハッシュ保存)", 2),
+  t("design", "設計", "auth-accounts.md の是正要求 R-AA-1〜22 を他文書へ反映 (data-model 4 / auth.md 4 / observability 1。R-AA-18 と R-AA-5 は同一差分で)", 0),
+  t("design", "レビュー", "auth-accounts.md の再レビュー (別セッション・重大ゼロの確認) → Task-3i 完了化", 2),
+  t("design", "レビュー", "auth-accounts.md 2 巡目の指摘反映 (重大 3 = 文書間の割れ / 中 7 / 軽微 4)。email_hash は HMAC+pepper を維持", 2),
+  t("design", "設計", "他文書への是正要求の引き継ぎ: data-model の email_hash を HMAC+pepper へ / signup_links の UNIQUE / auth.md の公開ホワイトリスト旧パス", 0),
+  t("design", "設計", "Task-3p: 会話型アイデア創出 API の設計 (SSE イベント型 + LM-Q1/Q2 の統合設計 + プロトタイプ新 UI) — Task-3i の後に着手", 0),
+  t("design", "設計", "RAG 設計の別トピック起票 (aidlc-planner。埋め込みプロバイダ選定・gateway・ベクトル格納先ほか申し送り 7 項目 — 第 1 リリースのクリティカルパス候補)", 0),
+  t("design", "設計", "保留中の [Answer] × 6 の回答 (DM-A2 データ引き継ぎ範囲 / FE-Q7 管理者 IP 制限 / Q-INF-1 要素一覧 / Q-INF-3 ドメイン / LM-Q5 A/B 体制 / アラート宛先)", 0),
+  t("design", "レビュー", "llm-migration.md の design-reviewer レビュー (別セッション)", 2),
+  t("design", "レビュー", "operations / infrastructure / llm-migration の指摘反映 (2 巡目 重大 2・中 11・軽微 8) と 3 巡目確認レビュー", 2),
+  t("design", "設計", "Task-3g: architecture.md §4 §6 を確定に更新", 1),
+  t("design", "設計", "Task-3k: testing.md 起草 (テスト段の分担・LLM 経路のテスト・テナント越境・Playwright E2E)", 2),
+  t("design", "レビュー", "data-model.md の design-reviewer レビュー (重大 3 / 中 5 / 軽微 4)", 2),
+  t("design", "レビュー", "data-model.md の指摘 12 件を反映 (SSOT 側の auth.md / operations.md は反映済み)", 2),
+  t("design", "レビュー", "testing.md の design-reviewer レビュー (別セッション・未実施)", 2),
+  t("design", "設計", "Task-3l: frontend.md 起草 (FE 構造・SSE 共通クライアント・デザイントークン・FE-1〜7 の構造的解消)", 2),
+  t("design", "設計", "Task-3m: frontend の CI に 4 検査を追加 (併置テスト存在 / 公開パス照合 / NEXT_PUBLIC 許可リスト / globals.css 行数)", 2),
+  t("design", "レビュー", "testing.md の指摘 15 件を反映 (重大 4 は解消済み)", 2),
+  t("design", "レビュー", "frontend.md の指摘 16 件を反映", 2),
+  t("design", "レビュー", "data-model.md 2 巡目の重大 1 件 (signup_links の所有者列) を 3 文書で是正", 2),
+  t("design", "レビュー", "testing.md / frontend.md の差分の再レビュー (別セッション)", 2),
+  t("design", "レビュー", "frontend.md の design-reviewer レビュー (別セッション・未実施)", 2),
+  t("design", "レビュー", "design-reviewer 2 巡目 (別セッション) → 重大ゼロで Design Freeze"),
+  t("design", "引き渡し", "Task-4c: 実装リポ 3 つ (backend / frontend / infra) の立ち上げと引き渡し"),
+  t("design", "レビュー", "data-model.md 2 巡目の軽微 R-2〜R-4 を反映 (§7.2 検査 6 の対象フィールド / R-DM-8 の状態表記の stale / observability.md 側に残る読み違えの余地)", 2),
+  t("design", "レビュー", "testing.md 2 巡目の中 R-2 / R-3 を反映 (§10 の存在検査への追加 / observability.md に feature 識別子の対象集合を定義する)", 2),
+  t("design", "レビュー", "testing.md / frontend.md の 2 巡目指摘の反映分を再レビュー (3 巡目・別セッション)"),
+  t("design", "レビュー", "review-auth-api.md の未解決 2 件を決着 (重大 3: §6.4 / §6.6 とリソース単位ロールの両立 / 重大 7: 共有・公開の扱い)"),
+  t("design", "設計", "IB-Q14 の 4 件を確定 (Idea.tag の単複と格納先 / market_size・cagr を Idea に載せるか / has_plan・has_knowledge / v2 concept → v3 summary の写像) — idea-boards.md §8 が照合表の SSOT", 1),
+  t("design", "設計", "idea_tags 新設の是正要求を data-model.md へ反映 (IB-Q14-1=配列で確定。テーブル 39→40・個人 31→32 の連動更新が data-model 3 箇所 / auth.md:592 / architecture.md:759 の計 6 箇所 — idea-boards.md §8.2 が実測リスト)", 2),
+  t("design", "レビュー", "3 巡目レビュー (review-round3.md) — 重大 3 / 中 6 / 軽微 4。Freeze は条件付き不可", 2),
+  t("design", "レビュー", "3 巡目の重大 1・2 のうち起草側の誤りを反映 (testing.md T-N の 6→7 種 / ci.yml コメント / frontend.md の 4 箇所 / §8.2 の連動 6→9 件と「例外 11」の混同訂正)", 2),
+  t("design", "設計", "DR-9 (件数の転記) の再発防止を機構化 — scripts/check-table-counts.sh を新設し make check / CI / pre-commit に配線。data-model.md の表の実測値と 4 文書 22 箇所の転記を照合 (故障注入 3 種で検出力確認)", 2),
+  t("design", "レビュー", "3 巡目の中 1〜中 6・軽微 1〜4 を判断して反映 (中 5 = FE-Q7 と auth.md:554-557 の矛盾はユーザー判断を含む)"),
+  t("design", "レビュー", "auth-accounts.md (37 エンドポイント・新規) の 1 巡目レビュー — 認証は A-1/A-2/A-5/D-5 の中核。v2 の既知欠陥 3 件を引き継がないことの確認が要件"),
+  t("design", "レビュー", "themes / settings / knowledge / news のプロトタイプ引用行番号の抜き取り照合 (idea-boards で 1 行ずれが 3 件出たため同種のずれの可能性)"),
+  t("design", "レビュー", "auth.md の 5 巡目レビュー — §6.2 (MFA の新規実装) / §6.4 (許可リスト 7 種) / §6.7 (4 系統) と社内管理者系のスコープ拡張の妥当性判定"),
+  t("design", "レビュー", "review-layering.md の「Freeze コミットと同時に閉じる事務項目 2 件」を処理", 2),
+  t("design", "設計", "docs/design/ に残る「未着手」の陳腐化を是正 (operations / data-model / frontend は作成済み。architecture.md:748 / :797 / :860 ほか計 8 箇所)"),
+  t("design", "設計", "Task-3i: 認証・アカウント基盤 API 約 30 本の入出力仕様を起草 (DM-A3 / DM-A4 の回答が前提)"),
+  t("design", "設計", "DM-A3 (アカウント基盤の二重化・5 項目) の回答確定 — data-model.md §6.5 に全項目の推奨あり。Task-3i の前提"),
+  t("design", "設計", "DM-A4 (signup_links に contract_id を持たせるか) の回答確定 — v2 実測では A (所有者列なし) が成立する"),
+  t("design", "引き渡し", "git リポジトリの初期化と make install-hooks (現状 .git が無く pre-commit / push ゲートが機能しない)"),
+  t("design", "設計", "LM-Q6 の残り: RAG を第 1 リリースから外すか / Voyage AI を 3 番目のプロバイダとして入れるか (Anthropic に埋め込み API が無いことは確定。スコープ判断のみ)", 2),
+  t("design", "設計", "RAG (ナレッジ検索) の別トピック設計を起票 — aidlc-planner 経由。申し送り 7 項目は llm-migration.md §9.1 の LM-Q6 が SSOT (埋め込みプロバイダ選定 / gateway 実装 / 単価テーブル / route_kind への値追加の要否 / Secrets 登録 / ベクトル格納先 / prod Environment の allowed_hosts)"),
+  t("fe", "設計", "FE-Q2 の残り: maxDuration=800 の Route Handler が 5 分超の SSE を完走するかの実測 1 回 (Preview / Production) + Vercel Pro 以上を前提にしてよいかのユーザー確認"),
+  t("infra", "設計", "Environment を不変として扱う運用の設計反映 (Anthropic 側に設定の版履歴が無い → 変更は新規作成 + ID 差し替え + 旧を archive)"),
+  t("infra", "構築", "prod の Anthropic Environment を limited networking で作成 (allowed_hosts の列挙。外部検索 Exa の経路を含む)"),
+
+  // ── 2026-07-31 夜: レビュー 3 本 (auth-accounts 1 巡目 / auth.md 5 巡目 / 4 巡目) と指摘反映 ──
+  t("design", "レビュー", "auth-accounts.md の 1 巡目レビュー実施 (重大 6 / 中 11 / 軽微 7。V2-D1 の実在を一次ソースで確認)", 2),
+  t("design", "レビュー", "auth.md の 5 巡目レビュー実施 (重大 6 / 中 7 / 軽微 5。review-auth-api の未解決 2 件も決着材料つきで判定)", 2),
+  t("design", "レビュー", "4 巡目レビュー実施 (round3 以降の増分。重大 2 / 中 6 / 軽微 5。check-table-counts の故障注入 5 種を実行)", 2),
+  t("design", "レビュー", "auth.md の 5 巡目指摘 18 件を反映 (MFA 試行上限の成立条件 / A-7 の §6.12 新設 / 第 3 のパターン / 書き込み系 CI 検査 / §5-12・5-13 / §10.3 受信欄)", 2),
+  t("design", "レビュー", "auth-accounts.md 指摘のうち他文書側を反映 (admin_mfa_configs 定義 / audit_logs の認証失敗対応 / token_hash / 種別⑦の系統分離 / settings.md 3 件)", 2),
+  t("design", "レビュー", "4 巡目指摘の反映 — DR-9 の機械強制を拡張 (除外リスト件数・グループ行ラベル・多重ヒット検査・定義元不在で exit 1。照合 22→37 件・故障注入 7/7 検出)", 2),
+  t("design", "レビュー", "DR-8 の手順修正 — 再検査 grep に状態語 (未了/未実装/是正要求/必要) を加える + 受信欄の規約化 (5 巡連続再発の原因は手順側の不足)", 2),
+  t("design", "レビュー", "プロトタイプ引用行番号の抜き取り照合 (themes/settings/knowledge/news。識別子 29 件・件数 6 件すべて一致・軽微 2 件のみ)", 2),
+  t("design", "設計", "plan.md の AC 状態列を実態へ同期 (AC-3.1〜3.8 / AC-4.2 が「未着手」のまま stale だった)", 2),
+  t("design", "レビュー", "frontend.md の状態語 stale 2 箇所を反映 (4 巡目 重大 1 / 軽微 1。**別セッションが同ファイルを編集中のため未対応**)"),
+  t("design", "レビュー", "auth-accounts.md 内の指摘 (重大 6 の D-1/D-3/D-8 追記 / 中 2〜7 / 中 11 / 軽微 1〜7) を反映 — **別セッションが同書を編集中のため未対応**"),
+  t("design", "設計", "A-7 を第 1 リリースのスコープに含める判断のユーザー確認 (auth.md §6.12 は下流文書の設計を宣言したのみ。増分 2 との線引き (c) は据え置き)"),
+  t("design", "レビュー", "5 巡目 / 4 巡目 / auth-accounts 反映分の再レビュー (別セッション。並行編集の収束後に実施する)"),
+  t("design", "引き渡し", "**並行セッションとの作業分担の整理** (同一ファイルを 2 セッションが同時編集しており、.git が無いため復元手段が無い)"),
+
+  // ── 2026-07-31: C-16 (v2 の仕様を引き継ぐ) の決定と反映 ──
+  t("design", "設計", "C-16 を制約として記録 — v2 に存在する仕様は原則すべて引き継ぐ (UI 変更は可・操作の後退は不可)。承認済み例外の表を requirements.md に併設", 2),
+  t("design", "設計", "C-16 の適用: A-7 の共有機能を増分 1 へ引き上げ (visibility の書き込み + scope=contract + 契約既定の 3 カテゴリ化)。auth.md §6.12 / data-model / themes / assets / settings の 5 書に反映", 2),
+  t("design", "設計", "C-16 の是正要求 R-9〜R-11 の反映 (API/README.md の D-API-8' 撤回 / frontend.md の共有 UI を増分 1 へ / auth-accounts.md の AA-D-15 の根拠差し替え) — **並行編集中のため未対応**"),
+  t("design", "設計", "C-16 の下での既存決定の再確認 (ST-Q8 = /settings/workspace の後ろ倒し / LM-Q4 = リサーチシート廃止 / TH-Q1 = CSV エクスポート / AA-Q1 = 企業ミッション API) — ユーザー確認待ち", 2),
+  t("design", "設計", "TH-Q1 決着 = CSV エクスポートを引き継ぐ。idea-boards.md §2.4 に GET /ideas/csv を仕様化 (v2 実装の実測: 16 列・UTF-8 BOM + CRLF・contract_id で絞る)", 2),
+
+  // ── インフラ (構築すべき要素の一覧) ──
+  t("infra", "設計", "環境分離方針 (local / dev / prod) と FE(Vercel)⇔BE(AWS) の環境対応表", 2),
+  t("infra", "設計", "Terraform 構成設計 (ディレクトリ構成・tfstate 保管 S3+lock・apply 実行主体)", 2),
+  t("infra", "構築", "ネットワーク (VPC / サブネット / セキュリティグループ / NAT)"),
+  t("infra", "構築", "ECR + ECS (クラスタ / サービス / タスク定義・複数タスク前提)"),
+  t("infra", "構築", "ALB (ヘルスチェック・SSE 向けアイドルタイムアウト設定)"),
+  t("infra", "構築", "RDS PostgreSQL (バックアップ / 暗号化 / パラメータグループ)"),
+  t("infra", "構築", "Secrets Manager (ANTHROPIC_API_KEY 等の保管と ECS への受け渡し)"),
+  t("infra", "構築", "Route53 / ACM (ドメイン・TLS 証明書)"),
+  t("infra", "構築", "S3 (アセットファイル PDF/CSV アップロード用バケット)"),
+  t("infra", "構築", "CloudWatch (構造化ログ収集・メトリクス・アラート通知先)"),
+  t("infra", "構築", "CI: GitHub Actions (UT + lint の機械強制・AWS へは OIDC 認証)"),
+  t("infra", "構築", "CD: BE デプロイパイプライン (ECR push → ECS ロールアウト・ロールバック手順)"),
+  t("infra", "構築", "DB マイグレーション自動適用の仕組み (手動承認が要る変更の区別を含む)"),
+  t("infra", "構築", "Vercel プロジェクト (環境変数・Preview / Production 環境)"),
+  t("infra", "構築", "Managed Agent の発行・更新のデプロイ手順への組み込み"),
+  t("infra", "構築", "コスト監視 (LLM 使用量集計・AWS Budgets アラート)"),
+
+  // ── バックエンド ──
+  t("be", "設計", "共通基盤設計 (4層構成 / sqlc・wire / CodedError / 認証ミドルウェア / 構造化ログ)", 2),
+  t("be", "実装", "共通基盤実装 (リポジトリ雛形立ち上げ含む)"),
+  t("be", "設計", "LLM・エージェント基盤設計 (agent パッケージ / SSE / 台帳 / custom tools / 使用量記録)", 2),
+  t("be", "実装", "LLM・エージェント基盤実装"),
+  t("be", "設計", "認証機能設計 (v2 移植)", 1),
+  t("be", "実装", "認証機能実装"),
+  t("be", "設計", "テーマ機能設計"),
+  t("be", "実装", "テーマ機能実装"),
+  t("be", "設計", "お知らせ機能設計"),
+  t("be", "実装", "お知らせ機能実装"),
+  t("be", "設計", "アイデア発散機能設計"),
+  t("be", "実装", "アイデア発散機能実装"),
+  t("be", "設計", "ナレッジ機能設計"),
+  t("be", "実装", "ナレッジ機能実装"),
+  t("be", "設計", "アイデアボード機能設計"),
+  t("be", "実装", "アイデアボード機能実装"),
+  t("be", "設計", "アセット機能設計 (AI 抽出の状態機械・失敗時再実行を含む)"),
+  t("be", "実装", "アセット機能実装"),
+  t("be", "設計", "設定機能設計"),
+  t("be", "実装", "設定機能実装"),
+  t("be", "設計", "v2 → v3 データ移行設計 (共存・ロールバック含む)", 1),
+  t("be", "実装", "v2 → v3 データ移行実装"),
+
+  // ── フロントエンド ──
+  t("fe", "設計", "共通基盤設計 (Next.js 雛形 / orval 型生成 / デザイントークン / ディレクトリ規約)", 2),
+  t("fe", "実装", "共通基盤実装"),
+  t("fe", "設計", "SSE 共通クライアント設計 (再接続・会話履歴復元を含む)", 1),
+  t("fe", "実装", "SSE 共通クライアント実装"),
+  t("fe", "設計", "認証機能設計 (ログイン・セッション)", 1),
+  t("fe", "実装", "認証機能実装"),
+  t("fe", "設計", "テーマ機能設計"),
+  t("fe", "実装", "テーマ機能実装"),
+  t("fe", "設計", "お知らせ機能設計"),
+  t("fe", "実装", "お知らせ機能実装"),
+  t("fe", "設計", "アイデア発散機能設計 (会話 UI・ストリーミング表示)"),
+  t("fe", "実装", "アイデア発散機能実装"),
+  t("fe", "設計", "ナレッジ機能設計"),
+  t("fe", "実装", "ナレッジ機能実装"),
+  t("fe", "設計", "アイデアボード機能設計"),
+  t("fe", "実装", "アイデアボード機能実装"),
+  t("fe", "設計", "アセット機能設計 (アップロード・抽出状態の表示)"),
+  t("fe", "実装", "アセット機能実装"),
+  t("fe", "設計", "設定機能設計"),
+  t("fe", "実装", "設定機能実装"),
+  t("fe", "実装", "結合テスト環境整備 (Playwright)"),
+];
+
+// id は cat+title から決める (安定 id)。SEED への追記が既存の保存データへ自動合流できるようにする
+function t(cat, phase, title, status = 0) { return { id: "s:" + cat + ":" + title, cat, phase, title, status }; }
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) return mergeSeed(parsed);
+    }
+  } catch (e) { /* 壊れた保存データは初期データで置き換える */ }
+  return JSON.parse(JSON.stringify(SEED));
+}
+
+// ユーザーが削除した初期タスクを合流時に復活させないための記録
+const DELETED_KEY = STORAGE_KEY + ":deleted";
+function loadDeleted() {
+  try { return new Set(JSON.parse(localStorage.getItem(DELETED_KEY)) || []); }
+  catch (e) { return new Set(); }
+}
+function saveDeleted(set) { localStorage.setItem(DELETED_KEY, JSON.stringify([...set])); }
+let deleted = loadDeleted();
+
+// 保存済みデータに、SEED に後から追加された項目を合流させる
+// (旧形式の id "s0" 等でも cat+title が一致すれば既存とみなし、重複させない)
+function mergeSeed(stored) {
+  const ids = new Set(stored.map(x => x.id));
+  const sigs = new Set(stored.map(x => x.cat + " " + x.title));
+  let added = false;
+  for (const s of SEED) {
+    const sig = s.cat + " " + s.title;
+    if (ids.has(s.id) || sigs.has(sig) || deleted.has(s.id) || deleted.has(sig)) continue;
+    stored.push(JSON.parse(JSON.stringify(s)));
+    added = true;
+  }
+  if (added) localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+  return stored;
+}
+
+let tasks = load();
+function save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks)); }
+
+function uid() { return "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+/* ── render ─────────────────────────── */
+const board = document.getElementById("board");
+const VIEW_KEY = STORAGE_KEY + ":view";
+let view = localStorage.getItem(VIEW_KEY) === "kanban" ? "kanban" : "cat";
+let kanbanFilter = "all";
+
+function render() {
+  board.classList.toggle("kanban-view", view === "kanban");
+  board.innerHTML = "";
+  if (view === "kanban") renderKanban(); else renderCatBoard();
+  renderTotals();
+  document.getElementById("view-btn").textContent = view === "kanban" ? "▤ 分類表示" : "▦ かんばん表示";
+}
+
+function renderCatBoard() {
+  for (const cat of CATS) {
+    const col = document.createElement("section");
+    col.className = "col";
+    col.dataset.cat = cat.id;
+    const items = tasks.filter(x => x.cat === cat.id);
+    const done = items.filter(x => x.status === 2).length;
+    const pct = items.length ? Math.round(done / items.length * 100) : 0;
+
+    col.innerHTML = `
+      <div class="col-head">
+        <div class="col-title"><span class="jp">${cat.jp}</span><span class="en">${cat.en}</span></div>
+        <div class="col-count"><b>${String(done).padStart(2, "0")}</b> / ${String(items.length).padStart(2, "0")}</div>
+      </div>
+      <div class="col-bar"><i style="width:${pct}%"></i></div>
+      <ul class="tasks" data-cat="${cat.id}"></ul>
+      <div class="add-row">
+        <select aria-label="工程">${cat.phases.map(p => `<option>${p}</option>`).join("")}</select>
+        <input type="text" placeholder="タスクを追加..." aria-label="新規タスク">
+        <button class="add-btn" title="追加">+</button>
+      </div>`;
+
+    const ul = col.querySelector(".tasks");
+    for (const item of items) ul.appendChild(renderTask(item, "cat"));
+
+    const input = col.querySelector("input");
+    const select = col.querySelector("select");
+    const add = () => {
+      const title = input.value.trim();
+      if (!title) return;
+      tasks.push({ id: uid(), cat: cat.id, phase: select.value, title, status: 0 });
+      input.value = "";
+      save(); render();
+      col.scrollIntoView({ block: "nearest" });
+    };
+    col.querySelector(".add-btn").addEventListener("click", add);
+    input.addEventListener("keydown", e => { if (e.key === "Enter") add(); });
+
+    board.appendChild(col);
+  }
+}
+
+function renderKanban() {
+  // 分類フィルタ
+  const filter = document.createElement("div");
+  filter.className = "filter-row";
+  filter.innerHTML = [{ id: "all", jp: "すべて" }, ...CATS].map(c =>
+    `<button class="chip${kanbanFilter === c.id ? " active" : ""}" data-cat="${c.id}">${c.jp}</button>`).join("");
+  filter.querySelectorAll(".chip").forEach(ch =>
+    ch.addEventListener("click", () => { kanbanFilter = ch.dataset.cat; render(); }));
+  board.appendChild(filter);
+
+  for (const meta of STATUS_META) {
+    const col = document.createElement("section");
+    col.className = "col lane";
+    col.dataset.status = meta.s;
+    const items = tasks.filter(x => x.status === meta.s && (kanbanFilter === "all" || x.cat === kanbanFilter));
+
+    col.innerHTML = `
+      <div class="col-head">
+        <div class="col-title"><span class="jp">${meta.jp}</span><span class="en">${meta.en}</span></div>
+        <div class="col-count"><b>${String(items.length).padStart(2, "0")}</b> 件</div>
+      </div>
+      <ul class="tasks"></ul>
+      <div class="add-row">
+        <select aria-label="分類">${CATS.map(c => `<option value="${c.id}"${kanbanFilter === c.id ? " selected" : ""}>${c.tag}</option>`).join("")}</select>
+        <input type="text" placeholder="タスクを追加..." aria-label="新規タスク">
+        <button class="add-btn" title="追加">+</button>
+      </div>`;
+
+    const ul = col.querySelector(".tasks");
+    for (const item of items) ul.appendChild(renderTask(item, "status"));
+
+    const input = col.querySelector("input");
+    const select = col.querySelector("select");
+    const add = () => {
+      const title = input.value.trim();
+      if (!title) return;
+      const cat = catOf(select.value);
+      tasks.push({ id: uid(), cat: cat.id, phase: cat.phases[0], title, status: meta.s });
+      input.value = "";
+      save(); render();
+    };
+    col.querySelector(".add-btn").addEventListener("click", add);
+    input.addEventListener("keydown", e => { if (e.key === "Enter") add(); });
+
+    board.appendChild(col);
+  }
+}
+
+function renderTask(item, mode) {
+  const li = document.createElement("li");
+  li.className = "task";
+  li.dataset.id = item.id;
+  li.dataset.status = item.status;
+  li.draggable = true;
+  if (mode === "status") {
+    // かんばん表示ではレーンではなくカード自身が分類色を持つ
+    li.style.setProperty("--cat-color", `var(--${item.cat})`);
+    li.style.setProperty("--cat-bg", `var(--${item.cat}-bg)`);
+  }
+
+  li.innerHTML = `
+    <button class="status-btn" title="状態を切替"></button>
+    <div class="task-main">
+      <div class="task-tags">
+        ${mode === "status" ? `<span class="tag cat-tag">${esc(catOf(item.cat).tag)}</span>` : ""}
+        <span class="tag phase-tag" title="工程を切替">${esc(item.phase)}</span>
+        <span class="tag status-tag">${STATUS_LABEL[item.status]}</span>
+      </div>
+      <div class="task-title" contenteditable="true" spellcheck="false">${esc(item.title)}</div>
+    </div>
+    <button class="del-btn" title="削除">✕</button>`;
+
+  li.querySelector(".status-btn").addEventListener("click", () => {
+    item.status = (item.status + 1) % 3;
+    save(); render();
+  });
+
+  li.querySelector(".phase-tag").addEventListener("click", () => {
+    const phases = catOf(item.cat).phases;
+    item.phase = phases[(phases.indexOf(item.phase) + 1) % phases.length] || phases[0];
+    save(); render();
+  });
+
+  li.querySelector(".del-btn").addEventListener("click", () => {
+    if (!confirm(`削除しますか?\n「${item.title}」`)) return;
+    tasks = tasks.filter(x => x.id !== item.id);
+    deleted.add(item.id);
+    deleted.add(item.cat + " " + item.title);
+    saveDeleted(deleted);
+    save(); render();
+  });
+
+  const titleEl = li.querySelector(".task-title");
+  titleEl.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); titleEl.blur(); }
+    if (e.key === "Escape") { titleEl.textContent = item.title; titleEl.blur(); }
+  });
+  titleEl.addEventListener("blur", () => {
+    const v = titleEl.textContent.trim();
+    if (v && v !== item.title) { item.title = v; save(); }
+    else titleEl.textContent = item.title;
+    renderTotals();
+  });
+  // 編集開始時にドラッグと干渉しないようにする
+  titleEl.addEventListener("focus", () => { li.draggable = false; });
+  titleEl.addEventListener("blur", () => { li.draggable = true; });
+
+  // drag & drop
+  li.addEventListener("dragstart", e => {
+    dragId = item.id;
+    li.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+  });
+  li.addEventListener("dragend", () => { dragId = null; render(); });
+  li.addEventListener("dragover", e => {
+    e.preventDefault();
+    if (dragId === item.id) return;
+    const rect = li.getBoundingClientRect();
+    const above = e.clientY < rect.top + rect.height / 2;
+    li.classList.toggle("drop-above", above);
+    li.classList.toggle("drop-below", !above);
+  });
+  li.addEventListener("dragleave", () => li.classList.remove("drop-above", "drop-below"));
+  li.addEventListener("drop", e => {
+    e.preventDefault();
+    li.classList.remove("drop-above", "drop-below");
+    if (!dragId || dragId === item.id) return;
+    const dragged = tasks.find(x => x.id === dragId);
+    if (!dragged) return;
+    const rect = li.getBoundingClientRect();
+    const above = e.clientY < rect.top + rect.height / 2;
+    adoptGroup(dragged, item, mode);
+    tasks = tasks.filter(x => x.id !== dragId);
+    let idx = tasks.findIndex(x => x.id === item.id);
+    if (!above) idx += 1;
+    tasks.splice(idx, 0, dragged);
+    save(); render();
+  });
+
+  return li;
+}
+
+let dragId = null;
+
+// ドロップ先の列に応じて分類 (分類ビュー) またはステータス (かんばん) を引き継ぐ
+function adoptGroup(dragged, target, mode) {
+  if (mode === "status") { dragged.status = target.status; return; }
+  if (dragged.cat !== target.cat) {
+    dragged.cat = target.cat;
+    const phases = catOf(target.cat).phases;
+    if (!phases.includes(dragged.phase)) dragged.phase = phases[0];
+  }
+}
+
+// 空の列 (末尾) へのドロップ
+board.addEventListener("dragover", e => e.preventDefault());
+board.addEventListener("drop", e => {
+  if (!dragId) return;
+  const colEl = e.target.closest(".col");
+  if (!colEl || e.target.closest(".task")) return;
+  const dragged = tasks.find(x => x.id === dragId);
+  if (!dragged) return;
+  if (view === "kanban") {
+    dragged.status = Number(colEl.dataset.status);
+  } else {
+    const cat = colEl.dataset.cat;
+    if (dragged.cat !== cat) {
+      dragged.cat = cat;
+      const phases = catOf(cat).phases;
+      if (!phases.includes(dragged.phase)) dragged.phase = phases[0];
+    }
+  }
+  tasks = tasks.filter(x => x.id !== dragId);
+  tasks.push(dragged);
+  dragId = null;
+  save(); render();
+});
+
+function renderTotals() {
+  const all = tasks.length;
+  const done = tasks.filter(x => x.status === 2).length;
+  document.getElementById("total-done").textContent = done;
+  document.getElementById("total-all").textContent = all;
+  const bar = document.getElementById("total-bar");
+  bar.innerHTML = CATS.map(c => {
+    const d = tasks.filter(x => x.cat === c.id && x.status === 2).length;
+    return `<i class="seg-${c.id}" style="width:${all ? d / all * 100 : 0}%"></i>`;
+  }).join("");
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+}
+
+/* ── toolbar ─────────────────────────── */
+document.getElementById("view-btn").addEventListener("click", () => {
+  view = view === "kanban" ? "cat" : "kanban";
+  localStorage.setItem(VIEW_KEY, view);
+  render();
+});
+
+document.getElementById("toggle-done").addEventListener("click", e => {
+  document.body.classList.toggle("hide-done");
+  e.currentTarget.classList.toggle("toggled");
+  e.currentTarget.textContent = document.body.classList.contains("hide-done") ? "✓ 完了を表示" : "✓ 完了を隠す";
+});
+
+document.getElementById("export-btn").addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(tasks, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "hassan-v3-tasks.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+const importFile = document.getElementById("import-file");
+document.getElementById("import-btn").addEventListener("click", () => importFile.click());
+importFile.addEventListener("change", () => {
+  const file = importFile.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!Array.isArray(data)) throw new Error("形式が不正です");
+      tasks = data;
+      // 読み込んだ内容を正とする: 含まれない初期タスクは削除済み扱いにして復活を防ぐ
+      const sigs = new Set(data.map(x => x.cat + " " + x.title));
+      const ids = new Set(data.map(x => x.id));
+      deleted = new Set();
+      for (const s of SEED) {
+        if (!ids.has(s.id) && !sigs.has(s.cat + " " + s.title)) { deleted.add(s.id); deleted.add(s.cat + " " + s.title); }
+      }
+      saveDeleted(deleted);
+      save(); render();
+    } catch (err) {
+      alert("読み込みに失敗しました: " + err.message);
+    }
+    importFile.value = "";
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById("reset-btn").addEventListener("click", () => {
+  if (!confirm("すべての変更を破棄して初期データに戻します。よろしいですか?")) return;
+  tasks = JSON.parse(JSON.stringify(SEED));
+  deleted = new Set();
+  saveDeleted(deleted);
+  save(); render();
+});
+
+render();
+</script>
+</body>
+</html>

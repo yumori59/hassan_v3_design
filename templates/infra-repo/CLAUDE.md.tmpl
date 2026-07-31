@@ -1,0 +1,82 @@
+# CLAUDE.md — <infra-repo-name> (インフラ / IaC)
+
+hassan_v3 の設計 (`<hassan_v3 の絶対パス>/docs/design/infrastructure.md`) を実装する IaC リポジトリ。
+**AWS を Terraform で管理する** (ユーザー指定: 全て IaC)。
+対象: VPC / ALB / ECS (クラスタ・サービス) / RDS PostgreSQL / IAM / Secrets Manager / CloudWatch。
+
+**3 リポジトリ構成**: このリポジトリは infra のみ。backend (Go / ECS) と frontend (Next.js / Vercel) は別リポ。
+**このリポジトリの出力 (RDS エンドポイント / ECS クラスタ名 / Secrets ARN) が backend の入力**。
+
+## コマンド
+
+| 目的 | コマンド |
+|---|---|
+| 初期化 | `terraform -chdir=<envs/dev> init` |
+| フォーマット | `terraform fmt -recursive` |
+| 検証 | `terraform validate` |
+| 差分確認 | `terraform -chdir=<envs/dev> plan` |
+| **適用** | `terraform -chdir=<envs/dev> apply` — **人が実行する。エージェントは実行しない** |
+| lint | `<tflint>` |
+
+## 絶対ルール
+
+1. **`apply` / `destroy` / state 操作をエージェントが実行しない**。コード変更と `plan` までが仕事。
+   適用は人間が `plan` の差分を読んで判断する (autoMode で deny 設定済み)
+2. **`plan` の差分は必ず読む**。想定外の `destroy`/`replace` が 1 つでもあれば、
+   その理由を説明できるまで適用しない (**RDS の replace はデータ消失**)
+3. **state ファイルを手で編集しない**。`terraform state rm` / `import` は人間の判断で行う
+4. **秘密情報を `.tf` / `.tfvars` にハードコードしない**。Secrets Manager / SSM Parameter Store を参照する。
+   `terraform.tfstate` は秘密を含む前提で扱う (リモート state + 暗号化)
+5. **本番環境の変更は dev で検証してから**。環境ごとにディレクトリ (または workspace) を分ける
+
+## 構成 (雛形)
+
+```
+<envs/dev/>        dev 環境のルートモジュール (backend / provider / 変数)
+<envs/prod/>       prod 環境のルートモジュール
+<modules/>         再利用モジュール (network / ecs / rds / iam / observability)
+```
+
+- **環境間の差分は変数で表現する**。`envs/dev` と `envs/prod` に同じリソース定義をコピーしない
+- リモート state (S3 + DynamoDB ロック等) を最初に用意する。ローカル state で運用を始めない
+
+## 検証ゲート (完了条件)
+
+```
+terraform fmt -check -recursive → terraform validate → <tflint> → terraform plan (差分の説明)
+```
+
+**`plan` が通ることは「正しい」ことを意味しない**。完了報告には
+①変更したリソース ②`plan` の要約 (add / change / destroy の件数と内容) ③想定外の差分の有無 を含める。
+
+## 設計との対応
+
+`docs/design/infrastructure.md` の「IaC 管理範囲」に対応させる。
+**範囲外にしたリソース (手動管理) は理由をコメントで残す** — 後から見て「漏れ」と区別できるように。
+
+## Claude Code 運用ルール
+
+| ファイル | 内容 |
+|---|---|
+| `.claude/rules/01-construction-loop.md` | **1 issue の作業ループ (S-1〜S-10)。全作業の起点** |
+| `.claude/rules/02-issue-granularity.md` | issue の粒度・DoD (V-1〜V-10)・3 リポ跨ぎのマージ順序 |
+| `.claude/rules/03-model-escalation.md` | モデルの既定・昇格判定 (M-1〜M-4 / T-1〜T-3) |
+| `.claude/rules/04-human-checkpoints.md` | 人間承認点 (H-1〜H-5) と機構・自律範囲 |
+| `.claude/agents/infra-engineer.md` | Terraform 実装エージェント (実装専任) |
+| `.claude/agents/infra-reviewer.md` | Terraform レビュー専任 (state 破壊・IAM・シークレット・公開範囲・コスト) |
+| `.claude/rules/feedback_review_patterns.md` | 頻出バグパターン (SSOT。設計リポと還流) |
+| `.claude/skills/implementing-robustly/` | 着手前の影響半径測定・完了前セルフレビュー |
+| `.claude/skills/test-driven-development/` | Red→Green の進め方 (infra の読み替えは rules 01 §2.4) |
+
+- **作業は GitHub issue 起点** (`.github/ISSUE_TEMPLATE/task.yml` で起票)。ループの現在位置と
+  中断・再開は rules 01 の §6
+- 実装は `infra-engineer`、レビューは**別セッションで** `infra-reviewer` (自己レビュー禁止)。
+  `terraform apply` はどちらの責務でもなく人間が行う (rules 04)
+- 要件・設計の変更が必要になったら**その場で決めず、設計リポ (hassan_v3) に差し戻す**
+- backend / frontend に影響する出力値 (エンドポイント・ARN) を変える場合、**先に相手側の受け取り方を確認する**
+
+## ハーネス
+
+- pre-commit で `terraform fmt -check` + `validate` を強制。`--no-verify` 回避は禁止
+- CI が PR で `fmt` / `validate` / `plan` を実行し、**plan の結果を PR にコメントする** (適用はしない)
+- `apply` / `destroy` / state 操作 / `.tfstate` の読み取りは autoMode で deny

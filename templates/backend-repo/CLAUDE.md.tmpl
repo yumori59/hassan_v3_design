@@ -1,0 +1,365 @@
+# CLAUDE.md — <backend-repo-name> (バックエンド)
+
+hassan_v3 の設計 (`<hassan_v3 の絶対パス>/docs/design/`) を実装する本番バックエンド。
+アーキテクチャは **クリーンアーキテクチャ 4 層 (Controller → UseCase → Service → Repository) +
+`entity/` / `gateway/` の計 6 パッケージ層** + hassan-v2-backend のコーディング規約・認証機構、
+LLM / エージェント層は **Anthropic Managed Agents** (PoC `claude_managed_agents` 方式)。
+**Dify は使わない** (廃止決定)。
+
+**3 リポジトリ構成**: このリポジトリは backend のみ。frontend (Next.js on Vercel) と
+infra (Terraform) は別リポジトリ。**OpenAPI スキーマが frontend との契約**。
+
+## コマンド
+
+| 目的 | コマンド |
+|---|---|
+| ローカル起動 | `<make run>` |
+| スキーマ適用 | `<make psqldef>` |
+| SQL→Go コード生成 | `<make sqlc>` |
+| DI コード生成 | `<make wire>` |
+| OpenAPI 定義生成 (IF 変更時に必須) | `<make docs>` — **frontend の型生成の元。忘れると向こうが壊れる** |
+| Managed Agent の発行・更新 | `<コマンド>` (system prompt / tool schema 変更時に必須) |
+
+## 検証ゲート (完了条件)
+
+```
+go build ./... / go vet ./... / go test ./... / <golangci-lint run>
+```
+
+`go test` は「振る舞い実装の完了ゲート」。新機能・複数ファイル・挙動変更はテスト先行 (Red→Green)。
+lint も CI で機械強制される。
+
+## アーキテクチャ (4 層 + `entity/` / `gateway/` の計 6 パッケージ層)
+
+本設計は **Clean Architecture (CA) + DDD のハイブリッド**。教科書との**意図的な逸脱が 2 点**ある
+(設計リポの `docs/design/architecture.md` §3.1 が正):
+
+1. **`service/` を層として置く** — CA の 4 層 (Entities / Use Cases / Interface Adapters / Frameworks) に
+   `service/` は存在しない。実体は **DDD の Domain Service** (1 集約に閉じた業務ロジック)。
+   ロジックの入口が **HTTP と Agent の custom tool の 2 つ**あるため、エンドポイント単位の UseCase だけでは
+   業務ロジックの置き場が足りない
+2. **Service が Repository / gateway を呼ぶ (副作用を持つ)** — CA では副作用は Use Cases 層が担うが、
+   副作用を全部 UseCase に集めると UseCase が肥大する。**純粋な計算は `entity/` に分離**し、
+   CA の「純粋な内側」は `entity/` が担う
+
+> **v2 は `service/` 追加レイヤーを明示禁止している** (`hassan-v2-backend/CLAUDE.md:39`)。v3 が覆すのは、
+> v2 で層違反ゼロのまま `usecase/idea/web_search.go` が 1381 行まで肥大した実測に基づく。
+> したがって v3 は **①層の追加 ②依存規則の機械強制 (L-1〜L-6 / `.golangci.yml`) ③肥大化の逃げ場 + lint**
+> を同時に持つ。**この 3 点セットのどれかが欠けると v2 と同じ結果になる**。
+
+### 依存方向 (実線 = import、点線 = 依存性逆転)
+
+```mermaid
+flowchart TB
+    C["controller/ (gin)"]
+    U["usecase/{domain}/<br/>利用する repository IF / gateway IF をここで定義"]
+    S["service/{domain}/<br/>利用する自ドメインの IF をここで定義"]
+    E["entity/"]
+    R["repository/{domain}/"]
+    G["gateway/{外部システム}/"]
+    DB[("PostgreSQL")]
+    EXT["Anthropic Managed Agents / Exa / 他の外部 API"]
+
+    C --> U
+    U --> S
+    U --> E
+    S --> E
+    R -. "IF を満たす (依存は内向き)" .-> U
+    R -. "IF を満たす (依存は内向き)" .-> S
+    G -. "IF を満たす (依存は内向き)" .-> U
+    G -. "IF を満たす (依存は内向き)" .-> S
+    R --> DB
+    G --> EXT
+```
+
+- **実線 = Go の import 方向**。`controller` → `usecase` → {`service`, `entity`} の一方向のみで逆流はない (L-1)
+- **点線 = 依存性逆転**。`repository/` と `gateway/` は **IF を満たす側**で、
+  **IF は利用側 (usecase または service) のパッケージで定義する**。`gateway` / `repository` は IF を定義しない。
+  Go はインターフェースを暗黙に満たすため、**実装パッケージが IF のパッケージを import することも無い** —
+  点線は「型の契約を誰が所有するか」を表す。組み立ては wire が行う
+- **`usecase` は `repository` / `gateway` の具体パッケージに依存しない**。
+  「Controller → UseCase → Service → Repository」の直列図は**この意味で誤読になるので使わない**
+- **IF は小さく (1〜3 メソッド)、利用側が必要な分だけ定義する**。**実装 1 : IF N を正常とする**
+
+### 責務と禁止事項
+
+| 層 | パッケージ | 責務 | 禁止事項 |
+|---|---|---|---|
+| Controller | `controller/` | HTTP 受信・認証/認可・バリデーション・ステータス判定 (401/403/404)・SSE 書き出し・**`CodedError` → HTTP ステータス変換 (単一箇所)** | ビジネスロジック、Repository / gateway の直接使用 |
+| UseCase | `usecase/<domain>/` | ユースケース単位の手続き・**複数ドメインの協調**・トランザクション境界・**所有者スコープの確定**・**ツールハンドラの組み立てと注入**・利用する IF の定義 | `*gin.Context` への依存、外部 SDK の型を公開 IF に露出させること (L-5)、Controller への依存 |
+| **Service** | `service/<domain>/` | **1 ドメイン (集約) に閉じたビジネスロジック**・Agent のツールループと停止条件・安全弁・ターン単位の集計・SSE イベントへの変換・**自ドメイン**の台帳の read / write-through・プロンプト構築 | **他ドメインの Service を呼ぶこと (L-2)**、**他ドメインの Repository を読み書きすること (L-3)**、トランザクションの開始/コミット (L-6)、HTTP への依存、UseCase への依存、外部 SDK の直接呼び出し |
+| **entity** | `entity/` | **副作用のない計算・変換・バリデーション**・ドメイン型の定義 (`ContractID` / `AccountID` の専用型・**ツール結果の型 `entity/toolresult`**・**sqlc 生成 enum の置き換え先**を含む) | SQL 実行、外部 API 呼び出し、他層 (`usecase` / `service` / `repository` / `gateway`) への依存、**sqlc 生成パッケージ・`database/sql` / `pgx` / `net/http` / 外部 SDK の import** (depguard の `L1-entity-no-side-effects` が強制) |
+| Repository | `repository/<domain>/` (v3 新規) / `repository/` (v2 移植分) | SQL 実行 (sqlc 生成クエリ)・entity 変換・**採番と一意制約をメソッド内に閉じる** (BE-11) | ビジネスロジック、複数 Repository の協調、上位層 (`usecase` / `service`) への依存 |
+| **gateway** | `gateway/<外部システム>/` | 外部 SDK / HTTP の呼び出し・レスポンスの正規化・**LLM 呼び出し 1 回ごとの計測値 (usage 4 カウンタ / `stop_reason` / provider / model / duration) の生成** | ビジネスロジック (停止条件・安全弁)、DB アクセス、**明細の永続化** (L-4 により repository を呼べない。永続化は呼び出し元が行う)、上位層への依存 |
+
+**型名の規約**: Service の型名は `XxxService` を使わず**振る舞いで命名する** —
+`conversation.Runner` / `asset.Extractor` / `plan.Composer`。
+`XxxService` を許すと「とりあえず Service」の受け皿になり、1 ドメインに閉じるという定義が崩れる。
+**ディレクトリ名は `service/` のままでよい** (層としての位置を示すため)。
+
+### 層配置の判断基準 (上から順に当てはめ、最初に Yes になった層に置く)
+
+| 問い | Yes → |
+|---|---|
+| HTTP リクエスト / レスポンスの形に依存するか | **Controller** |
+| DB のトランザクションを開始・コミットするか / **複数ドメインを跨いで協調するか** | **UseCase** |
+| 外部システム (LLM / 検索 / ストレージ) の SDK・HTTP を呼ぶか | **gateway** |
+| SQL を実行するか | **Repository** |
+| **1 ドメインに閉じた業務判断があるか** (自ドメインのデータ読み書きを伴ってよい) | **Service** |
+| 副作用が無いか (純粋な計算・変換・バリデーション) | **entity** |
+
+どれにも当てはまらない処理は責務が混ざっている — 配置を設計し直す。
+**UseCase は「1 エンドポイント = 1 ファイル」**。複数で使うヘルパーは同じ `usecase/<domain>/` 内の
+機能名ファイルへ分離する。
+
+### 依存規則 L-1〜L-6 (CI で depguard により機械強制)
+
+| ID | 規則 |
+|---|---|
+| L-1 | 依存方向は `controller` → `usecase` → {`service`, `repository` の IF, `gateway` の IF} → `entity`。**逆流禁止** |
+| L-2 | **`service/A` → `service/B` の import 禁止**。他ドメインのロジックが必要なら **UseCase が両方を呼んで結果を引き渡す** |
+| L-3 | **`service/<domain>` が扱えるデータは自ドメインのみ**。他ドメインのデータは **UseCase が取得して引数で渡す**。**read-only の横断参照も例外にしない**。**加えて sqlc 生成パッケージ (`<module-path>/db/rdb` 相当) を import できるのは `repository/**` だけ** — 全ドメインの全クエリを含むため、`service/theme` から `rdb.New(tx).GetAssetByID(...)` で他ドメインへ到達できてしまう (L-2 / L-3 / A-4 / A-6 / BE-11 の迂回路)。**生成された enum・モデル型・params 構造体は `entity/` で定義し、Repository が変換して返す**。**L-3 は depguard で検査できない** (下記) |
+| L-4 | **`service` / `usecase` → `gateway` は可**。ただし**依存するのは利用側が定義した IF**であり、**`gateway/<外部システム>` の具体パッケージを import するのは `di/` だけ**。**`gateway` → `service` / `usecase` / `repository` は禁止**。**両方向を depguard で deny する** (`L4-L5-no-concrete-adapters` / `L4-gateway-no-upper-layers`) |
+| L-5 | **外部 SDK・gateway 実装の型を `usecase` / `service` の公開 IF に露出させない** (v2 の型エイリアス方式の禁止)。**`repository` / `gateway` の具体パッケージ自体も import しない** (L-4 と同一規則) |
+| L-6 | **`tx` は UseCase が張り、引数で渡す**。ただし **`pgx.Tx` の実型をそのまま渡さない** — `pgx.Tx` は `Begin` / `Commit` / `Rollback` を公開しているため、渡した時点で Service がトランザクション境界を動かせる。**利用側で定義した narrow IF (`Exec` / `Query` / `QueryRow` の 3 メソッドのみ) を引数型にする**。Service は `tx` を Repository の `XxxWithTx` へそのまま渡すだけで、**SQL を直接実行しない** (narrow IF では型で防げないため CI の `D-2⑨` で検査する) |
+
+- **違反した PR はマージできない** (golangci-lint のジョブが必須チェック)。設定は `.golangci.yml`
+- **適用範囲は v3 新規ドメインのみ**。同一リポジトリに **2 つの層規約が並ぶ**:
+
+| 区分 | 対象パス | 適用する規約 |
+|---|---|---|
+| **v3 新規ドメイン** | `usecase/{theme,asset,conversation,idea,plan}/**`<br>`service/**`<br>`repository/{theme,asset,conversation,idea,plan}/**` | **4 層 + entity + gateway**。L-1〜L-6 を depguard で強制 |
+| **共通層** | `entity/**` / `gateway/**` / `controller/**` / `config/**` | L-1 / L-4 / L-5 を全体に適用 |
+| **配線** | `di/**` (`provider.go` / `wire.go` / `wire_gen.go`) | **どの depguard 規則の対象にもしない** — 全層の具体パッケージを import する唯一の層だから |
+| **v2 移植分** | `usecase/` の上記以外のドメイン (認証・アカウント等) と `repository/*.go` (フラット構成のまま) | **v2 の 3 層規約**。`service/` パッケージを作らない。L-2 / L-5 の強制対象外 |
+
+- **本表に無いパッケージを新設する PR は、本表と `.golangci.yml` と `layering-scopes.yml` への追記を同一 PR に含める**。
+  追記漏れは「新規ドメインが除外側に落ちて無検査になる」形の事故になる (CI の `D-2⑦` が検出する)
+- **L-3 (service が扱えるデータは自ドメインのみ) は depguard で検査できない** —
+  `L4-L5-no-concrete-adapters` により service は `repository` を一切 import しないため、
+  「自ドメインの repository のみ」は **import グラフに現れない**。担保は 3 段:
+  ①service が宣言する repository IF のメソッドが自ドメインのものだけであること (レビュー)
+  ②**`di/` の配線レビュー** (`service/theme` に `repository/theme` 以外を渡していないか)
+  ③A-4 の所有者スコープ CI 検査 (越境した場合の実害を捕まえる最終防壁)。
+  **`repository/<domain>/` をドメイン別に分けている理由は ② を成立させるため**である
+  (フラット構成だと `repository.NewRepository()` 1 個が全ドメインを持ち、配線から所有関係が読めない)
+
+### Agent 実行の 3 層分割 (A-6 / O-2 / O-3)
+
+```
+usecase/conversation/            ← ドメインを知っている層
+  send_message.go
+    ① 所有者スコープ (contractID / accountID) を確定
+    ② pgxTx = db.Begin()  ← pgx.Tx の実型を持つのはこの関数の中だけ
+    ③ handlers = ToolHandlers(scope, deps)
+    ④ runner.RunTurn(ctx, pgxTx, handlers, input)
+         引数の型は conversation.Tx (narrow IF)。pgx.Tx が暗黙に満たす
+    ⑤ Commit / Rollback + gateway が返した計測値の記録
+  tool_registry.go
+    ToolHandlers(scope Scope, deps Deps) map[string]conversation.ToolHandler
+      - tool 名 → ハンドラの対応表を組み立てる
+      - scope は **クロージャに束縛** して閉じ込める (引数にしない)   …… A-6 の束縛点
+      - 他ドメイン (asset / idea / plan) のデータは、この層で定義した
+        repository IF 経由で読む → L-2 / L-3 に触れない
+      - 戻り値に入れる型は entity/toolresult の宣言のみを使う      …… BE-12
+
+service/conversation/            ← ドメインは conversation のみ知る層
+  tx.go       type Tx interface { Exec(...); Query(...); QueryRow(...) }
+                ← Begin / Commit / Rollback を持たない narrow IF (L-6)
+  runner.go   type ToolHandler = func(ctx context.Context, tx Tx, args json.RawMessage) (any, error)
+              RunTurn(ctx, tx Tx, handlers map[string]ToolHandler, input) (TurnResult, error)
+    - ツールループ: gateway のイベントを受け tool_use → handlers[name](ctx, tx, args)
+    - 停止条件と安全弁 (ツール呼び出し回数 / 累積トークン / 実行時間) の判定
+    - ターン単位の集計 (ツール回数・累積 usage・打ち切り理由)
+    - 台帳への write-through (自ドメイン repository のみ)                     …… BE-10 / L-3
+    - SSE イベントへの変換 (agent 発話・ツール進捗)                           …… BE-7
+    - ハンドラ戻り値は entity/toolresult.Result として扱う (Payload は解釈しない) …… BE-12
+    - **asset / idea / plan / theme のパッケージを import しない** (depguard で強制)
+
+gateway/anthropic/               ← 外部システムのアダプタ層
+  session.go / stream.go
+    - SDK 呼び出し・セッション作成・SSE 受信・イベント型の正規化
+    - usage 4 カウンタ (input / output / cache_read_input / cache_creation_input) と
+      `stop_reason` を **CallMeta として戻り値に載せる**
+    - **全 LLM 呼び出しの単一関門**。直接 API 経路も `gateway/<プロバイダ>` を通る
+```
+
+**`tx` は引数・所有者スコープはクロージャ束縛にする理由**:
+
+- `tx` をクロージャに隠すと、**どのハンドラが書き込みトランザクション内で動くかがコードから読めず**、
+  BE-10 (台帳 write-through 欠落) / BE-11 (採番のサイレント失敗) を型で防げない
+- 所有者スコープを引数にすると、**Runner (= LLM 出力を扱う層) がスコープを組み替えられる余地**が生まれ、
+  A-6 の強制が「Runner の実装が正しいこと」に依存する。クロージャ束縛なら差し替える手段が型として存在しない
+- **構造的な保証**: Runner は他ドメインのパッケージを import しないため、
+  **注入されたハンドラを経由しない限りドメインデータへ到達できない**
+- 所有者不一致 (0 件) は**「該当なし」として LLM に返す** — エラー内容から他テナントのリソースの存在を
+  推測させない。発生はツール名・件数・`request_id` として warn ログ + メトリクスに出す
+- tool 名は**文字列キー**になるため、**起動時チェック**で `map` のキー集合と schema を突き合わせ、
+  不一致なら**起動失敗**させる。引数名の不一致は CI 検査 (`scripts/check-tool-contract.sh`) で見る
+
+### 横断規約
+
+**① エラー契約** — **層境界では `constants.NewCodedError(...)` で作った `CodedError` を返すことを必須とする。
+パッケージ内部での文脈追加は `fmt.Errorf("...: %w", err)` を許可し、境界で包み直す**。
+
+| 境界 | 返す型 |
+|---|---|
+| `gateway/*` / `repository/*` → 利用側 (usecase / service) の公開関数 | **`CodedError`** |
+| `service/*` → `usecase` の公開関数 | **`CodedError`** |
+| `usecase/*` → `controller` の公開関数 | **`CodedError`** |
+| パッケージ内部の非公開関数間 | `fmt.Errorf("...: %w", err)` 可 |
+
+- **CI 検査の対象は「層境界を越える公開関数の戻り値」に絞る**。全面禁止を採らない理由: v2 は全面禁止を
+  規約にしながら非テストコードに **113 件**の `fmt.Errorf` が溜まり、規約として機能しなかった
+- **`CodedError` → HTTP ステータスの変換は `controller/` 内の変換関数 1 本のみ**。判定は **`errors.As`** を使う
+  (v2 は `err.(*constants.CodedError)` を 8 ファイル 61 箇所にコピペし、**直接アサーションは
+  ラップされた `CodedError` を取りこぼしていた**)。他ファイルでの型アサーションは CI で禁止
+- **401 (未認証) / 403 (権限なし) / 404 (不存在) を取り違えない**
+- **LLM 起因の失敗は握り潰さない**: `stop_reason == max_tokens` の切り詰めは**応答が成功扱いでも**
+  warn ログ + メトリクスに出す (BE-6) / JSON パース失敗・タイムアウト・ツール引数の不整合は
+  **専用コードの `CodedError`** で区別する (部分結果を「成功」として返さない) /
+  **安全弁による打ち切りはエラーではなく正常終了**として扱い、理由を SSE イベントとターン集計に載せる
+
+**② 設定値の SSOT** — **`config` パッケージを唯一の置き場とする** (BE-2)。
+タイムアウト・リトライ回数と間隔・使用モデルと許可リスト・`MaxTokens`・
+**安全弁のしきい値 (ツール呼び出し回数 / 累積出力トークン / 1 ターンの実行時間)**・
+生成数の既定値と上限・外部サービスのエンドポイント・ログレベル・単価テーブルの版をここに置く。
+
+- **同じ値を Go / FE / `prompts/` の 3 箇所に持たない**。FE が必要とする上限値は **API レスポンスに含めて配る**。
+  プロンプトが必要とする値は**テンプレート引数として注入**する (テンプレート内に数値を書かない)
+- 環境で変わる値 (使用モデル・エンドポイント・ログレベル) は env var / Secrets Manager を **`config` が読む**。
+  **他のパッケージが `os.Getenv` を直接呼ぶことを禁止する** (CI 検査対象)
+- 安全弁のしきい値は**再デプロイなしで変更できる形にする**
+
+**③ 監査ログ** — **本処理とは別トランザクションの best-effort** とし、書き込み失敗で本処理を巻き戻さない。
+**失敗時は WARN ログとメトリクスの両方が必須** (どちらか一方では不可)。
+
+- **`_ =` による無言破棄を禁止する** (v2 は 6 ファイル 17 箇所で無言破棄していた)。
+  v2 の問題は「別トランザクションだったこと」ではなく**「失敗が見えないこと」**
+- 監査ログ Repository のメソッドは **`tx` を取らない**形で提供する (本処理の `tx` に相乗りしない)
+- **操作の種類による例外を設けない** (「認証・権限に関わる操作だけ本処理も失敗させる」は本増分では作らない)
+
+**④ 肥大化を締める lint** — **重複検出を主役、行数は補助**。設定は `.golangci.yml`:
+**`dupl` しきい値 150 トークン (主役)** / **`cyclop` 複雑度 15** / **`funlen` 150 行 / 80 ステートメント (補助)**。
+**ファイル行数は制限しない** (別ファイルへ移すだけで回避でき、抑止力にならない)。
+
+**⑤ 「跨ぎは UseCase」で溢れたものの置き場** — L-2 / L-3 により UseCase が太る。逃げ場は次の 5 つのみ:
+
+| 溢れたものの性質 | 置き場 |
+|---|---|
+| 副作用のない計算・変換・バリデーション | **`entity/`** |
+| 外部 API 呼び出し | **`gateway/<外部システム>/`** |
+| 1 ドメインに閉じた業務ロジック | **`service/<domain>/`** |
+| 手続きの断片 (複数ドメインを跨ぐ協調の一部) | **`usecase/<domain>/` 内のファイル分割** |
+| プロンプトのテンプレート文字列 | **`prompts/<domain>/`** (テンプレートファイル) + **`service/<domain>/`** (構築ロジック) |
+
+**禁止: 「共通 Service」の新設**。ドメインに属さない Service は L-2 の抜け道になる。
+
+### プロンプトの置き場
+
+- **テンプレートファイルは `prompts/<domain>/` に集約**する
+- **テンプレートを組み立てる構築ロジックは `service/<domain>/`** に置く (`entity/` にも、独立した
+  `prompt/` パッケージにも置かない)。「どのバージョンのデータをプロンプトに渡すか」はドメインの
+  業務ルール (BE-1 の再発防止点) なので、副作用のない計算の置き場ではない
+- この配置により、**tool schema ↔ handler ↔ prompt の 3 者一致検査と Agent 発行手順が走査するパスが
+  `prompts/<domain>/` に確定する**
+
+### LLM 計測の実施時期 (先送りの線引き)
+
+| 項目 | 担当層 | いつ実装するか |
+|---|---|---|
+| **1 呼び出しの計測値の生成** (provider / model / usage 4 カウンタ / `stop_reason` / duration を `CallMeta` として戻り値に載せる) | **`gateway/<プロバイダ>`** (単一関門) | **初期実装** |
+| **ターン単位の集計** (ツール呼び出し回数・累積トークン・打ち切り理由) | **`service/conversation.Runner`** | **初期実装** |
+| **安全弁** (ツール呼び出し回数 / 累積トークン / 実行時間の打ち切り) | **`service/conversation.Runner`** (しきい値は `config`) | **初期実装** |
+| **明細の永続化** (append-only) | **`usecase/<domain>`** が `CallMeta` を受け取り記録用 Repository へ渡す (**gateway は永続化しない**) | **v3 第 1 リリース前** |
+| **コスト算出・アカウント/テーマ単位の集計・アラート** | 未確定 (テーブル確定後) | **v2 併用期間中** |
+
+- **記録先は後から 1 箇所に足せるが、戻り型が usage を載せられない状態は後付けできない** —
+  よって**型と安全弁は初期実装**
+- **明細は append-only なので、取り損なった期間は後から遡って補完できない** — よって**第 1 リリース前**
+- 集計・コスト算出・アラートは既存の明細から後付けできるため **v2 併用期間中**に回す
+- **個別の機能実装は計測コードを書かない** (計測点は上表の 2 箇所のみ)
+
+## Managed Agent の運用 (PoC 由来・本番で最も事故りやすい)
+
+- system prompt / custom tool schema を変えたら **Agent の再発行が必要**。
+  コードだけデプロイして再発行を忘れると、引数が黙って捨てられ機能が死ぬ (BE-8 / BE-10)
+- tool schema の引数名 ↔ Go handler のパース ↔ prompt の説明は **3 者一致**させる
+- **ツール結果のフィールド契約 (BE-12)** — ハンドラの戻り値は `any` だが、**入れてよい値は
+  `entity/toolresult/` に 1 箇所だけ宣言した型**に限る。**匿名 struct / `map[string]any` /
+  手組みの `json.RawMessage` を戻り値に入れない**。
+  **読む側 (台帳 write-through・SSE 変換・後続ツールの入力・生成物の永続化) は同じ型定義から読み、
+  独自の構造体を定義しない**。**テストは合成 JSON を手書きせず、同じ型を組み立てて `json.Marshal` する**
+  (手書き JSON は型を変えてもテストが通り、契約違反を隠す)。
+  Runner は共通エンベロープ `Result` (`ToolName` / `Summary` / `Payload`) だけを扱い、
+  **`Payload` を解釈しない** (ツールごとの型を読むのは還流先のハンドラ = usecase)。
+  検査は `scripts/check-tool-contract.sh` の 4・5 番 (CI の `D-6` ステップ)
+- Agent の Tools は更新時に**全置換**される。既存の web_search 等を落とさない (BE-9)
+- LLM 呼び出しは**全経路**で `gateway/<プロバイダ>` の単一関門を通し、トークン (usage 4 カウンタ)・
+  `stop_reason` を取得する (`max_tokens` 切り詰めの検出。BE-6)。
+  **コスト算出・集計・アラートは v2 併用期間中に先送り**、明細の永続化は v3 第 1 リリース前
+  (実施時期の SSOT は上記「LLM 計測の実施時期」の表)
+
+## LLM の使い分け (Dify 廃止に伴う方針)
+
+| 処理の性質 | 呼び方 | 判定基準 |
+|---|---|---|
+| ツールを使う / 複数ターン回る / 出力が次の入力を決める | **Managed Agent** | 1 つでも当てはまれば Agent |
+| 単発の変換・抽出・要約・分類 | **LLM API を直接呼ぶ** (`gateway/<プロバイダ>/` 経由) | 上記すべてに当てはまらない |
+
+**Yes / No の読み方 (この 3 つを外すと直接 API で足りる処理が Agent 判定になる。**
+**機能ごとの確定した判定は設計リポ hassan_v3 `docs/design/llm-migration.md` §3 / §4 が SSOT)**:
+
+| 誤りやすい形 | 正しい判定 |
+|---|---|
+| **固定パイプライン** (LLM を N 回、決まった順に呼ぶ) | 「複数ターン回る」に**当たらない** → 直接 API。次に何を呼ぶかをコードが決めているため |
+| **分類 → 分岐** (LLM の分類結果で処理を分ける) | 「出力が次の入力を決める」に**当たらない** → 直接 API。分岐先はコードが持っている |
+| **履歴を渡すだけの chat** (ツールを持たない) | Agent に**当たらない** → 直接 API。履歴の受け渡しは messages 配列で足りる |
+
+- 直接呼ぶ場合も **`gateway/<プロバイダ>/` の実装越しに呼ぶ** (IF は利用側の `usecase` / `service` で定義する)。
+  SDK を各所で直叩きしない (モデル見直し・プロバイダ切り替えのたびに全箇所修正になる)。
+  **直接 API 経路も Managed Agent 経路も `gateway/<プロバイダ>` が全 LLM 呼び出しの単一関門**
+- LLM 抽象の要件: **①全メソッドが `ctx` を第 1 引数に取る** (安全弁の実行時間上限・キャンセルが効くため)
+  **②共通メタ (usage 4 種 / `stop_reason` / provider / model / duration) を全応答が返す共通エンベロープを持つ**
+  **③未知モデルはエラーにする** (v2 は `default` で暗黙に OpenAI へ流していた)
+- **暴走の安全弁は必須**: 1 セッションあたりのツール呼び出し回数・トークン・実行時間で打ち切る。
+  コスト上限は運用方針として設けないが (可視化とアラートで運用)、
+  **無限ループ対策の打ち切りは機能要件**として実装する
+
+## DB 変更フロー (直列・順序厳守)
+
+```
+<db/schema.sql 編集> → <make psqldef> → <db/queries/*.sql 編集> → <make sqlc> → repository 実装 → <make wire>
+```
+
+生成物 (`<db/rdb/*.sql.go>`, `<di/wire_gen.go>`) の更新漏れに注意。
+`DROP` / `TRUNCATE` / down マイグレーションは破壊操作ガードで原則禁止。
+
+## Claude Code 運用ルール
+
+| ファイル | 内容 |
+|---|---|
+| `.claude/rules/01-construction-loop.md` | **1 issue の作業ループ (S-1〜S-10)。全作業の起点** |
+| `.claude/rules/02-issue-granularity.md` | issue の粒度・DoD (V-1〜V-10)・3 リポ跨ぎのマージ順序 |
+| `.claude/rules/03-model-escalation.md` | モデルの既定・昇格判定 (M-1〜M-4 / T-1〜T-3) |
+| `.claude/rules/04-human-checkpoints.md` | 人間承認点 (H-1〜H-5) と機構・自律範囲 |
+| `.claude/agents/go-developer.md` | Go 実装エージェント |
+| `.claude/agents/code-reviewer.md` | 実装レビュー (本番基準) |
+| `.claude/rules/feedback_review_patterns.md` | 頻出バグパターン (SSOT。設計リポと還流) |
+| `.claude/skills/implementing-robustly/` | 着手前の影響半径測定・完了前セルフレビュー |
+| `.claude/skills/test-driven-development/` | Red→Green の進め方 |
+
+- **作業は GitHub issue 起点** (`.github/ISSUE_TEMPLATE/task.yml` で起票)。ループの現在位置と
+  中断・再開は rules 01 の §6
+- 実装は `go-developer`、レビューは**別セッションで** `code-reviewer`
+- 要件・設計の変更が必要になったら**実装で辻褄を合わせず、設計リポ (hassan_v3) に差し戻す**
+- 既存コードとの平仄 (命名・エラー返却スタイル・テストスタイル・DTO 命名) を最優先で揃える
+- **frontend に影響する変更 (API の IF)** は、OpenAPI 定義の更新とセットで行い、
+  frontend リポ側の型再生成が必要なことを PR に明記する
+
+## ハーネス
+
+- pre-commit で `go build` + `go vet` + 差分パッケージの `go test` を強制。
+  `--no-verify` 回避はユーザー明示指示がない限り禁止
+- CI (`.github/workflows/ci.yml`) が PR / push で全体テスト + lint + 生成物の差分を機械強制
+- `.env` 読取・DB 破壊操作・force push・migration 削除は autoMode で deny

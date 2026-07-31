@@ -1,0 +1,276 @@
+{
+  "//": [
+    "frontend リポジトリ雛形の eslint 設定。**コピー後にファイル名を .eslintrc.json にする**",
+    "(拡張子 .tmpl は設計リポ側で置換前だと分かるようにするためのもの)。",
+    "",
+    "設計の SSOT: 設計リポ hassan_v3 `docs/design/frontend.md` §3.3 の L-F1〜L-F6 / §7 (トークン) / §8 (パース層)。",
+    "**この設定が無いと FE-3 / FE-4 / FE-5 / FE-6 の担保が「規約文書に書くだけ」に退行する** —",
+    "v2 は同じ禁止事項を文書に持ちながら eslint に該当ルールが 1 つも無く、FE-5 が実際に起きた。",
+    "",
+    "前提パッケージ: eslint-plugin-import (L-F1〜L-F4 / L-F6 の zone)。",
+    "v2 の設定 (no-console / consistent-type-imports / unused-imports / as 禁止) は踏襲する。"
+  ],
+  "extends": [
+    "next/core-web-vitals",
+    "next/typescript",
+    "prettier",
+    "plugin:storybook/recommended",
+    "plugin:tailwindcss/recommended"
+  ],
+  "plugins": [
+    "unused-imports",
+    "import",
+    "tailwindcss"
+  ],
+  "rules": {
+    "no-console": "error",
+    "@typescript-eslint/consistent-type-imports": "error",
+    "unused-imports/no-unused-imports": "error",
+    "//FE-3 トークン強制": "任意値 (w-[13px] / text-[#0455c5]) とクラス名の誤りを落とす (frontend.md §7.2)",
+    "tailwindcss/no-arbitrary-value": "error",
+    "tailwindcss/no-custom-classname": [
+      "error",
+      {
+        "whitelist": [
+          "^(app|admin)-.*"
+        ]
+      }
+    ],
+    "no-restricted-syntax": [
+      "error",
+      {
+        "selector": "VariableDeclarator[init.type='TSAsExpression'][init.typeAnnotation.typeName.name!='const']",
+        "message": "Don't use `as`. (v2 から踏襲)"
+      },
+      {
+        "selector": "Literal[value=/^#[0-9a-fA-F]{3,8}$/]",
+        "message": "生 hex を書かない。デザイントークン (tailwind の theme.extend) を使う (FE-3 / frontend.md §7)"
+      },
+      {
+        "selector": "JSXAttribute[name.name='style']",
+        "message": "インラインスタイルを使わない。トークン化されたクラスで表現する (FE-3 / frontend.md §7)"
+      }
+    ],
+    "//L-F1〜L-F6": "依存方向の zone。zones の from/target はコピー後の実ディレクトリ構成に合わせて確認する",
+    "import/no-restricted-paths": [
+      "error",
+      {
+        "zones": [
+          {
+            "//": "L-F2: lib は domain を知らない",
+            "target": "./src/lib",
+            "from": "./src/features",
+            "message": "L-F2 違反: src/lib から src/features を import しない (frontend.md §3.3)"
+          },
+          {
+            "//": "L-F3: 共通 UI がドメイン型に固定されるのを防ぐ",
+            "target": "./src/components",
+            "from": "./src/features",
+            "message": "L-F3 違反: src/components から src/features を import しない (frontend.md §3.3)"
+          },
+          {
+            "//": "L-F6: 生成物への import は決められた場所からのみ",
+            "target": "./src",
+            "from": "./src/generated",
+            "except": [
+              "../features/*/api",
+              "../features/*/lib",
+              "../features/*/types.ts",
+              "../lib/api",
+              "../lib/sse"
+            ],
+            "message": "L-F6 違反: src/generated への import は features/*/api・features/*/lib・features/*/types.ts・lib/api・lib/sse からのみ (frontend.md §3.3)"
+          }
+        ]
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "//": "L-F1: src/lib に React / Next を持ち込まない (FE-5 = PoC で実際に起きた循環依存)",
+      "files": [
+        "src/lib/**/*.{ts,tsx}"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "react",
+                "message": "L-F1 違反: lib に React を import しない (FE-5)"
+              },
+              {
+                "name": "react-dom",
+                "message": "L-F1 違反: lib に react-dom を import しない (FE-5)"
+              }
+            ],
+            "patterns": [
+              {
+                "group": [
+                  "next",
+                  "next/*"
+                ],
+                "message": "L-F1 違反: lib に next を import しない (FE-5)"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "//": "L-F5: BE 呼び出しは features/*/api・lib/api・lib/sse のみ。それ以外で fetch を書かせない",
+      "files": [
+        "src/features/*/components/**/*.{ts,tsx}",
+        "src/app/**/*.{ts,tsx}"
+      ],
+      "excludedFiles": [
+        "src/app/api/**/*.{ts,tsx}"
+      ],
+      "rules": {
+        "no-restricted-globals": [
+          "error",
+          {
+            "name": "fetch",
+            "message": "L-F5 違反: BE 呼び出しは features/*/api・lib/api・lib/sse を通す (認証ヘッダ・X-Request-Id・エラー正規化・AbortSignal を通らない呼び出しを作らない。frontend.md §3.3)"
+          }
+        ]
+      }
+    },
+    {
+      "//": "L-F4: features/A から features/B への import を禁止する",
+      "files": [
+        "src/features/**/*.{ts,tsx}"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@/features/*/!(types)"
+                ],
+                "message": "L-F4 違反: 他ドメインの内部を import しない。共有したいものは components/ か lib/ へ上げる (frontend.md §3.3)"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "//": "L-F1 + L-F4 の再掲 (features/*/lib は上の 2 つの override 両方に一致する)。**overrides の no-restricted-imports はマージではなく上書き**なので、後勝ちのこの override に両方の制約を書かないと L-F1 (react / next 禁止 = FE-5 の担保) が消える",
+      "files": [
+        "src/features/*/lib/**/*.{ts,tsx}"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "react",
+                "message": "L-F1 違反: lib に React を import しない (FE-5)"
+              },
+              {
+                "name": "react-dom",
+                "message": "L-F1 違反: lib に react-dom を import しない (FE-5)"
+              }
+            ],
+            "patterns": [
+              {
+                "group": [
+                  "next",
+                  "next/*"
+                ],
+                "message": "L-F1 違反: lib に next を import しない (FE-5)"
+              },
+              {
+                "group": [
+                  "@/features/*/!(types)"
+                ],
+                "message": "L-F4 違反: 他ドメインの内部を import しない。共有したいものは components/ か lib/ へ上げる (frontend.md §3.3)"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "//": "FE-D': X-Admin-Token は lib/api/admin-mutator.ts の 1 ファイルのみ (frontend.md §5.2)。**overrides の no-restricted-syntax は上書きなので、基底の 3 セレクタ (as / hex / style) を再掲する** — 省くと src/** 全体でトークン強制が消える",
+      "files": [
+        "src/**/*.{ts,tsx}"
+      ],
+      "excludedFiles": [
+        "src/lib/api/admin-mutator.ts"
+      ],
+      "rules": {
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "VariableDeclarator[init.type='TSAsExpression'][init.typeAnnotation.typeName.name!='const']",
+            "message": "Don't use `as`. (v2 から踏襲)"
+          },
+          {
+            "selector": "Literal[value=/^#[0-9a-fA-F]{3,8}$/]",
+            "message": "生 hex を書かない。デザイントークン (tailwind の theme.extend) を使う (FE-3 / frontend.md §7)"
+          },
+          {
+            "selector": "JSXAttribute[name.name='style']",
+            "message": "インラインスタイルを使わない。トークン化されたクラスで表現する (FE-3 / frontend.md §7)"
+          },
+          {
+            "selector": "Literal[value='X-Admin-Token']",
+            "message": "X-Admin-Token は lib/api/admin-mutator.ts でのみ使う (frontend.md §5.2 / FE-D')。一般ユーザー系の mutator に付けない"
+          },
+          {
+            "selector": "Property[key.name='X-Admin-Token']",
+            "message": "X-Admin-Token は lib/api/admin-mutator.ts でのみ使う (frontend.md §5.2 / FE-D')"
+          }
+        ]
+      }
+    },
+    {
+      "//": "src/styles と tailwind.config は **hex を書いてよい唯一の場所** (frontend.md §7.2)。**hex だけを許可し、as / style / X-Admin-Token の禁止は維持する** (ルール全体を off にすると他の禁止まで消える)",
+      "files": [
+        "src/styles/**",
+        "tailwind.config.ts",
+        "tailwind.config.js"
+      ],
+      "rules": {
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "VariableDeclarator[init.type='TSAsExpression'][init.typeAnnotation.typeName.name!='const']",
+            "message": "Don't use `as`. (v2 から踏襲)"
+          },
+          {
+            "selector": "JSXAttribute[name.name='style']",
+            "message": "インラインスタイルを使わない。トークン化されたクラスで表現する (FE-3 / frontend.md §7)"
+          },
+          {
+            "selector": "Literal[value='X-Admin-Token']",
+            "message": "X-Admin-Token は lib/api/admin-mutator.ts でのみ使う (frontend.md §5.2 / FE-D')。一般ユーザー系の mutator に付けない"
+          },
+          {
+            "selector": "Property[key.name='X-Admin-Token']",
+            "message": "X-Admin-Token は lib/api/admin-mutator.ts でのみ使う (frontend.md §5.2 / FE-D')"
+          }
+        ]
+      }
+    },
+    {
+      "//": "生成物は手編集しない (L-F6)。lint の対象外にして差分ノイズを避ける",
+      "files": [
+        "src/generated/**"
+      ],
+      "rules": {}
+    }
+  ],
+  "ignorePatterns": [
+    "src/generated/**",
+    "node_modules",
+    ".next",
+    "playwright-report"
+  ]
+}

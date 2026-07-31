@@ -1,0 +1,56 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/hooks/require-review-before-push.sh\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/hooks/auto-review-on-commit.sh\""
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(**/.env)",
+      "Read(**/*.pem)",
+      "Read(**/*credentials*)",
+      "Write(/Users/yuyamorishita/aillio/hassan/claude_managed_agents/**)",
+      "Edit(/Users/yuyamorishita/aillio/hassan/claude_managed_agents/**)",
+      "Write(/Users/yuyamorishita/aillio/hassan/hassan-v2-backend/**)",
+      "Edit(/Users/yuyamorishita/aillio/hassan/hassan-v2-backend/**)",
+      "Write(/Users/yuyamorishita/aillio/hassan/hassan-v2-frontend/**)",
+      "Edit(/Users/yuyamorishita/aillio/hassan/hassan-v2-frontend/**)"
+    ]
+  },
+  "autoMode": {
+    "soft_deny": [
+      "$defaults",
+      "git commit with --no-verify, or any attempt to bypass the mandatory pre-commit hook (project rule 05-harness forbids it unless the user explicitly requests --no-verify)",
+      "any write, commit, checkout, stash, or branch operation inside the reference repositories (claude_managed_agents, hassan-v2-backend, hassan-v2-frontend) — they are read-only sources of truth for this design repository",
+      "git push --force / --force-with-lease, git reset --hard, or git clean -fd that discards uncommitted work",
+      "deleting or wholesale-rewriting existing design artifacts under docs/design/, docs/analysis/, or aidlc-docs/ (design decisions are the product of this repository; supersede them with a new revision instead)",
+      "outward-facing or repository-level operations: creating/editing/merging/closing pull requests or issues, creating/deleting/editing repositories, changing auth (gh pr / gh issue / gh repo / gh auth), or pushing branches to a remote",
+      "executing arbitrary code through an interpreter whose runtime behavior is not visible in the command itself (python3 -c or a script file, node -e, go run, or bash/sh running an ad-hoc script), since it can read or transmit secrets or mutate state outside the reviewed doc-lint/traceability commands",
+      "running builds, servers, database commands, or docker containers from this repository — it contains no product code, so such a command is operating on some other repository"
+    ],
+    "hard_deny": [
+      "$defaults",
+      "reading, printing (cat/echo/grep), or transmitting the contents of .env or other secret/credential files, including those inside the reference repositories"
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+*.pem
+node_modules/
+.claude/settings.local.json
+.claude/worktrees/
+.claude/tmp/

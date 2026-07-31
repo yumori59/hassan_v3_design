@@ -1,0 +1,190 @@
+name: E2E
+
+# frontend リポジトリ雛形。**E2E (Playwright) の実行機構**。
+# <...> のプレースホルダを実構成に合わせて置換する。
+#
+# 設計の SSOT: 設計リポ hassan_v3 `docs/design/testing.md` §7 (T-J / T-K)。
+#   - **PR では回さない** — E2E はデプロイ済みのコードに対してしか回せないため、
+#     PR 時点のコードは dev に存在しない (原理的に不可能)。PR では I 段 (統合) が同じ縦串を担保する
+#   - **`main` マージ後の dev デプロイ完了 + nightly** に回す
+#   - **何もブロックしない (赤は通知)**。ただし **E2E が赤のまま prod デプロイ (H-4) を進めない** —
+#     最新の結果を H-4 の承認材料に含める (`.claude/rules/04-human-checkpoints.md` §1.1)
+#   - **retries は 1 回まで** (CI のみ)。リトライで隠れるフレークは仕様の非決定性を示すため隠さない
+#
+# 前提 (これが無いと E2E は成立しない):
+#   - dev 環境に FE / BE がデプロイ済みであること
+#   - E2E 用のテストアカウントと TOTP シークレットが Secrets として登録されていること
+#     (所在は設計リポ `docs/design/operations.md` §4.1 が SSOT。**prod の資格情報は使わない**)
+
+on:
+  # ① main マージ後の dev デプロイ完了をトリガーにする。
+  #    FE の dev デプロイは Vercel が行うため、GitHub Actions からは完了を直接知れない。
+  #    このため **BE 側の dev デプロイ完了 (deploy.yml) から repository_dispatch で叩く**か、
+  #    下の workflow_run / schedule のいずれかを選ぶ (実装リポで 1 つに決める)。
+  repository_dispatch:
+    types: [dev-deployed]
+
+  # ② nightly (dev の状態を毎日確認する)
+  schedule:
+    - cron: '0 18 * * *'        # UTC 18:00 = JST 03:00
+
+  # ③ 手動実行 (赤の切り分け時の 1 回だけの再実行を含む)
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 実行理由 (再実行の場合は「フレークの切り分け」等。retries とは別に 1 回まで)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write             # OIDC で AWS ロールを引き受ける (E2E 資格情報を Secrets Manager から取るため)
+
+# 同じ dev 環境に対して E2E を同時に走らせない (テストデータが互いを壊す)。
+concurrency:
+  group: e2e-dev
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    name: Playwright (dev)
+    runs-on: ubuntu-latest
+    # dev の資格情報を environment secret から取る (リポジトリ全体の変数に置かない)。
+    environment: dev
+    timeout-minutes: 30         # 設計上の全体目安 15 分 + 余裕 (testing.md §3 の E 段)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: <バージョン>
+          cache: npm
+
+      - name: install
+        run: npm ci
+
+      - name: Playwright ブラウザの導入
+        run: npx playwright install --with-deps chromium
+
+      # E2E の資格情報は **Secrets Manager が唯一の所在** (hassan_v3 docs/design/testing.md §7.3 /
+      # operations.md §4.1 の限定列挙)。**GitHub environment secret にパスワードや TOTP シークレットを置かない**。
+      - name: AWS 認証 (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # 要求権限: secretsmanager:GetSecretValue (/hassan-v3/dev/e2e/* のみ)
+          role-to-assume: ${{ vars.E2E_AWS_ROLE_ARN }}
+          aws-region: <リージョン>
+
+      - name: E2E 資格情報の取得 (Secrets Manager)
+        id: creds
+        run: |
+          set -euo pipefail
+          SECRET_ID="/hassan-v3/dev/e2e/account"
+          JSON=$(aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text)
+          # 値はログに出さない。GITHUB_ENV へ書いて後続ステップへ渡す (mask も付ける)
+          for K in email password totp_secret; do
+            V=$(printf '%s' "$JSON" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s);process.stdout.write(String(o[process.argv[1]]??""))})' "$K")
+            if [ -z "$V" ]; then
+              echo "::error::$SECRET_ID に $K がありません"
+              exit 1
+            fi
+            echo "::add-mask::$V"
+            case "$K" in
+              email) echo "E2E_ACCOUNT_EMAIL=$V" >> "$GITHUB_ENV" ;;
+              password) echo "E2E_ACCOUNT_PASSWORD=$V" >> "$GITHUB_ENV" ;;
+              totp_secret) echo "E2E_TOTP_SECRET=$V" >> "$GITHUB_ENV" ;;
+            esac
+          done
+
+      - name: E2E 実行 (dev 環境に対して)
+        run: <npx playwright test>
+        env:
+          # 対象は dev の FE。**prod を指さないこと** (本番データを汚さない — testing.md §8.4)
+          E2E_BASE_URL: <https://dev.example.com>
+          # 資格情報は前ステップが GITHUB_ENV へ設定済み。**TOTP は実行時に生成する**
+          # (固定コードでは MFA の経路が本番と別物になる。v2 の e2e/auth.setup.ts は
+          #  固定コードを環境変数で渡しており、TOTP として成立していない)
+
+      # **データが無いときに test.skip で自分をスキップして緑にしない** (v2 の実例:
+      # e2e/idea/idea-history-edit.spec.ts が対象データを見つけられないと skip して緑になる)。
+      # スキップされたテストがあれば「担保できていない」ことを可視化する。
+      - name: スキップされたテストの検出 (緑の見せかけを防ぐ)
+        if: always()
+        run: |
+          set -euo pipefail
+          # 実構成のパスに置換する (reporter に json を追加しておく)
+          REPORT="playwright-report/results.json"
+          # **レポートが無いのを緑にしない** — 「テストが 1 件も動いていない」状態を通してしまうため
+          if [ ! -f "$REPORT" ]; then
+            echo "::error::JSON レポート ($REPORT) がありません。" \
+                 "playwright.config の reporter に json を追加し、出力先を本ステップと一致させてください" \
+                 "(レポート欠損を緑にすると『0 件実行で成功』が通る)"
+            exit 1
+          fi
+          # **JSON は node で構文解析する** — grep のパターン一致に頼らない
+          # (Playwright の出力は `"status": "skipped"` のように空白を含み、
+          #  さらに grep -o は無マッチで終了コード 1 を返すため set -e 下では正常系が落ちる)
+          node -e '
+            const fs = require("fs");
+            const r = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            let total = 0, skipped = 0;
+            const names = [];
+            const walk = (s) => {
+              (s.suites || []).forEach(walk);
+              (s.specs || []).forEach((sp) =>
+                (sp.tests || []).forEach((t) =>
+                  (t.results || [{ status: t.status }]).forEach((res) => {
+                    total++;
+                    if ((res.status || t.status) === "skipped") { skipped++; names.push(sp.title); }
+                  })));
+            };
+            (r.suites || []).forEach(walk);
+            console.log(`total=${total} skipped=${skipped}`);
+            if (total === 0) {
+              console.log("::error::E2E が 1 件も実行されていません (0 件実行で緑にしない)");
+              process.exit(1);
+            }
+            if (skipped > 0) {
+              console.log(`::error::スキップされた E2E が ${skipped} 件あります: ${names.join(", ")}. ` +
+                "データ不足で自分をスキップする書き方 (test.skip) は緑の見せかけになるため、" +
+                "テストデータの用意 (docs/design/testing.md §8) を実装してください");
+              process.exit(1);
+            }
+          ' "$REPORT"
+
+      - name: レポートの保存 (赤の切り分けに使う)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            <playwright-report/>
+            <test-results/>
+          retention-days: 14
+
+      - name: 結果の要約 (H-4 の承認材料になる)
+        if: always()
+        run: |
+          {
+            echo "## E2E (dev)"
+            echo "- 起動理由: ${{ github.event_name }} ${{ inputs.reason }}"
+            echo "- FE の対象 commit: \`${{ github.sha }}\`"
+            # BE 側の commit は repository_dispatch の client_payload.sha で渡ってくる。
+            # **nightly / 手動実行では BE の commit が不明** なので、その旨を明示する
+            # (H-4 の承認材料に使えるのは dispatch 起動の結果だけ — testing.md §7.4)
+            if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+              echo "- BE の対象 commit: \`${{ github.event.client_payload.sha }}\`"
+            else
+              echo "- BE の対象 commit: **不明** (${{ github.event_name }} 起動のため)。"
+              echo "  **この結果は H-4 の承認材料に使わない** (testing.md §7.4)"
+            fi
+            echo "- 結果: ${{ job.status }}"
+            echo ""
+            echo "**赤だった場合の切り分け順序** (testing.md §7.4):"
+            echo "1. observability の LLM 失敗分類 (F-1〜F-5) の発生率を見る"
+            echo "2. 同じ commit で **1 回だけ** 再実行する"
+            echo "3. 再実行も赤なら回帰として扱う (フレーク扱いで緑にしない)"
+            echo ""
+            echo "**この結果が赤のまま prod デプロイ (H-4) を承認しない**"
+          } >> "$GITHUB_STEP_SUMMARY"

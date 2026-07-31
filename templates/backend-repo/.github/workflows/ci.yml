@@ -1,0 +1,301 @@
+name: CI
+
+# backend リポジトリ雛形。<...> のプレースホルダを実構成に合わせて置換する。
+# 設計リポ (hassan_v3) の docs/design/ で決めた CI ゲート (D-2) と一致させること。
+# ユーザー指定: UT と lint を CI で機械強制する (C-8)。
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  go:
+    name: build / vet / test / lint
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: go build
+        run: go build ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      # 層規約 (依存規則 L-1〜L-6) と肥大化 lint (dupl / cyclop / funlen) の設定は
+      # リポジトリ直下の .golangci.yml が正。**このジョブを必須チェックにする**
+      # (設計: 依存規則の違反した PR はマージできない — architecture.md §3.5.1)。
+      # .golangci.yml は golangci-lint v2 系のスキーマ (`version: "2"`) で書かれている。
+      # このステップが D-2① (depguard による L-1〜L-6) と D-2⑤ (dupl / cyclop / funlen) を兼ねる。
+      - name: D-2①⑤ golangci-lint (depguard による L-1〜L-6 / dupl・cyclop・funlen)
+        uses: golangci/golangci-lint-action@v6
+        with:
+          args: --config=.golangci.yml
+
+      # **スキーマ適用は統合段の前提**。これが無いと postgres が起動していても
+      # テーブルが無く、DB を伴うテストが「接続できるが SELECT が落ちる」形で失敗する
+      # (設計: docs/design/testing.md §8。v2 は DB を伴うテストが 0 件で、この段が存在しなかった)。
+      # 方式 (psqldef / golang-migrate) は D-4 未確定 — 確定したらこのコマンドを置き換える。
+      - name: スキーマ適用 (統合段の前提)
+        run: |
+          set -euo pipefail
+          # SCHEMA_APPLY_TARGET は方式の確定後に実構成の Makefile ターゲットへ置換する
+          # (psqldef なら "psqldef" / golang-migrate なら "migrate")。
+          SCHEMA_APPLY_TARGET=""
+          if [ -z "$SCHEMA_APPLY_TARGET" ]; then
+            echo "::error::スキーマ適用ターゲットが未設定です。" \
+                 "docs/design/data-model.md の方式確定 (D-4) 後に SCHEMA_APPLY_TARGET を埋めること" \
+                 "(未設定のまま緑にしない — 統合段がテーブル無しで動くのを防ぐ)"
+            exit 1
+          fi
+          make "$SCHEMA_APPLY_TARGET"
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/test?sslmode=disable
+
+      - name: go test (UT + 統合)
+        run: go test ./...
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/test?sslmode=disable
+
+      - name: 生成物の差分チェック (sqlc / wire の再生成漏れ)
+        run: |
+          # 生成コマンドが未整備の間はこのステップを削除しておくこと。
+          make sqlc wire
+          git diff --exit-code || {
+            echo "生成物が最新ではありません (make sqlc / make wire の実行漏れ)" >&2
+            exit 1
+          }
+
+      # golden ファイル (LLM 応答の固定サンプル) の再生成漏れを検出する。
+      # hassan_v3 docs/design/testing.md §5.3 の規約 4: 読み手・書き手・テストを同じ定義から導くため、
+      # golden は生成物として扱い**手編集しない**。再生成の差分が出たら定義とテストがずれている。
+      - name: golden ファイルの差分チェック (BE-12 の再発防止)
+        run: |
+          set -euo pipefail
+          if grep -qE '^golden:' Makefile 2>/dev/null; then
+            make golden
+            git diff --exit-code || {
+              echo "golden が最新ではありません (make golden の実行漏れ、または定義とテストのずれ)" >&2
+              exit 1
+            }
+          else
+            echo "::error::Makefile に golden ターゲットがありません (testing.md §5.3 の規約 4)"
+            exit 1
+          fi
+
+      # 必要なテストが「在ること」の存在検査 (testing.md §10 の #4 / #5 / #7)。
+      # テストが通ることと、必要なテストが書かれていることは別の担保である。
+      - name: 必須テストの存在検査 (testing.md §10)
+        run: |
+          set -euo pipefail
+          if [ -x scripts/check-required-tests.sh ]; then
+            bash scripts/check-required-tests.sh
+          else
+            echo "::error::scripts/check-required-tests.sh が未実装です" \
+                 "(testing.md §10 の #4 / #5 / #7 = ①LLM 出力を数値化する entity 関数のレンジ入力ケース" \
+                 " ②feature const 群ごとの F-1〜F-5 ケース ③repository・controller のテストに" \
+                 " t.Skip が無いこと (許可は testing.Short() の 1 箇所のみ)。" \
+                 " 未実装なら『規約のみ』に戻るため落とす)"
+            exit 1
+          fi
+
+      - name: OpenAPI 定義の差分チェック (frontend の型生成の元)
+        run: |
+          make docs
+          git diff --exit-code || {
+            echo "OpenAPI 定義が最新ではありません (make docs の実行漏れ)" >&2
+            exit 1
+          }
+
+      # --- 設計で「CI で機械強制する」と決めたゲート ---------------------------
+      # スクリプト本体は実装リポで用意する (リポジトリ構造が確定してから書ける)。
+      # **雛形の時点では未実装で、その場合は CI が落ちるようにしてある** —
+      # 「設計には書いたが機構が無い」状態を防ぐため、無言のスキップにはしない。
+      - name: A-1 認証の適用漏れ検査 (全 route が認証ミドルウェアを通るか)
+        run: |
+          if [ -x scripts/check-route-auth.sh ]; then
+            bash scripts/check-route-auth.sh
+          else
+            echo "::error::scripts/check-route-auth.sh が未実装です (設計: A-1 / AC-1.1)"
+            echo "router の登録一覧と認証ミドルウェア適用を突き合わせ、素通りの route を検出する検査を実装してください"
+            exit 1
+          fi
+
+      - name: A-4 所有者スコープの検査 (所有者 ID を引数で受ける経路の契約検証)
+        run: |
+          if [ -x scripts/check-owner-scope.sh ]; then
+            bash scripts/check-owner-scope.sh
+          else
+            echo "::error::scripts/check-owner-scope.sh が未実装です (設計: A-4 / AC-1.2)"
+            echo "クライアント入力由来の所有者 ID を使う箇所に、契約一致検証があるかを検出する検査を実装してください"
+            echo "(v2 では一覧経路で契約一致検証が抜けていた実例がある — 存在確認は所有権の検証にならない)"
+            exit 1
+          fi
+
+      - name: D-6 tool の入出力スキーマ一致検査 (schema / handler / prompt / 読み手)
+        run: |
+          if [ -x scripts/check-tool-contract.sh ]; then
+            bash scripts/check-tool-contract.sh
+          else
+            echo "::error::scripts/check-tool-contract.sh が未実装です (設計: D-6 / BE-8 / BE-12)"
+            echo "検査対象 5 種 (architecture.md §3.8.4):"
+            echo "  1. schema にある tool 名に handler が無い / 2. handler があるのに schema に無い"
+            echo "  3. schema の引数名と handler のパースキーが不一致 (+ prompt の説明との 3 者一致)"
+            echo "  4. handler が entity/toolresult 以外の型 (匿名 struct / map[string]any / 手組み JSON) を戻り値に入れている"
+            echo "  5. 読み手が書き手の型に無いフィールド (または異なる型) を参照している (BE-12)"
+            exit 1
+          fi
+
+      # --- D-2 の検査 ②〜⑨ (architecture.md §5 の D-2 行と 1 対 1 で対応させる) --------
+      # ステップ名の `D-2<番号>` が対応の索引。設計の宣言と実物のずれを grep で照合できるようにしてある。
+      # 単純なパターン照合で足りるもの (③④⑥⑧⑨) はここで実装し、
+      # 構文解析が必要なもの (②⑦) はスクリプト本体を実装リポで用意する (未実装なら落ちる)。
+      - name: D-2② 層境界の公開関数の戻り値が CodedError か (fmt.Errorf は内部のみ)
+        run: |
+          if [ -x scripts/check-error-contract.sh ]; then
+            bash scripts/check-error-contract.sh
+          else
+            echo "::error::scripts/check-error-contract.sh が未実装です (設計: §3.9① / AC-6.11 / AC-6.17)"
+            echo "go/ast で controller / usecase / service / repository / gateway の公開関数を走査し、"
+            echo "error を返す関数が *constants.CodedError を返しているかを検査してください"
+            echo "(パッケージ内部の非公開関数は fmt.Errorf(\"%w\") を許可する — 検査対象は層境界のみ)"
+            exit 1
+          fi
+
+      # L-5 が禁じるのは「**外部 SDK・gateway 実装・sqlc 生成物**の型」のエイリアス
+      # (architecture.md §3.5.1 の L-5)。module 内パッケージ (entity / config 等) への
+      # エイリアスは対象外なので、右辺のパッケージ名でホワイトリスト除外する。
+      # 誤検知で「除外設定で黙らせる」運用に流れると code-reviewer の観点と衝突するため、
+      # 除外リストは module 内パッケージ名のみを列挙する (外部パッケージは決して足さない)。
+      - name: D-2③ 外部パッケージ型の型エイリアス検出 (L-5 / F6 の再発防止)
+        run: |
+          hits=$(grep -rnE '^type +[A-Za-z_][A-Za-z0-9_]* += +[a-z][A-Za-z0-9_]*\.' \
+                   --include='*.go' usecase service 2>/dev/null | grep -v '_test\.go' \
+                   | grep -vE '= *(entity|toolresult|config|constants|apperror)\.' || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo "::error::usecase / service で外部パッケージの型エイリアスを定義しています (L-5)"
+            echo "IF は利用側のパッケージで定義してください (v2 の type LLMService = llm.Service 方式は不採用 — architecture.md D-A''')"
+            echo "module 内パッケージへのエイリアスなら、このステップの除外リストに同一 PR で追記してください"
+            exit 1
+          fi
+
+      # 変換関数の所在は controller/errresp.go を規約とする (1 箇所に集約。architecture.md §3.9①)。
+      # 別のファイル名にする場合は下の除外パスだけを変える (集約先は 1 つに保つ)。
+      - name: D-2④ CodedError の型アサーションが変換関数 1 本に限られているか (F5)
+        run: |
+          hits=$(grep -rn --exclude-dir=vendor 'err\.(\*constants\.CodedError)' --include='*.go' . 2>/dev/null \
+                   | grep -v '_test\.go' | grep -v 'controller/errresp\.go' || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo "::error::CodedError の直接型アサーションは HTTP 変換関数 1 本 (controller/errresp.go) 以外で禁止です"
+            echo "判定は errors.As を使ってください (直接アサーションはラップされた CodedError を取りこぼす — F5: v2 は 8 ファイル 61 箇所)"
+            exit 1
+          fi
+
+      - name: D-2⑥ config 以外での os.Getenv 禁止 (設定値の SSOT / BE-2)
+        run: |
+          hits=$(grep -rn --exclude-dir=vendor 'os\.Getenv\|os\.LookupEnv' --include='*.go' . 2>/dev/null \
+                   | grep -v '_test\.go' | grep -vE '(^|/)config/' || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo "::error::環境変数の読み取りは config パッケージに集約してください (architecture.md §3.9②)"
+            exit 1
+          fi
+
+      - name: D-2⑦ 層規約の対象パスの登録漏れ検査 (§3.5.2 / layering-scopes.yml)
+        run: |
+          if [ -x scripts/check-layer-scopes.sh ]; then
+            bash scripts/check-layer-scopes.sh
+          else
+            echo "::error::scripts/check-layer-scopes.sh が未実装です (設計: §3.5.2 / AC-6.19)"
+            echo "3 つの集合を作ります:"
+            echo "  ① service/ usecase/ repository/ 配下の実ディレクトリ集合 (layering-scopes.yml の common_layers を除く)"
+            echo "  ② layering-scopes.yml の v3_domains / ported_domains"
+            echo "  ③ .golangci.yml の L2-service-no-cross-domain-<domain> 規則名 / L5-no-external-sdk の files /"
+            echo "     L3-no-sqlc-outside-repository の files / exclusions のパス正規表現に現れるドメイン名"
+            echo "**比較は非対称です** (移植分は ③ に載せてはいけないため、対称比較にすると"
+            echo " ported_domains が非空になった瞬間に必ず落ちます)。検査する条件は 3 つ:"
+            echo "  条件 1: ① == (v3_domains ∪ ported_domains)   … 新設ドメインの登録漏れ"
+            echo "  条件 2: ③ == v3_domains                       … .golangci.yml への登録漏れ / 余分な登録"
+            echo "  条件 3: ported_domains のどのドメイン名も ③ に現れない … 移植分を誤って強制対象に入れた"
+            echo "1 つでも満たさなければ exit 1 にしてください"
+            exit 1
+          fi
+
+      - name: D-2⑧ 監査ログ戻り値の無言破棄 (_ =) の検出 (§3.9③ / F11)
+        run: |
+          hits=$(grep -rnE '^[[:space:]]*(_ =|_, _ =).*([Ll]og|Audit|Activity|Event)' \
+                   --include='*.go' controller usecase service repository 2>/dev/null \
+                   | grep -v '_test\.go' || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo "::error::監査ログ / イベントログの戻り値を _ = で破棄しています (architecture.md §3.9③)"
+            echo "失敗は WARN ログ + メトリクスとして観測可能にしてください (v2 は 6 ファイル 17 箇所で無言破棄 — F11)"
+            exit 1
+          fi
+
+      # Repository 以外から SQL へ到達する経路を 3 種類まとめて検出する (architecture.md の D-2⑨)。
+      # (a) narrow IF 経由の生 SQL / (b) sqlc 生成パッケージの import (depguard の backstop) /
+      # (c) narrow IF から実型へ戻す型アサーション (§3.7 の 2 で残ると明記した抜け道)。
+      # <module-path> と db/rdb は実構成に合わせて置換する。
+      # gateway も対象 — §3.3 は gateway の禁止事項に「DB アクセス」を挙げ、observability.md の O-C は
+      # 「gateway は DB を触れないため永続化は呼び出し元の UseCase が行う」を明細記録点の根拠にしている。
+      # depguard 側 (.golangci.yml の L3-no-sqlc-outside-repository の files / L4-gateway-no-upper-layers の
+      # deny に database/sql・pgx) と対を成す backstop (design-reviewer の中 A 指摘 2026-07-30)。
+      - name: D-2⑨ Repository 以外での SQL 到達経路の検出 (§3.3 / §3.7 の 2・3 / L-3 の backstop)
+        run: |
+          targets="service usecase/theme usecase/asset usecase/conversation usecase/idea usecase/plan controller entity gateway"
+          fail=0
+          raw=$(grep -rnE '\.(Exec|Query|QueryRow)\(ctx' --include='*.go' $targets 2>/dev/null \
+                  | grep -v '_test\.go' || true)
+          if [ -n "$raw" ]; then
+            echo "$raw"
+            echo "::error::(a) SQL の実行は Repository の責務です (architecture.md §3.3)"
+            echo "tx は narrow IF (Exec / Query / QueryRow) として渡るため型では防げません — Repository の XxxWithTx へ渡してください"
+            fail=1
+          fi
+          sqlc=$(grep -rn '<module-path>/db/rdb' --include='*.go' $targets 2>/dev/null \
+                   | grep -v '_test\.go' || true)
+          if [ -n "$sqlc" ]; then
+            echo "$sqlc"
+            echo "::error::(b) sqlc 生成パッケージを import できるのは repository/** だけです (architecture.md §3.5.1 の「sqlc 生成パッケージの扱い」)"
+            echo "全ドメインの全クエリを含むため、ここから他ドメインへ到達できます (L-2 / L-3 / A-4 / A-6 / BE-11 の迂回路)"
+            echo "enum・モデル型・params 構造体は entity/ で定義し、Repository が変換して返してください (§3.6)"
+            fail=1
+          fi
+          assert=$(grep -rnE '\.\((pgx\.Tx|\*sql\.Tx)\)' --include='*.go' $targets 2>/dev/null \
+                     | grep -v '_test\.go' || true)
+          if [ -n "$assert" ]; then
+            echo "$assert"
+            echo "::error::(c) narrow IF から実型へ戻す型アサーションは禁止です (architecture.md §3.7 の 2)"
+            echo "Begin / Commit / Rollback を取り戻すとトランザクション境界が UseCase から離れ、BE-10 / BE-11 の防御が消えます"
+            fail=1
+          fi
+          [ "$fail" -eq 0 ]
+
+      - name: math/rand 禁止検査 (認証フローの乱数は crypto/rand。auth.md §6.10-3 が SSOT)
+        run: |
+          if [ -x scripts/check-crypto-rand.sh ]; then
+            bash scripts/check-crypto-rand.sh
+          else
+            echo "::error::scripts/check-crypto-rand.sh が未実装です (設計: auth.md §6.10-3)"
+            echo "math/rand の import を検出し、許可リスト (所在と追加の承認手順は auth.md §6.10-3) 以外で使われていたら exit 1 にしてください"
+            exit 1
+          fi

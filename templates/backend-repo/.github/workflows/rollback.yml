@@ -1,0 +1,193 @@
+name: Rollback
+
+# backend リポジトリ雛形。**ロールバックの唯一の起動経路**。
+# <...> のプレースホルダを実構成に合わせて置換する。
+#
+# なぜワークフローにするのか (hassan_v3 docs/design/operations.md §4.1 / §5.3):
+#   - **個人に長期の AWS 認証情報を配らない**方針のため、AWS コンソール / ローカル CLI から
+#     `ecspresso rollback` を実行できる人がいない。障害時に「第一手段の実行者が不在」になるのを防ぐ
+#   - prod は environment 承認を通す (H-4 と同じ承認者)。dev は承認なしで即実行する
+#
+# 設計上の要点:
+#   - **deploy.yml から自動起動しない**。deploy.yml の失敗時ステップはこの workflow の起動を促すだけ。
+#     自動で戻すと、原因が DB 側にある場合にアプリだけ戻り、状態の組み合わせが増える
+#   - **Agent ID / Environment ID は「起動時に 1 回解決」される値** (operations.md §3.3 の⑤)。
+#     SSM を前バージョンへ戻すだけでは稼働中タスクに反映されないため、**必ずタスク置換まで行う**
+#   - **DB は戻さない**。非破壊変更は旧イメージが新スキーマで動くことが定義 (operations.md §7.4)。
+#     破壊的変更の切り戻しは RDS スナップショットからの復元で、**人間が判断して実行する**
+#     (復元先の指定と切り替えに判断が要るため、意図的にワークフロー化しない)
+#
+# 戻す順序は適用順序の逆: release → apply_agent → apply_migration (DB は原則戻さない)。
+# この workflow が担うのは前 2 つ (service / service+agent)。
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 対象環境
+        required: true
+        type: choice
+        options: [dev, prod]
+      target:
+        description: 戻す対象 (service = ECS のみ / service+agent = Agent ID・Environment ID も前バージョンへ)
+        required: true
+        type: choice
+        options: [service, service+agent]
+      reason:
+        description: 理由 (障害の症状・判断根拠。ジョブサマリと監査に残る)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write             # OIDC で AWS ロールを引き受ける
+
+# deploy.yml と同じ group を使い、**デプロイとロールバックが同時に走らない**ようにする。
+# 承認待ちをキャンセルしない。
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    name: ロールバック (${{ inputs.environment }} / ${{ inputs.target }})
+    runs-on: ubuntu-latest
+    # prod は承認必須 (H-4 と同じ environment)。dev は承認者未設定の environment なので素通りする。
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 理由と対象の記録 (監査)
+        run: |
+          {
+            echo "## ロールバック"
+            echo "- 環境: \`${{ inputs.environment }}\`"
+            echo "- 対象: \`${{ inputs.target }}\`"
+            echo "- 起動者: @${{ github.actor }}"
+            echo "- 理由: ${{ inputs.reason }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: AWS 認証 (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # 要求権限: ecs:UpdateService / ecs:DescribeServices / ecs:RegisterTaskDefinition /
+          #           ecs:DescribeTaskDefinition / ssm:GetParameter / ssm:GetParameterHistory /
+          #           ssm:PutParameter (agent 切り戻し時のみ) / iam:PassRole
+          role-to-assume: <deploy 用 IAM ロールの ARN (environment variable から取る)>
+          aws-region: <リージョン>
+
+      - name: ecspresso のセットアップ
+        uses: kayac/ecspresso@v2
+        with:
+          version: <バージョン>
+
+      # === ① Agent ID / Environment ID の切り戻し (target = service+agent のときのみ) ==========
+      # タスク置換より **前** に行う。置換後に SSM を戻すと、新しいタスクが旧コード + 新 Agent で起動する。
+      - name: ① SSM の Agent ID / Environment ID を前バージョンへ戻す
+        id: revert_ssm
+        if: inputs.target == 'service+agent'
+        # SSM のパス階層は operations.md §3.3 の⑤ / OP-E が SSOT (この 3 パス以外を使わない):
+        #   /hassan-v3/<env>/agent/<name>/id
+        #   /hassan-v3/<env>/anthropic/environment-id      ← Agent 名ではなく環境単位
+        #   /hassan-v3/<env>/agent/<name>/source-hash      ← CI だけが読み書きする
+        # 前バージョンの値は SSM のパラメータ履歴から取得する (版履歴が切り戻し手段。OP-E)。
+        #
+        # **未実装のまま緑にしない** (deploy.yml の 3 者一致検査と同じ扱い)。
+        # ここが無言で通ると「SSM は戻っていないのに②でタスクだけ置換され、
+        # 新コード + 新 Agent のまま = 何も戻っていない」状態でジョブが成功する。
+        run: |
+          set -euo pipefail
+          if [ -x scripts/rollback-agent.sh ]; then
+            bash scripts/rollback-agent.sh "${{ inputs.environment }}"
+          else
+            echo "::error::scripts/rollback-agent.sh が未実装です。" \
+                 "target=service+agent での切り戻しは実行できません" \
+                 "(要求動作: <prompts/agents.yaml> の列挙ごとに /hassan-v3/<env>/agent/<name>/id と" \
+                 " /hassan-v3/<env>/anthropic/environment-id を get-parameter-history の直前バージョンへ put-parameter し、" \
+                 " 戻した値とバージョン番号をジョブサマリに残す)。" \
+                 "ECS のみ戻す場合は target=service で再実行する"
+            exit 1
+          fi
+          echo "::warning::Agent の切り戻しはタスク置換 (②) が完了するまで稼働中タスクに反映されない"
+
+      # === ② ECS サービスのロールバック =====================================================
+      - name: ② ecspresso rollback (直前のタスク定義へ戻す)
+        id: ecspresso_rollback
+        run: |
+          set -euo pipefail
+          ecspresso rollback \
+            --config=<stacks>/${{ inputs.environment }}/ecspresso.yml \
+            --wait-until=service-stable
+
+      # target = service+agent の場合、① で SSM を戻しただけでは反映されないため、
+      # rollback による**タスク置換が Agent 切り戻しの反映も兼ねる** (operations.md §5.3)。
+
+      # 条件は「①が成功し、②だけが失敗した」ときに限定する。
+      # `failure()` だけでは**①自身が失敗した場合にも発火**し、「①は成功した」という誤った文言を出す
+      # (① が失敗した場合は SSM が戻っていないため、中途状態ではなく「何も変わっていない」状態)。
+      - name: ②' ①は成功・②が失敗した場合の危険状態の明示 (service+agent のときのみ)
+        if: >-
+          always() && inputs.target == 'service+agent'
+          && steps.revert_ssm.outcome == 'success'
+          && steps.ecspresso_rollback.outcome == 'failure'
+        run: |
+          {
+            echo "### ⚠ 中途状態です — 運用者の対応が必要"
+            echo ""
+            echo "①(SSM の Agent ID / Environment ID を旧値へ戻す) は成功し、"
+            echo "②(\`ecspresso rollback\` によるタスク置換) が失敗しました。"
+            echo ""
+            echo "**現在の状態**: 稼働中タスクは**起動時に読んだ新しい Agent ID を保持し続けている**"
+            echo "(operations.md §3.3 の⑤)。SSM だけが旧値になっており、**次にタスクが起動した時点で**"
+            echo "旧 Agent + 現行コードの組み合わせに変わる。オートスケールやタスク異常終了による"
+            echo "自動再起動でも切り替わるため、**この状態を放置しない**。"
+            echo ""
+            echo "**対応の選択肢**:"
+            echo "1. ②の失敗原因 (戻すタスク定義が無い / サービスが不安定) を解消して本 workflow を再実行する"
+            echo "2. 切り戻しを取りやめるなら、**① を打ち消す** (SSM を再度新しい値へ戻す) — 放置は禁止"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::SSM は旧値・タスクは新 Agent のままの中途状態です。上のサマリの対応を行ってください"
+
+      - name: ③ 結果の出力 (成否によらず実行)
+        if: always()
+        run: |
+          set +e
+          {
+            echo "### ロールバック後の状態"
+            echo '```'
+            aws ecs describe-services \
+              --cluster <ECS クラスタ名> \
+              --services <ECS サービス名> \
+              --query 'services[0].{status:status,desired:desiredCount,running:runningCount,taskDefinition:taskDefinition}' \
+              --output table
+            echo '```'
+            # ①の結果を観測できるようにする (ECS の状態だけでは Agent が戻ったか分からない)
+            if [ "${{ inputs.target }}" = "service+agent" ]; then
+              echo ""
+              echo "#### SSM の現在値 (①の結果)"
+              echo '```'
+              # AGENT_NAMES は prompts/agents.yaml の列挙から埋める (例: "orchestrator plan diverge" — chat は orchestrator へ統合済みのため無い。docs/design/llm-migration.md §4.1)
+              AGENT_NAMES="${AGENT_NAMES:-}"
+              for NAME in $AGENT_NAMES; do
+                aws ssm get-parameter \
+                  --name "/hassan-v3/${{ inputs.environment }}/agent/$NAME/id" \
+                  --query 'Parameter.{name:Name,version:Version,value:Value}' --output table
+              done
+              aws ssm get-parameter \
+                --name "/hassan-v3/${{ inputs.environment }}/anthropic/environment-id" \
+                --query 'Parameter.{name:Name,version:Version,value:Value}' --output table
+              echo '```'
+              echo "**戻したバージョン番号を上表の \`version\` で確認する** (版が進んでいれば書き戻し済み)。"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: ④ 次に人間が判断すること (DB は自動で戻さない)
+        if: always()
+        run: |
+          {
+            echo "### DB の扱い (この workflow は DB を変更しない)"
+            echo "- **非破壊のマイグレーション**: 戻さない。旧イメージが新スキーマで動くことが非破壊の定義"
+            echo "- **破壊的なマイグレーションを適用済みの場合**: RDS スナップショットからの復元が必要。"
+            echo "  承認コメントに記録したスナップショット ID を使い、**承認者が判断して実行する**"
+            echo "  (この workflow では実行しない)"
+          } >> "$GITHUB_STEP_SUMMARY"

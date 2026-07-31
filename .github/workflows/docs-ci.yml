@@ -1,0 +1,53 @@
+name: Docs CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  docs:
+    name: doc-lint / traceability
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: doc-lint (リポジトリ全体)
+        # 参照リポジトリ (claude_managed_agents 等) は CI 環境に存在しないため、
+        # 参照先の実在チェックは WARN に降格して実行される (doc-lint.sh の REF_ROOT 判定)。
+        # リンク切れ・[Answer] 未回答・TODO 残の検出は CI でも有効。
+        run: bash scripts/doc-lint.sh
+
+      - name: check-traceability (AC-ID 照合)
+        run: bash scripts/check-traceability.sh
+
+      - name: フックの実行権限チェック
+        # 実行権限が無い pre-commit は git が黙って無視するため、ゲートが無効化される。
+        # Write ツールで新規作成したフックは実行権限が付かないので機械検査する。
+        run: |
+          fail=0
+          for f in $(find scripts/hooks templates -name 'pre-commit' -o -path '*/hooks/*.sh'); do
+            if [ ! -x "$f" ]; then echo "実行権限なし: $f" >&2; fail=1; fi
+          done
+          exit $fail
+
+      - name: シェルスクリプトの構文チェック
+        run: |
+          for f in $(find scripts templates -name '*.sh' -o -name 'pre-commit'); do
+            echo "bash -n $f"
+            bash -n "$f"
+          done
+
+      # 雛形のワークフローに埋め込まれた複数行 run スクリプトの構文チェック。
+      # `<...>` プレースホルダが複数行スクリプト内に残ると、実装リポがコピーした時点で
+      # 「実行すると必ず落ちるワークフロー」になる (設計リポで 3 回作り込んだ)。
+      - name: ワークフローに埋め込んだ run スクリプトの構文チェック
+        run: bash scripts/check-workflow-shell.sh
+
+      # data-model.md の表を数えた実測値と、同書・他文書に散在する件数の記述の整合。
+      # 件数の一部は CI 検査の期待値 (§3.3 / §7.2) であり、ずれると実装リポで
+      # 「設計どおり実装した検査が必ず落ちる」。テーブル 1 件の追加で 15 箇所が連動した
+      # 実例が docs/design/API/idea-boards.md §8.2 にある。
+      - name: data-model.md のテーブル件数の整合チェック
+        run: bash scripts/check-table-counts.sh

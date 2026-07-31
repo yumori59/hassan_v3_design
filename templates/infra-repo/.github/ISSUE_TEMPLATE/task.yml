@@ -1,0 +1,157 @@
+name: 実装タスク (infra / Terraform)
+description: 1 issue = 1 PR = 同じ対象・同じ検証手段で閉じる AC 群 (.claude/rules/02-issue-granularity.md §1)
+title: "<feat|fix|refactor|chore|docs>: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **必須 5 欄** (対象 AC-ID / 影響する対象 / 検証コマンド / 人間チェックポイント / 依存 issue) を埋めてください。
+        欄が欠けている issue は S-1 (issue 受領) で差し戻されます。
+        **`apply` はエージェントが実行しません** (人間が plan の差分を読んで判断する)。
+        `envs/` 配下の変更は、期待する plan 差分を「期待する plan 差分」欄に**着手前に宣言**します (rule 01 §2.4)。
+
+  # --- 必須 1: 対象 AC-ID -------------------------------------------------
+  - type: input
+    id: ac-ids
+    attributes:
+      label: 対象 AC-ID (必須)
+      description: >-
+        設計リポ hassan_v3 の requirements.md に書かれた AC-ID を feature 名付きで列挙する。
+        modules/ 配下は terraform test のテスト名に AC-ID を含める。
+        envs/ 配下は「期待する plan 差分」の宣言が AC の検証手段になる (rule 01 §2.4)。
+      placeholder: "productionization / AC-6.2"
+    validations:
+      required: true
+
+  # --- 必須 2: 影響する対象 (backend/frontend の「層」の読み替え) ----------
+  - type: dropdown
+    id: layers
+    attributes:
+      label: 影響する対象 (必須・複数選択可)
+      description: >-
+        infra には backend の 6 パッケージ層 (4 層 + entity / gateway) に相当する区分が無いため、modules / envs の区分と
+        破壊的差分を生みやすい対象 (IAM / Secrets / state) に読み替える (rule 02 §4.3)。
+      multiple: true
+      options:
+        - modules/network (VPC / サブネット / SG)
+        - modules/ecs (クラスタ / サービス / タスク定義)
+        - modules/rds (PostgreSQL) — replace はデータ消失
+        - modules/iam (ロール / ポリシー)
+        - modules/observability (CloudWatch / アラーム)
+        - envs/dev (ルートモジュール)
+        - envs/prod (ルートモジュール) — 人間承認の対象
+        - Secrets Manager / SSM Parameter Store
+        - リモート state / backend 設定
+    validations:
+      required: true
+
+  # --- 必須 3: 実行すべき検証コマンド -------------------------------------
+  - type: textarea
+    id: verification
+    attributes:
+      label: 実行すべき検証コマンド (必須)
+      description: >-
+        S-6 でオーケストレーターが自分の手で実行するコマンド。既定値はリポの検証ゲート
+        (rule 01 §1.3 の infra 行)。plan の出力は要約して PR に貼る (rule 02 §3.1 の V-7)。
+      value: |
+        terraform fmt -check -recursive
+        terraform -chdir=<envs/dev> validate
+        tflint --recursive
+        terraform -chdir=<envs/dev> plan
+        # modules/ を変更した場合
+        terraform test
+    validations:
+      required: true
+
+  # --- 必須 4: 人間チェックポイントの該当有無 -----------------------------
+  - type: dropdown
+    id: human-checkpoints
+    attributes:
+      label: 人間チェックポイントの該当有無 (必須・複数選択可)
+      description: >-
+        該当が無い場合も「該当なし」を選ぶ (空欄にしない)。承認機構は rule 04-human-checkpoints.md が正。
+        envs/prod を選んだ issue は着手前の計画承認 (rule 04 の H-5) が必須 (rule 02 §4.3)。
+      multiple: true
+      options:
+        - 該当なし
+        - 着手前の計画承認 (新規リソース種別 / 設計書に無い構成 / 3 リポ跨ぎ / envs/prod)
+        - terraform apply (dev) — 人間のみ (rule 04 §3.1)
+        - terraform apply (prod) — rule 04 の H-4
+        - state 操作 (import / state rm) — 人間のみ
+    validations:
+      required: true
+
+  # --- 必須 5: 依存 issue (他リポ) ----------------------------------------
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 依存 issue (他リポ) (必須)
+      description: >-
+        依存方向は infra → backend → frontend。このリポは依存の先頭にあるため、多くの場合「なし」になる。
+        このリポの出力 (RDS エンドポイント / ECS クラスタ名 / Secrets の ARN) を待っている
+        backend / frontend の issue があれば、それも参照として書く (順序の確認に使う)。
+      value: |
+        なし
+      placeholder: |
+        なし (このリポが先頭)
+        後続: <owner>/<backend-repo>#123 (この issue の apply 完了後に着手可)
+    validations:
+      required: true
+
+  # --- 任意欄 -------------------------------------------------------------
+  - type: textarea
+    id: expected-plan
+    attributes:
+      label: 期待する plan 差分 (envs/ を変更する場合は記入)
+      description: >-
+        rule 01 §2.4 の「Red の代替」。add / change / destroy のリソース名と件数を**着手前に**宣言する。
+        S-6 の plan 出力がこの宣言と一致することを確認する (V-7)。差異があれば理由を PR で説明する。
+      placeholder: |
+        add: aws_secretsmanager_secret.anthropic_api_key (1)
+        change: aws_ecs_task_definition.backend (1 — secrets ブロックの追加)
+        destroy: なし
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 背景 / 目的 (任意)
+      description: この issue で何が達成されるか。1〜3 行。
+    validations:
+      required: false
+
+  - type: input
+    id: design-ref
+    attributes:
+      label: 設計書の該当箇所 (任意)
+      description: >-
+        hassan_v3 の設計書のファイルと節。IaC の管理範囲外にする判断を含む場合は、その理由を
+        コード側にもコメントで残す (後から「漏れ」と区別するため)。
+      placeholder: "docs/design/infrastructure.md §4"
+    validations:
+      required: false
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: 非スコープ / 備考 (任意)
+      description: >-
+        この issue で扱わないこと。rule 02 §1.2 手順 3 の上限
+        (生成物を除く変更ファイル数 15 / 差分行数 800) を超える見込みの場合は、
+        割れない理由をここに書く (理由の記載がない超過は S-2 で差し戻す)。
+    validations:
+      required: false
+
+  - type: dropdown
+    id: model
+    attributes:
+      label: 想定モデル (任意)
+      description: rule 03-model-escalation.md の基準による着手前判定の結果。実行中の昇格があれば issue コメントで上書きする。
+      options:
+        - 未判定
+        - sonnet (既存モジュールの変数追加・前例あり)
+        - opus (新規リソース種別 / IAM 設計 / state 移行を含む)
+    validations:
+      required: false

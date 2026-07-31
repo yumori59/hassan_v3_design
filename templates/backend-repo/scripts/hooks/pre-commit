@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# pre-commit hook (backend リポジトリ雛形) — Go ビルド/vet/差分テスト を強制
+#
+# `ln -sf ../../scripts/hooks/pre-commit .git/hooks/pre-commit` で導入する。
+# 二層化: 重い全体テストは CI、軽い「差分のみ」は pre-commit。
+# 失敗するとコミット不可。`--no-verify` での回避はユーザー明示指示がない限り禁止。
+set -uo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+staged=$(git diff --cached --name-only --diff-filter=ACM || true)
+go_staged=$(echo "$staged" | grep -E '\.go$' || true)
+
+if [[ -f go.mod ]]; then
+  echo "[pre-commit] go build ./..."
+  if ! go build ./...; then
+    echo "[pre-commit] FAIL: go build ./..." >&2
+    exit 1
+  fi
+
+  echo "[pre-commit] go vet ./..."
+  if ! go vet ./...; then
+    echo "[pre-commit] FAIL: go vet ./..." >&2
+    exit 1
+  fi
+
+  if [[ -n "$go_staged" ]]; then
+    pkgs=$(echo "$go_staged" | xargs -n1 dirname | sort -u | sed 's#^#./#')
+    echo "[pre-commit] go test (変更パッケージ): $(echo "$pkgs" | tr '\n' ' ')"
+    # shellcheck disable=SC2086
+    if ! go test $pkgs; then
+      echo "[pre-commit] FAIL: go test (変更パッケージ)" >&2
+      exit 1
+    fi
+  else
+    echo "[pre-commit] Go 変更なし — go test スキップ"
+  fi
+fi
+
+# --- 生成物の追従漏れ検出 (非ブロック) ----------------------------------
+schema_staged=$(echo "$staged" | grep -E '^(db/schema\.sql|db/queries/)' || true)
+gen_staged=$(echo "$staged" | grep -E '^(db/rdb/.*\.sql\.go|di/wire_gen\.go)$' || true)
+if [[ -n "$schema_staged" && -z "$gen_staged" ]]; then
+  echo "[pre-commit] 注意: スキーマ/クエリを変更していますが生成物 (sqlc/wire) が含まれていません。"
+  echo "[pre-commit] 　　　 make sqlc / make wire の実行漏れがないか確認してください。"
+fi
+
+# --- OpenAPI 契約の追従漏れ検出 (非ブロック) ------------------------------
+# Controller の IF を変えたら OpenAPI 定義を再生成する (frontend リポの型生成の元)。
+ctrl_staged=$(echo "$staged" | grep -E '^controller/' || true)
+api_staged=$(echo "$staged" | grep -E '^(docs/(swagger|openapi)|api/openapi)' || true)
+if [[ -n "$ctrl_staged" && -z "$api_staged" ]]; then
+  echo "[pre-commit] 注意: Controller を変更していますが OpenAPI 定義の更新が含まれていません。"
+  echo "[pre-commit] 　　　 IF 変更なら定義を再生成してください (frontend の型生成が壊れます)。"
+fi
+
+# --- Managed Agent 再発行の注意喚起 (非ブロック) --------------------------
+# system prompt / custom tool schema を変えたら Agent 再発行が必要 (BE-8 / BE-10)。
+agent_staged=$(echo "$staged" | grep -E '^(prompts/.*\.md|.*conversation_tools.*\.go|.*agent.*schema.*)$' || true)
+if [[ -n "$agent_staged" ]]; then
+  echo "[pre-commit] 注意: Managed Agent の system prompt / tool schema に影響する変更を含みます:"
+  echo "$agent_staged" | sed 's/^/[pre-commit]   /'
+  echo "[pre-commit] Agent の再発行が必要か確認してください (BE-8 / BE-10)。"
+fi
+
+echo "[pre-commit] OK"

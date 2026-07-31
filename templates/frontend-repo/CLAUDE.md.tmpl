@@ -1,0 +1,100 @@
+# CLAUDE.md — <frontend-repo-name> (フロントエンド)
+
+hassan_v3 の設計 (`<hassan_v3 の絶対パス>/docs/design/`) を実装する本番フロントエンド。
+**Next.js on Vercel**。UI の設計入力は `<hassan_v3>/docs/prototype/` のプロトタイプ
+(**プロトタイプは仕様ではない** — 仕様は `docs/design/` が正)。
+
+**3 リポジトリ構成**: このリポジトリは frontend のみ。backend (Go / ECS) と infra (Terraform) は別リポ。
+**API の型は backend の OpenAPI スキーマから生成する** — 手書きしない。
+
+## コマンド
+
+| 目的 | コマンド |
+|---|---|
+| 開発サーバ | `<npm run dev>` |
+| 型チェック | `<npm run tsc>` |
+| テスト | `<npm run test>` |
+| ビルド | `<npm run build>` |
+| lint | `<npm run lint>` |
+| **API 型の生成** | `<npm run generate>` — backend の OpenAPI スキーマから生成 |
+| E2E | `<npm run e2e>` |
+
+## 検証ゲート (完了条件)
+
+```
+<npm run tsc> → <npm run test> → <npm run build> → <npm run lint>
+```
+
+4 つ全部が通って初めて「完了」。テストは「振る舞い実装の完了ゲート」で、
+新機能・複数ファイル・挙動変更はテスト先行 (Red→Green)。
+
+## API 境界 (最重要)
+
+- **型は生成物**。`<npm run generate>` で backend の OpenAPI から生成し、**手書きの型定義を作らない**
+- backend の IF が変わったら**型を再生成する**。生成物の差分を CI でチェックし、
+  型ズレのまま気付かずマージされることを防ぐ
+- 生成型に無い変換 (表示用の整形・LLM 出力のパース) は**純粋関数として分離し、テストを書く**
+- `fetch` には **AbortSignal** を渡し、`AbortError` は正常系として扱う (FE-1)
+- **SSE ストリーミング**: `\n\n` 区切りでイベントを取り出す。
+  **改行を含む本文・空行を落とさない** (空行は markdown の段落区切りとして意味を持つ。BE-7 の FE 側)
+
+## LLM 応答を扱う UI の注意
+
+- **数値・レンジのパースは必ずテスト対象**にする (「120-420億円」を「-420億円」と誤抽出する類。FE-6)
+- **ストリーミングの中断・タイムアウト・エラーを必ず画面に出す** (無言で止まる UI にしない)
+- 生成中のキャンセルはユーザーの正常操作として扱う
+- **フィーチャーフラグ**: 判定の正は backend。FE は導線 (メニュー・ボタン) を隠すだけに留める。
+  **配布方法は未確定** (2026-07-30 時点) — 設計リポの `docs/design/operations.md` §7.2 は
+  「フラグ値は backend の `stacks/<env>/` のタスク定義に置く」と決めたが、
+  **それを FE へ配る API は `docs/design/API/` の 73 エンドポイントに存在しない**。
+  ①専用エンドポイントを新設するか ②環境変数として Vercel 側にも同じ値を置くか (二重管理になる) を
+  設計リポで決めるまで、**FE 側に独自の判定ロジックを持たない**という原則だけを守る
+
+## コンポーネント規約
+
+- Props 型は明示。`any` 禁止 (`unknown` + 型ガード)
+- 純粋ロジック (`lib/` 等) に React hook / JSX を持ち込まない (FE-5)
+- デザイントークンを使う。ハードコード px / 汎用クラスの新規追加をしない (FE-3)
+- 複合状態は `useReducer` + 純粋 reducer (テスト可能にする)
+
+## テスト規約
+
+- 純粋ロジック → 同ディレクトリに `*.test.ts` / コンポーネント → `*.test.tsx`
+- **関連する複数の期待は同一 `waitFor` コールバック内に置く** — 分割するとフルスイートで
+  中間レンダーを拾ってフレークする (FE-7)
+- モックは `afterEach` で確実にリセットする
+
+## Vercel デプロイ
+
+- **Production Branch は `production`、`main` は Preview** (Vercel の既定は `main` = Production なので
+  必ず変更する)。`production` へは `main` からの PR のみ — ブランチ保護の設定は
+  `.claude/rules/04-human-checkpoints.md` §4.1 / §4.4
+- プレビュー環境: PR ごとに自動生成される。**本番 backend を指さないよう API のベース URL を環境変数で分離する**
+- 環境変数は Vercel の Project Settings で管理 (dev / preview / production)。
+  **秘密情報を `NEXT_PUBLIC_*` に置かない** (ブラウザに露出する)
+- backend の破壊的 API 変更時は「backend で新旧併存 → FE 切替 → 旧削除」の順序を守る
+
+## Claude Code 運用ルール
+
+| ファイル | 内容 |
+|---|---|
+| `.claude/rules/01-construction-loop.md` | **1 issue の作業ループ (S-1〜S-10)。全作業の起点** |
+| `.claude/rules/02-issue-granularity.md` | issue の粒度・DoD (V-1〜V-10)・3 リポ跨ぎのマージ順序 |
+| `.claude/rules/03-model-escalation.md` | モデルの既定・昇格判定 (M-1〜M-4 / T-1〜T-3) |
+| `.claude/rules/04-human-checkpoints.md` | 人間承認点 (H-1〜H-5) と機構・自律範囲 |
+| `.claude/agents/react-developer.md` | 実装エージェント |
+| `.claude/agents/frontend-reviewer.md` | 実装レビュー (本番基準) |
+| `.claude/rules/feedback_review_patterns.md` | 頻出バグパターン (SSOT。設計リポと還流) |
+| `.claude/skills/implementing-robustly/` | 着手前の影響半径測定・完了前セルフレビュー |
+| `.claude/skills/test-driven-development/` | Red→Green の進め方 |
+
+- **作業は GitHub issue 起点** (`.github/ISSUE_TEMPLATE/task.yml` で起票)。ループの現在位置と
+  中断・再開は rules 01 の §6
+- 実装は `react-developer`、レビューは**別セッションで** `frontend-reviewer`
+- 要件・設計の変更が必要になったら**実装で辻褄を合わせず、設計リポ (hassan_v3) に差し戻す**
+
+## ハーネス
+
+- pre-commit で 型チェック + 差分テスト を強制。`--no-verify` 回避はユーザー明示指示がない限り禁止
+- CI が PR / push で tsc / test / build / lint + **生成型の差分**を機械強制
+- `.env*` の読取は autoMode で deny

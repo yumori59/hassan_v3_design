@@ -1,0 +1,95 @@
+name: CI
+
+# infra リポジトリ雛形。<...> のプレースホルダを実構成に合わせて置換する。
+# **plan までを CI で行い、apply はしない** (適用は人間の判断)。
+# 設計リポ (hassan_v3) の docs/design/infrastructure.md の IaC 管理範囲と一致させること。
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+  id-token: write        # OIDC で AWS へ read-only ロールを引き受ける
+  pull-requests: write   # plan 結果を PR にコメントする
+
+jobs:
+  validate:
+    name: fmt / validate / lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: terraform fmt -check
+        run: terraform fmt -check -recursive
+
+      - name: terraform init (backend なし・検証のみ)
+        run: |
+          # ENV_DIRS は実構成のルートモジュールのパスに置換する (例: "envs/dev envs/prod")
+          ENV_DIRS="envs/dev envs/prod"
+          for d in $ENV_DIRS; do
+            terraform -chdir="$d" init -backend=false
+          done
+
+      - name: terraform validate
+        run: |
+          # ENV_DIRS は実構成のルートモジュールのパスに置換する (例: "envs/dev envs/prod")
+          ENV_DIRS="envs/dev envs/prod"
+          for d in $ENV_DIRS; do
+            terraform -chdir="$d" validate
+          done
+
+      - name: tflint
+        uses: terraform-linters/setup-tflint@v4
+      - run: tflint --recursive
+
+  plan:
+    name: plan (dev)
+    needs: validate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: AWS 認証 (OIDC / plan 用の read-only ロール)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: <plan 用 IAM ロールの ARN>
+          aws-region: ap-northeast-1
+
+      - name: terraform init
+        run: terraform -chdir=<envs/dev> init
+
+      - name: terraform plan
+        id: plan
+        run: terraform -chdir=<envs/dev> plan -no-color -out=tfplan | tee plan.txt
+
+      - name: destroy / replace の検出
+        # データ消失につながる差分を CI で目立たせる (ブロックはしない — 意図した replace もある)
+        run: |
+          if grep -qE 'must be replaced|will be destroyed' plan.txt; then
+            echo "::warning::plan に destroy / replace が含まれます。適用前に内容を確認してください"
+            grep -nE 'must be replaced|will be destroyed' plan.txt | head -20
+          fi
+
+      - name: plan を PR にコメント
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('plan.txt', 'utf8').slice(0, 60000);
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '### terraform plan (dev)\n```\n' + plan + '\n```',
+            });
+
+# apply は意図的に定義していない。適用は人間が plan の差分を読んで実行する
+# (CLAUDE.md の絶対ルール 1)。自動 apply を追加する場合は設計 (D-3) で承認フローを決めてから。
