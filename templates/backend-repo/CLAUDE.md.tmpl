@@ -1,6 +1,8 @@
 # CLAUDE.md — <backend-repo-name> (バックエンド)
 
 hassan_v3 の設計 (`<hassan_v3 の絶対パス>/docs/design/`) を実装する本番バックエンド。
+
+**設計書を読むときは必ず `docs/design/README.md` (索引) から入る** — 同ディレクトリは 18 ファイル・約 12,000 行あり、**1 つのタスクに必要なのはその一部**である。索引は「何を作るか → どのファイルのどの節を読むか」と「実装時に読まなくてよい節」を示す。
 アーキテクチャは **クリーンアーキテクチャ 4 層 (Controller → UseCase → Service → Repository) +
 `entity/` / `gateway/` の計 6 パッケージ層** + hassan-v2-backend のコーディング規約・認証機構、
 LLM / エージェント層は **Anthropic Managed Agents** (PoC `claude_managed_agents` 方式)。

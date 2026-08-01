@@ -4,6 +4,10 @@ hassan_v3 の設計 (`<hassan_v3 の絶対パス>/docs/design/`) を実装する
 **Next.js on Vercel**。UI の設計入力は `<hassan_v3>/docs/prototype/` のプロトタイプ
 (**プロトタイプは仕様ではない** — 仕様は `docs/design/` が正)。
 
+**設計書を読むときは必ず `docs/design/README.md` (索引) から入る** — 同ディレクトリは 18 ファイル・
+約 12,000 行あり、**1 つのタスクに必要なのはその一部**である。FE は索引の
+「フロントエンド」節が入口 (`frontend.md` §2 / §3 / §11.1 / §9 + 対応する `API/<ドメイン>.md` §2)。
+
 **3 リポジトリ構成**: このリポジトリは frontend のみ。backend (Go / ECS) と infra (Terraform) は別リポ。
 **API の型は backend の OpenAPI スキーマから生成する** — 手書きしない。
 
@@ -46,7 +50,8 @@ hassan_v3 の設計 (`<hassan_v3 の絶対パス>/docs/design/`) を実装する
 - **フィーチャーフラグ**: 判定の正は backend。FE は導線 (メニュー・ボタン) を隠すだけに留める。
   **配布方法は未確定** (2026-07-30 時点) — 設計リポの `docs/design/operations.md` §7.2 は
   「フラグ値は backend の `stacks/<env>/` のタスク定義に置く」と決めたが、
-  **それを FE へ配る API は `docs/design/API/` の 73 エンドポイントに存在しない**。
+  **それを FE へ配る API は `docs/design/API/` のどのエンドポイントにも存在しない**
+  (総数は同ディレクトリ `README.md` §3 の総覧が SSOT。ここに件数を転記しない = DR-9)。
   ①専用エンドポイントを新設するか ②環境変数として Vercel 側にも同じ値を置くか (二重管理になる) を
   設計リポで決めるまで、**FE 側に独自の判定ロジックを持たない**という原則だけを守る
 

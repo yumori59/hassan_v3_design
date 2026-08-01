@@ -112,7 +112,7 @@ body:
     attributes:
       label: 設計書の該当箇所 (任意)
       description: hassan_v3 の設計書のファイルと節。該当が無い場合は空欄でよい (S-3 で設計差し戻しの判定対象になる)。
-      placeholder: "docs/design/api/themes.md §3.2 / docs/design/auth.md §2.2"
+      placeholder: "docs/design/API/themes.md §3.2 / docs/design/auth.md §2.2"
     validations:
       required: false
 

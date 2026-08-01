@@ -258,7 +258,7 @@ flowchart TB
 > `accounts` / `admin_accounts` の 2 種にまたがるため)。**`contract_id` の FK (CASCADE) は維持する** —
 > 契約解約はテナント全削除であり、部分的な不整合を生まない。
 
-#### 3.4.3 移管の実行方式 (対象 28 テーブル・大量行への対処)
+#### 3.4.3 移管の実行方式 (対象 29 テーブル・大量行への対処)
 
 | # | 決定 |
 |---|---|
@@ -669,7 +669,7 @@ db/
 |---|---|---|---|---|---|
 | `read_news_accounts` | 既読状態 | `(account_id, news_id)` | `news_id text` (CMS のコンテンツ ID) / `read_at` | `contract_id`→`contracts` (CASCADE) / **`account_id`→`accounts` (CASCADE ← §3.3-2 / DM-6 の `NO ACTION` 規約の例外。§3.4.2 の分類②)** | `(account_id, read_at DESC)` |
 | `account_notification_settings` | 通知設定 | `account_id` | `diverge_completed text` / `weekly_summary text` | `contract_id`→`contracts` (CASCADE) / **`account_id`→`accounts` (CASCADE ← 同じ例外)** | — |
-| `workspace_settings` | ワークスペース設定 | `contract_id` | `timezone text` / `default_asset_visibility text` | `contract_id`→`contracts` (CASCADE) | — |
+| `workspace_settings` | ワークスペース設定 | `contract_id` | `timezone text` / **`default_theme_visibility` / `default_asset_visibility` / `default_idea_visibility`** (いずれも `text`、値域は `private`\|`contract`。[API/settings.md](API/settings.md) D-ST-3 の 3 カテゴリ = v2 の `sharing_settings` と 1:1) | `contract_id`→`contracts` (CASCADE) | — |
 
 **判断の適用**:
 
@@ -747,9 +747,10 @@ db/
     **`CHECK ((actor_type = 'unauthenticated' AND actor_id IS NULL AND contract_id IS NULL)
     OR (actor_type <> 'unauthenticated' AND actor_id IS NOT NULL AND contract_id IS NOT NULL))`** を張る。
     **NULL を許す条件をスキーマで表明する** — 同じ表の `llm_call_records` の計測 `CHECK` と方針を揃える
-  - **メールアドレスは平文で保存しない**。`detail jsonb` に **`{"email_hash": "<SHA-256>"}`** を入れる
-    (同一アドレスへの反復と分散試行を区別できる最小の形)。**値域と記録項目の SSOT は
-    [observability.md](observability.md) §4.5**
+  - **メールアドレスは平文で保存しない**。`detail jsonb` に **`{"email_hash": "<HMAC-SHA256>"}`** を入れる
+    (同一アドレスへの反復と分散試行を区別できる最小の形。**鍵付き HMAC — 鍵は `AUDIT_EMAIL_HMAC_KEY`。
+    鍵なし SHA-256 は既知アドレスの照合で逆引きできるため使わない**)。**値域と記録項目の SSOT は
+    [observability.md](observability.md) §4.5** ([API/auth-accounts.md](API/auth-accounts.md) AA-D-21 と同一方式)
   - **却下 (b) 認証失敗は `audit_logs` に書かず構造化ログ + メトリクスだけで観測する**:
     v2 の `signin_failed` / MFA 検証失敗が**監査記録から落ちる**。[auth.md](auth.md) §9.3 Q-A2 の
     「v2 でできていたことを満たす」に対する明示の後退になる
@@ -886,7 +887,7 @@ conversation_sessions.ledger.deep_dive_results ──> plan_tab_versions (ground
 | **O-6** 監査ログ | **回答 (テーブル)** | AC-2.5 | §4.10 の `audit_logs`。**actor は種別 + ID** ([observability.md](observability.md) §4.5 / [auth.md](auth.md) §10.2 R-5' への対応)。`action` は `text` (DM-15) |
 | **O-4** 失敗の可観測性 | **部分回答** | AC-2.3 | ジョブの `failure_code` / `failure_message` を列として持つ (§4.4 / §4.7)。値域は [observability.md](observability.md) §4.3。採番・保存の失敗を握り潰さない規約は §4.11.1 の 2 |
 | **O-5** SSE / 長時間処理 | **部分回答** | — | 進捗を DB から配信するための `asset_extraction_events` (§4.4) と、**会話履歴を DB に持つ決定** (DM-12) が [API/README.md](API/README.md) §1.3 の J-6 / J-7 の前提を満たす。`heartbeat_at` は DM-17 |
-| **D-4** マイグレーション | **部分回答 (方式のみ未確定)** | **AC-3.4** | §6.1〜§6.3。**適用タイミング・後方互換・ロールバックは確定** ([operations.md](operations.md) §7.4 を参照)。**ツール選定 (psqldef / golang-migrate) は `[Answer]` として残す** (§6.1) |
+| **D-4** マイグレーション | **回答** | **AC-3.4** | §6.1〜§6.3。**適用タイミング・後方互換・ロールバックは確定** ([operations.md](operations.md) §7.4 を参照)。**ツール選定も psqldef で確定** (2026-07-31 ユーザー回答 — §6.1 の `[Answer]`) |
 | **D-7** 段階リリース (データ面) | **部分回答** | AC-3.5 | §6.3 の投入順序と §6.4 の移行項目。**引き継ぎ範囲が未確定**のため移行の対象・写像は確定していない (§6.4 の `[Answer]`) |
 | **D-1 / D-3 / D-5 / D-8** | **対象外** | — | 環境・デプロイ・シークレット・IaC は本書の範囲外 ([operations.md](operations.md) / [infrastructure.md](infrastructure.md))。**先送りではなく所在が別**である |
 | **DR-3** 既存データ | **部分回答** | AC-3.5 | v2 のデータは読むだけで書き換えない (P-3)。**ロールバックは v3 側を捨てるだけで成立する** (§6.6)。**引き継ぎ範囲が未確定**のため、対象テーブルの対応表は §6.4 の確定後に書く |
@@ -1177,7 +1178,7 @@ auth.md §6.3 / §6.4 への転記は同文書の担当セッションが行う 
 | # | 項目 | 内容 | 確定先 |
 |---|---|---|---|
 | **DM-Q1** | 拡張の可用性 | **`pg_trgm` / `pgvector` / (代替候補の) `pg_bigm` が RDS PostgreSQL で有効化できるか**を確認する。使えない場合 §3.5 の検索方式と §4.7 のチャンクテーブルが変わる | [infrastructure.md](infrastructure.md) |
-| **DM-Q2** | メンバー削除時の所有物 | **3 点**: ①採用案は「分類①を契約内管理者へ移管 → 分類②を削除 → 分類③は残す → `accounts` を物理削除」(§3.4.1 の 3)。**v2 は CASCADE で消えていた**ため挙動が変わる ②契約の付け替え経路を持たない前提 (§3.4.1 の 1) の確認 ③**移管対象 28 テーブルの行数の実測** (§3.4.3 の 5。バッチ上限の既定値 50 集約が妥当かの根拠になる。**推測値を設計に書かない**) | 要件確認 (認証系 API の仕様 = Task-3i と同時) / ③は `Task-2f` |
+| **DM-Q2** | メンバー削除時の所有物 | **3 点**: ①採用案は「分類①を契約内管理者へ移管 → 分類②を削除 → 分類③は残す → `accounts` を物理削除」(§3.4.1 の 3)。**v2 は CASCADE で消えていた**ため挙動が変わる ②契約の付け替え経路を持たない前提 (§3.4.1 の 1) の確認 ③**移管対象 29 テーブルの行数の実測** (§3.4.3 の 5。バッチ上限の既定値 50 集約が妥当かの根拠になる。**推測値を設計に書かない**) | 要件確認 (認証系 API の仕様 = Task-3i と同時) / ③は `Task-2f` |
 | **DM-Q3** | 第 1 リリースに含めるドメイン | Q-3 `[Answer 3]` は「PoC 由来の新機能セット (テーマ・アセット・会話型)」だが、[API/](API/README.md) の 6 ドメインは増分 1 とされている ([architecture.md](architecture.md) §8 も同じ食い違いを仮定として記録)。**§4.1.1 の「増分」列と §6.3 の投入順序がこれに依存する** | ユーザー判断 |
 | **DM-Q4** | 新着通知メールの記録 | `news_email_logs` 相当を v3 が持つか ([API/news.md](API/news.md) NW-Q5)。**要件が確認されるまで列を作らない** | 要件確認 |
 | **DM-Q5** | ~~`active_rate` の定義~~ → **解消 (2026-07-30)** | ST-Q9 の回答で `GET /usage-summary` はクロス集計形 (月 × メンバー × 活動種別) に変わり、`active_rate` は廃止された ([API/settings.md](API/settings.md) §3 / §7.1)。集計元が `audit_logs` である点は §4.10 のとおり | — |

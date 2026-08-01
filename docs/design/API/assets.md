@@ -64,6 +64,11 @@
 | GET | `/assets/{asset_id}/documents` | 添付資料一覧 | 個人 / 契約 (§3.2) | R: `{items:[{id, file_name, byte_size, content_type, status, created_at}]}` | 200 / 404 | — | — |
 | POST | `/assets/{asset_id}/documents` | 添付資料追加 | 個人 | `multipart/form-data`: `file` — R: `Document` | **201** / 404 / **400** (拡張子・サイズ違反) | — | — |
 | DELETE | `/assets/{asset_id}/documents/{document_id}` | 添付資料削除 | 個人 | — | **204** / 404 | — | — |
+| POST | `/assets/bulk` | **複数アセットの一括作成** (C-16) | 個人 | B: `{items:[{name, description, asset_type, ref_url, folder_id?}], on_error}` (`on_error` = `abort` 既定 \| `skip`) — R: `{created:[Asset], skipped:[{index, reason}]}` | **201** / **400** (`items` が空 / 件数上限超過 / `abort` で 1 件でも不正) | — | — |
+| DELETE | `/assets/bulk` | **一括削除** (論理削除。C-16) | 個人 | B: `{asset_ids:[...]}` — R: `{deleted_count}` | 200 / **404** (**1 件でも他人 or 不存在なら全件実行しない** — D-AS-14) / **400** (件数上限超過) | — | — |
+| POST | `/asset-imports` | **CSV 一括取り込み** (v2 の `POST /assets/upload` の後継。C-16) | 個人 | `multipart/form-data`: `file` (必須) / `asset_type` (必須) / `folder_id` (任意) — R: `{import_id, status:"queued"}` | **202** / **200** (冪等キー一致 — [README.md](README.md) §1.3 J-5) / **400** (拡張子・サイズ違反 / `asset_type` が列挙外) | — | — |
+| GET | `/asset-imports/{import_id}` | 取り込みの状態・結果取得 | 個人 | R: `{import_id, status, total_rows, created_count, skipped:[{row, reason}], failure:{code, message}}` (**状態機械は [README.md](README.md) §1.3 が SSOT**) | 200 / 404 | — | — |
+| GET | `/assets/recent` | **最近使ったアセット** (C-16) | 個人 / 契約 (§3.2) | Q: `limit` (既定 10・最大 50) / `created_by` (**自契約のメンバーのみ**) — R: `{items:[Asset]}` (`asset_usage_histories.used_at` の降順) | 200 / **400** (契約外の `created_by`) | — | — |
 
 ### 2.1 抽出フロー (プロトタイプ 4 ステップの API 対応)
 
@@ -139,6 +144,22 @@ v2 ではアセットの契約内共有も `sharing_settings` が決めており
 | D-AS-12 | **`Asset` に `visibility` (`private`\|`contract`。既定 `private`) を持たせる**。`scope=contract` は「`visibility = contract` のアセット + 自分のアセット」を返す。**書き込み経路 (`POST` / `PUT` の `visibility`) と `scope=contract` はどちらも増分 2** | (a) `visibility` を持たず `scope=contract` を増分 1 で許す (**当初案・却下**): 契約内の全アセットが露出する。v2 の既定は非共有なので**切替が一斉公開**になる。(b) **[settings.md](settings.md) の `default_asset_visibility` だけを作る** (**当初案の欠陥・却下**): 設定を**書く側**はあるのに、それを適用する**アセット側のフィールドと読む側が存在しない** — BE-10 (読む側と書く側を対で設計する) の再発形。**両者を同じ増分 2 に入れることで構造的に潰す** |
 | D-AS-13 | **フォルダの可視性はフォルダ自身の `visibility` で判定**し、配下アセットの可視性とは独立に評価する | (a) 配下アセットの可視性から導出する: 1 件でも `contract` のアセットがあるとフォルダが見え、**フォルダ名から他人の技術領域が推測できる**。(b) フォルダは常に契約内公開: 同じ理由で不可 |
 
+### 3.3 v2 の一括操作・最近使用の引き継ぎ (**C-16**。2026-08-01 追加)
+
+**経緯**: 2026-07-30 に「更新版プロトタイプからボタンが消えた」ことを根拠に **AS-Q3 (一括インポート) をクローズしたのは誤り**だった。
+**v2 に現に動いている機能** (`hassan-v2-backend/router/router.go:109`, `:112`, `:113`, `:114`) であり、
+C-16 (v2 の仕様は原則すべて引き継ぐ。操作の後退を認めない) の下では**承認なしに落とせない**。
+2026-08-01 のユーザー判断で**引き継ぐ**ことになった。**プロトタイプに UI が無いことは「機能を落とす理由」にならない** (DR-7 の裏面 —
+プロトタイプは仕様ではないのだから、**無いことも仕様ではない**)。
+
+| # | 論点 | 採用案 | 却下案と理由 |
+|---|---|---|---|
+| **D-AS-14** | **一括削除の部分失敗** | **1 件でも他人 or 不存在なら全件実行しない** (404)。[knowledge.md](knowledge.md) D-KN-11 と同じ規則 | (a) 実行できたものだけ削除する: 「何が消えて何が残ったか」を FE が集計することになり、失敗の可観測性が下がる。(b) 他人の ID を黙って無視する: **他テナントの ID を含む要求が成功として記録され、越境の試行がログから読み取れない** |
+| **D-AS-15** | **一括作成の部分失敗** | **`on_error` を明示的に受ける** (`abort` 既定 / `skip`)。`skip` のとき `skipped[]` に `index` と理由を返す | (a) 常に全件ロールバック: 100 行のうち 1 行の不備で全部やり直しになり、CSV 取り込み (D-AS-16) の実用性が落ちる。(b) 常に成功分だけ作る (v2 の CSV 方式): **不正行が黙って捨てられる** — v2 は `title` / `description` が空の行を `continue` でスキップし、**利用者に何行落ちたかを返さない** (`hassan-v2-backend/usecase/asset/upload_assets_from_csv.go:54`〜`:61` + Controller が `success(c)` = 本文なし — `同 controller/asset.go:521`)。**この無言のスキップは v3 で引き継がない** (BE-10 の「握り潰さない」観点) |
+| **D-AS-16** | **CSV 取り込みの実行方式** | **非同期ジョブ (`POST /asset-imports` → 202) + 状態 GET**。`GET /asset-imports/{import_id}` が `total_rows` / `created_count` / `skipped[]` を返す。**共通の実行基盤は [README.md](README.md) §1.3 (D-API-15)** に従う | (a) **v2 と同じ同期 POST** (`POST /assets/upload` → 200 本文なし): 行数が増えるとリクエストタイムアウトに当たり、**何件入って何件落ちたかを利用者が知る手段が無い** (上記のとおり v2 は本文を返さない)。(b) 202 だけ返して状態を持たない: 取り込み結果を確認できず、再実行の判断ができない |
+| **D-AS-17** | **CSV の列と行の扱い** | **1 列目 = 任意 (無視) / 2 列目 = 名前 / 3 列目 = 説明**を v2 から踏襲する (`hassan-v2-backend/usecase/asset/upload_assets_from_csv.go:59`〜`:60`)。**先頭 2 行 (ヘッダ + 記入例) をスキップする**点も踏襲 (`同:47`, `:55`)。**ただし列の意味を `docs/design/` の表で明示し、テンプレート CSV を配布する前提にする** | (a) 列名をヘッダから読む: v2 のテンプレートを使っている既存利用者の CSV が通らなくなる (C-16 の「操作の後退」)。(b) 先頭 2 行スキップをやめる: 同じ理由。**代償**: 位置ベースなので列の増減に弱い — **テンプレートの配布とバリデーションエラーの行番号返却 (D-AS-15) で補う** |
+| **D-AS-18** | **「最近使った」の判定元** | **`asset_usage_histories.used_at` の降順** (v2 と同じ。`hassan-v2-backend/db/queries/asset_usage_history.sql:6`, `:14`)。既定 `limit=10` / 最大 50 | (a) `assets.updated_at` で代用する: 「編集した」と「使った」は別で、**発散で参照しただけのアセットが並ばない**。(b) v2 の `num` パラメータ名を踏襲する (`hassan-v2-backend/controller/asset.go:432`): [README.md](README.md) D-API-7 が `limit` を共通規約にしているため、ここだけ別名にしない |
+
 **移行 (切替時に 1 度だけ実行)**:
 
 | # | 処理 | 理由 |
@@ -173,7 +194,7 @@ v2 ではアセットの契約内共有も `sharing_settings` が決めており
 |---|---|---|---|
 | AS-Q1 | **CSV エクスポート** | ボタンがあるがトーストのみのダミー (更新版 `:7498` / `:13341`) | 要件確認。v2 に `GET /ideas/csv` の前例あり |
 | AS-Q2 | **「AI で探す」** | **クローズ (2026-07-30)**: 更新版プロトタイプからボタン自体が消えた (「AI で探す」の文言 0 件。ツールバーは「新規アセットを登録」`:7407` と「CSV エクスポート」`:7498` のみ)。設計対象外とする | — (復活したら再起票。PoC の `claude_managed_agents/internal/asset_related` が実装候補) |
-| AS-Q3 | **一括インポート** | **クローズ (2026-07-30)**: 更新版プロトタイプからボタン自体が消えた (「一括インポート」の文言 0 件)。設計対象外とする | — (復活したら再起票。v2 `POST /assets/upload` と PoC `/api/assets/bulk-import` に前例) |
+| AS-Q3 | **一括インポート** | **クローズを撤回 → 引き継ぐ (2026-08-01)**。2026-07-30 に「更新版プロトタイプからボタンが消えた」を理由にクローズしたが、**v2 に稼働中の実装がある** (`POST /assets/upload` = `hassan-v2-backend/router/router.go:114`) ため **C-16 違反**だった。**§3.3 で `POST /asset-imports` として仕様化済み** | 解決済み (§3.3 の D-AS-16 / D-AS-17) |
 | AS-Q4 | **特許明細書の除外** | 注意書きのみ (`:13055`)。判定手段が無い | 抽出プロンプト設計 (§3.1) |
 | AS-Q5 | **アップロード基盤の共用** | プロトタイプはアセットとナレッジで別 UI | data-model / 実装リポ設計 (D-AS-4 の却下案 (b)) |
 | **AS-Q11** | **アップロード経路が 4 系統目になる** (2026-07-31 のエンドポイント一覧の再照合で発見) | **D-AS-4 は「アップロード実装が 3 系統になり、拡張子・サイズ検証の SSOT が割れる (BE-2)」を理由に専用 API を却下した**が、更新版プロトタイプの**会話画面の「持ち込みアイデア入力」が PDF のドラッグ&ドロップを持つ** (`setFile` `:9720`〜`:9728` が `File` を受け取り `PDF · N KB` と表示、`summarizeIdeaInput` `:9742` 経由で送信。ウィジェット全体は `:9606`〜`:9861`)。これは①アセット添付 ②抽出用の未紐付けアップロード ③ナレッジファイル に続く **4 系統目**にあたる | **会話型アイデア創出の API 設計** ([README.md](README.md) §0 の対象外領域)。**同設計に「4 系統目を作らず、既存 3 系統のどれかに寄せる (または共通のアップロード基盤へ統合する)」制約として引き継ぐ** — D-AS-4 の却下理由が 3 系統を前提にしているため、4 系統目が黙って増えると同じ判断の根拠が崩れる。**本ファイルの範囲では新規エンドポイントを追加しない** |

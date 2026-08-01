@@ -110,7 +110,7 @@ body:
       description: >-
         hassan_v3 の設計書のファイルと節。プロトタイプ (docs/prototype/) は設計入力であって仕様ではないため、
         プロトタイプだけを根拠に実装しない (該当設計が無ければ S-3 で設計差し戻しの判定対象になる)。
-      placeholder: "docs/design/api/themes.md §3.2"
+      placeholder: "docs/design/API/themes.md §3.2"
     validations:
       required: false
 

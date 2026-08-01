@@ -21,7 +21,7 @@
 | **対象外** | **会話型アイデア創出 (アイデア発散)** の API — 会話セッション・SSE 4 ターン・9 custom tools・企画書生成 | 別途「会話型アイデア創出の API 設計」として起草する。本ディレクトリには置かない |
 | **対象** | 認証・アカウント基盤の API (サインイン・サインアップ・パスワードリセット・MFA・メンバー管理・会社情報 + **アカウント手動ロック / 解除** + 社内管理者経路) | [auth-accounts.md](auth-accounts.md) (**2026-07-31 追加**。ユーザー決定 2026-07-30 = [settings.md](settings.md) §4 の **D-ST-1'** により v3 で実装する)。移植対象の一覧は [settings.md](settings.md) §5、認証・認可の規約は [../auth.md](../auth.md) |
 
-> **§1・§2 の共通規約は上表の 6 ドメイン (73 本) を対象に書かれている**。
+> **§1・§2 の共通規約は上表の 6 ドメインを対象に書かれている** (本数は §3 の総覧が正 — DR-9)。
 > [auth-accounts.md](auth-accounts.md) は同じ規約に載るが、**認証系であるがゆえの差分 3 点**を持つ:
 > ①**公開エンドポイント 6 本がある** (§2.1 の「本ディレクトリに公開エンドポイントは無い」の例外)
 > ②**資格情報エラーの 401 に `CodedError` 本文を持つ** (§2.5 の「401 は本文なし」の例外)
@@ -323,10 +323,10 @@ X-Token: <JWT>
 
 ## 3. エンドポイント総覧
 
-**合計 110 エンドポイント** = 下表の 6 ドメイン **73 本** + 認証・アカウント基盤
+**合計 116 エンドポイント** = 下表の 6 ドメイン **79 本** + 認証・アカウント基盤
 [auth-accounts.md](auth-accounts.md) の **37 本** (同書 §2)。
 
-> **§1・§2 の共通規約が対象にするのは 6 ドメインの 73 本**である (§0 の注)。
+> **§1・§2 の共通規約が対象にするのは 6 ドメインの 79 本**である (§0 の注)。
 > 認証・アカウント基盤は D-ST-1' (2026-07-30) により v3 が実装し、
 > **入出力仕様は [auth-accounts.md](auth-accounts.md) で確定した** (2026-07-31。plan.md の **Task-3i**)。
 > 工数・依存の見積りでは 37 本を必ず加算すること。
@@ -334,14 +334,14 @@ X-Token: <JWT>
 | ドメイン | ファイル | 数 | LLM | SSE | 403 |
 |---|---|---|---|---|---|
 | テーマ管理 | [themes.md](themes.md) | 9 | 0 | 0 | 0 |
-| アセット管理 | [assets.md](assets.md) | 17 | 1 | 1 | 0 |
+| アセット管理 | [assets.md](assets.md) | **22** | 1 | 1 | 0 |
 | ナレッジ (RAG チャット) | [knowledge.md](knowledge.md) | 15 | **2** | 1 | 0 |
-| アイデアボード + アイデア参照 | [idea-boards.md](idea-boards.md) | 21 | 0 | 0 | **8** |
+| アイデアボード + アイデア参照 | [idea-boards.md](idea-boards.md) | **22** | 0 | 0 | **8** |
 | お知らせ | [news.md](news.md) | 5 | 0 | 0 | 0 |
 | 設定 | [settings.md](settings.md) | 6 | 0 | 0 | **3** |
-| **小計 (6 ドメイン)** | — | **73** | **3** | **2** | **11** |
+| **小計 (6 ドメイン)** | — | **79** | **3** | **2** | **11** |
 | 認証・アカウント基盤 | [auth-accounts.md](auth-accounts.md) | **37** | 0 | 0 | **10** |
-| **合計** | — | **110** | **3** | **2** | **21** |
+| **合計** | — | **116** | **3** | **2** | **21** |
 
 LLM 3 本 = `POST /asset-extractions` / `POST /knowledge-threads/{thread_id}/messages` /
 `POST /knowledge-files` (埋め込み生成)。**O-2 の計測対象はこの 3 本** (§4 の O-2 行)。
@@ -386,6 +386,11 @@ LLM 3 本 = `POST /asset-extractions` / `POST /knowledge-threads/{thread_id}/mes
 | GET | `/assets/{asset_id}/documents` | 添付資料一覧 | 個人 / 契約 (増分 2) | 1 |
 | POST | `/assets/{asset_id}/documents` | 添付資料追加 (multipart) | 個人 | 1 |
 | DELETE | `/assets/{asset_id}/documents/{document_id}` | 添付資料削除 | 個人 | 1 |
+| POST | `/assets/bulk` | 複数アセットの一括作成 (C-16) | 個人 | 1 |
+| DELETE | `/assets/bulk` | 一括削除 (論理削除。C-16) | 個人 | 1 |
+| POST | `/asset-imports` | CSV 一括取り込み (v2 の `POST /assets/upload` の後継。C-16) | 個人 | 1 |
+| GET | `/asset-imports/{import_id}` | 取り込みの状態・結果取得 | 個人 | 1 |
+| GET | `/assets/recent` | 最近使ったアセット (C-16) | 個人 / 契約 (増分 2) | 1 |
 
 ### 3.3 ナレッジ → [knowledge.md](knowledge.md)
 
@@ -432,6 +437,7 @@ LLM 3 本 = `POST /asset-extractions` / `POST /knowledge-threads/{thread_id}/mes
 | GET | `/ideas` | アイデア一覧 (参照専用) | 個人 / 契約 (増分 2) | 1 |
 | GET | `/ideas/{idea_id}` | アイデア取得 (参照専用) | 個人 / 契約 (増分 2) | 1 |
 | PUT | `/ideas/{idea_id}/star` | スター評価更新 | 個人 | 1 |
+| GET | `/ideas/csv` | アイデア一覧の CSV エクスポート (C-16。絞り込みは `GET /ideas` と同一 — [idea-boards.md](idea-boards.md) §2.4) | 個人 / 契約 (増分 2) | 1 |
 
 ### 3.5 お知らせ → [news.md](news.md)
 

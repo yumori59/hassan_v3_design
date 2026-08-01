@@ -11,6 +11,9 @@
 #   ① settings.md §5 の移植チェックリストの行数 == auth-accounts.md §2.6 の対応表の行数
 #   ② auth-accounts.md §2 のエンドポイント実数 == 同書と README.md §3 に書かれた値
 #   ③ README.md §3 の総覧の合計値 == 6 ドメインの内訳 + 認証・アカウント基盤
+#   ④ 各ドメインファイルのエンドポイント実数 == README §3 総覧表の行・§3.1〜§3.6 の明細行数・
+#     小計行・「共通規約が対象にするのは N 本」(2026-08-01 追加 — 総覧表の三重不整合
+#     (個別値の合計 78 ↔ 小計 73 ↔ 明細 17 行) が①〜③をすり抜けたため)
 #
 # 使い方: bash scripts/check-endpoint-mapping.sh
 # 終了コード: 不一致があれば 1
@@ -105,7 +108,32 @@ else
   errors=$((errors + 1))
 fi
 
+# ── ④ 6 ドメイン: ファイル実測 == 総覧表の行 == §3.x の明細行数 (2026-08-01 追加) ──
+dom_subtotal=0
+i=0
+for f in themes assets knowledge idea-boards news settings; do
+  i=$((i + 1))
+  file="docs/design/API/$f.md"
+  # ドメインファイルのエンドポイント表の実測 (行頭が「| GET | 」等)
+  actual=$(grep -cE '^\| (GET|POST|PUT|DELETE|PATCH) \| ' "$file")
+  dom_subtotal=$((dom_subtotal + actual))
+  # README 総覧表の該当行 (2 列目のファイルリンクで特定) の本数列
+  row=$(grep -E "^\|[^|]*\| \[$f\.md\]" "$RM" | head -1 | awk -F'|' '{print $4}' | grep -oE '[0-9]+')
+  expect "$f.md のエンドポイント実数 == README §3 総覧表の本数" "$actual" "$row" "④"
+  # README §3.$i の明細の行数
+  next=$((i + 1))
+  sec_rows=$(awk "/^### 3\\.$i /,/^### 3\\.$next |^## 4/" "$RM" | grep -cE '^\| (GET|POST|PUT|DELETE|PATCH) \| ')
+  expect "$f.md のエンドポイント実数 == README §3.$i の明細行数" "$actual" "$sec_rows" "④"
+done
+# 小計行 (「| **小計 (6 ドメイン)** | — | **79** | …」)
+rm_subtotal=$(grep -E '^\| \*\*小計' "$RM" | head -1 | awk -F'|' '{print $4}' | grep -oE '[0-9]+')
+expect "6 ドメイン実測の合計 == README §3 の小計行" "$dom_subtotal" "$rm_subtotal" "④"
+# 冒頭の「6 ドメイン N 本」と注の「共通規約が対象にするのは 6 ドメインの N 本」
+expect "6 ドメイン実測の合計 == README §3 冒頭の「6 ドメイン N 本」" "$dom_subtotal" "$rm_domains" "④"
+rm_kyotsu=$(grep -oE '共通規約が対象にするのは 6 ドメインの ?\*{0,2}[0-9]+ ?\*{0,2}本' "$RM" | head -1 | grep -oE '[0-9]+' | tail -1)
+expect "6 ドメイン実測の合計 == README §3 注の共通規約対象本数" "$dom_subtotal" "$rm_kyotsu" "④"
+
 # ── 結果 ────────────────────────────────────────
-echo "[endpoint-mapping] 実測: auth-accounts.md $aa_eps 本 / settings.md §5 $st_rows 行"
+echo "[endpoint-mapping] 実測: auth-accounts.md $aa_eps 本 / 6 ドメイン $dom_subtotal 本 / settings.md §5 $st_rows 行"
 echo "[endpoint-mapping] 照合 $checked 件 / エラー $errors 件"
 [[ "$errors" -eq 0 ]] || exit 1

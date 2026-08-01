@@ -763,7 +763,7 @@ type StreamState =
 | `/idea-boards` | `(app)` | アイデアボード 一覧 | `GET /idea-boards` | **[API]** | 1 |
 | `/idea-boards/[boardId]` | `(app)` | ボード詳細 (フェーズ別カンバン・コメント) | `/idea-boards/{board_id}/items` 系 | **[API]** (ロール別の 403 は §9) | 1 |
 | `/idea-boards/phases` | `(app)` | フェーズマスタ管理 | `/idea-board-phases` 系 4 本 | **[API]** | 1 |
-| `/ideas` | `(app)` | アイデア一覧 (参照専用・スター) | `GET /ideas` `PUT /ideas/{idea_id}/star` | **[API]** | 1 |
+| `/ideas` | `(app)` | アイデア一覧 (参照専用・スター) + **CSV エクスポートボタン** (2026-08-01 に R-12 で追加 — v2 は発散画面に置いていたが、v3 は一覧の絞り込み結果を出す形のため本画面に置く) | `GET /ideas` `PUT /ideas/{idea_id}/star` `GET /ideas/csv` ([API/idea-boards.md](API/idea-boards.md) §2.4) | **[API]** | 1 |
 | `/ideas/[ideaId]` | `(app)` | アイデア詳細 | `GET /ideas/{idea_id}` | **[API]** | 1 |
 | `/assets` | `(app)` | アセット一覧 + フォルダツリー | `/assets` `/asset-folders` 系 | **[API]** | 1 |
 | `/assets/[assetId]` | `(app)` | アセット詳細 (スペック・機能ツリー・添付) | `/assets/{asset_id}` 系 | **[API]** | 1 |

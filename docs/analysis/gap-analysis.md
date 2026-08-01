@@ -1,5 +1,7 @@
 # ギャップ分析: PoC → 本番 (v3)
 
+> **v2 の搭載機能の全件台帳は [v2-feature-inventory.md](v2-feature-inventory.md)** (全 132 ルート × v3 の対応先。C-16 の照合の入力)。本書はギャップの分析、同書は**引き継ぎ漏れの検出**を担う。
+
 > PoC ([poc-inventory.md](poc-inventory.md)) と本番既存システム (hassan-v2-backend / hassan-v2-frontend) の
 > 差分を、**本番化で埋めなければならない穴**として整理する。設計判断は [architecture.md](../design/architecture.md)、
 > 必須観点の ID は `.claude/rules/08-production-gates.md`。

@@ -415,7 +415,7 @@ frontend リポ (型生成 / Vercel)
 | A-1〜A-7 | 認証・テナント境界はアプリ層の設計であり、インフラ構成では表現しない (**A-4 の所有者絞り込みを Postgres RLS で担保する案は既に却下されている** — [design_memo.md](design_memo.md) の「テナント境界」) | [auth.md](auth.md) |
 | O-2 / O-4 / O-6 | LLM 計測・失敗の分類・監査ログはアプリ層の実装。インフラは §3.5 の受け皿を用意するのみ | [observability.md](observability.md) |
 | D-2 CI ゲート | infra リポの CI ゲートは [../../templates/infra-repo/.github/workflows/ci.yml](../../templates/infra-repo/.github/workflows/ci.yml) (fmt / validate / tflint / plan) と [../../templates/shared/.claude/rules/01-construction-loop.md](../../templates/shared/.claude/rules/01-construction-loop.md) §1.3 が定める。本書で重複定義しない | 同ファイル群 / [architecture.md](architecture.md) D-2 |
-| D-4 マイグレーション | **実行経路 (ネットワーク到達性) は INF-H で回答**。**方式 (psqldef / golang-migrate) の選定と適用タイミングは未確定** | [architecture.md](architecture.md) D-4 / [../../templates/shared/.claude/rules/04-human-checkpoints.md](../../templates/shared/.claude/rules/04-human-checkpoints.md) §2.2 |
+| D-4 マイグレーション | **実行経路 (ネットワーク到達性) は INF-H で回答**。**方式は psqldef で確定** (2026-07-31。SSOT は [data-model.md](data-model.md) §6.1)。適用タイミング・承認は [operations.md](operations.md) §7.4 | [architecture.md](architecture.md) D-4 / [../../templates/shared/.claude/rules/04-human-checkpoints.md](../../templates/shared/.claude/rules/04-human-checkpoints.md) §2.2 |
 | D-6 Agent ライフサイクル | Agent / Environment は AWS リソースではない。**インフラ側の関与は「Agent ID と Environment ID を SSM に版付きで置く」ことのみ** (INF-G / §3.4 / X-4) | [architecture.md](architecture.md) D-6 / [operations.md](operations.md) §5.2 (発行・再発行トリガ・Environment の分離) / `deploy.yml` の `apply_agent` |
 | D-7 段階リリース | **構築順序 (§6) とリソース面の切替手段 (§9.2) は回答**。機能単位の切替順序・v2 併用期間の運用は対象外 | [architecture.md](architecture.md) D-7 / 移行計画 |
 

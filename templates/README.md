@@ -45,7 +45,9 @@ cp    .claude/rules/feedback_review_patterns.md <impl-repo>/.claude/rules/
    チェックリストどおり実施する — ブランチ保護 (必須レビュー + 必須 CI チェック + force push 禁止)・
    environment (dev / prod 系) の承認者・ラベル (`needs-human` / `blocked-by-design`) の作成。
    **これが済むまで H-1 (マージ) 〜 H-4 (本番デプロイ) の承認は機構で担保されない**
-5. hassan_v3 の `docs/design/` と `aidlc-docs/inception/<feature>/plan.md` を実装の入力にする
+5. hassan_v3 の `docs/design/` と `aidlc-docs/inception/<feature>/plan.md` を実装の入力にする。
+   **設計書は `docs/design/README.md` (索引) から入る** — 18 ファイル・約 12,000 行あり、
+   タスク種別ごとに読む範囲が決まっている (索引が「読まなくてよい節」も示す)
 
 ## リポジトリ間の依存 (立ち上げ順序)
 
