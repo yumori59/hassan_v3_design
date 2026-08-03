@@ -26,7 +26,10 @@ model: sonnet
 
 ## 必読 (作業前に確認)
 
-- `CLAUDE.md` — 構成・検証ゲート・DB 変更フロー・Managed Agent 運用
+- `CLAUDE.md` — 構成・コマンド・検証ゲート
+- **`.claude/rules/05-architecture-coding-rules.md`** — 層の責務・依存規則 L-1〜L-6・エラー契約・
+  設定値の SSOT・Managed Agent 運用・LLM の使い分け・DB 変更フロー (本エージェントの §「層の責務」
+  「Managed Agent 変更時の必須手順」は要点の再掲。詳細と理由はこのファイルが正)
 - **`.claude/skills/implementing-robustly/SKILL.md`** — 着手前の影響半径測定 (全参照 grep・
   永続データ契約・知識重複) と完了前セルフレビュー。**最初のコードを書く前に読み、手順①〜⑤に従う**
 - `.claude/rules/feedback_review_patterns.md` — BE パターン**全件**を実装前に一読

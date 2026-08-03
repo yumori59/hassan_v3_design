@@ -2,7 +2,7 @@
 
 設計リポ hassan_v3 の `docs/design/architecture.md` §3 を、実装リポジトリのディレクトリとして写したもの。
 **決定の正は設計リポ側**であり、本ファイルは「どこに何を置くか」の索引に徹する
-(責務・禁止事項・依存規則の本文は `CLAUDE.md` に持たせてある。同じ表を二重に持たない)。
+(責務・禁止事項・依存規則の本文は `.claude/rules/05-architecture-coding-rules.md` に持たせてある。同じ表を二重に持たない)。
 
 - 空ディレクトリは `.gitkeep` で保持している。**最初のファイルを置いたら `.gitkeep` を消す**
 - `<module-path>` は `go.mod` の module path に読み替える
@@ -20,7 +20,8 @@
 ├── CLAUDE.md.tmpl              立ち上げ時に CLAUDE.md へリネーム (§1.2)
 ├── .claude/                    Claude Code 運用ルール一式 (§1.2)
 │   ├── agents/                 go-developer.md (実装) / code-reviewer.md (レビュー)
-│   ├── rules/                  shared/ からコピーして合流 (01〜04 + feedback_review_patterns.md)
+│   ├── rules/                  05-architecture-coding-rules.md (雛形あり・backend 固有) + shared/ から
+│   │                           コピーして合流 (01〜04 + feedback_review_patterns.md)
 │   └── skills/                 shared/ からコピーして合流 (implementing-robustly / test-driven-development)
 ├── common/                     ドメインを持たない技術基盤 (層規約 L-1〜L-6 の対象外。§1.1)
 │   ├── router/                 ルート登録と認証ミドルウェアの適用 (v2 踏襲)
@@ -50,14 +51,15 @@
 └── .github/                    workflows (ci / deploy / rollback) と issue / PR テンプレート
 ```
 
-### 1.1 `common/` を作った理由 (雛形固有の整理。設計の決定は変えていない)
+### 1.1 `common/` の位置づけ (決定の正: `architecture.md` §3.5.1)
 
-`docs/design/architecture.md` §3.5.1 は **layer-first** (`controller/` `usecase/<domain>/` …を最上位に置く)
+`docs/design/architecture.md` §3.5.1 が **layer-first** (`controller/` `usecase/<domain>/` …を最上位に置く)
 を採用し、**domain-first** (`<domain>/{controller,usecase,...}` の feature フォルダ) を却下案としている
-(v2 の既存構造と揃わなくなり、移植コードとの二重構造になるため)。**この決定は変えていない** —
+(v2 の既存構造と揃わなくなり、移植コードとの二重構造になるため)。**この決定は変わっていない** —
 `usecase/` `service/` `repository/` `entity/` `gateway/` `controller/` は引き続き最上位にある。
 
-`common/` は**その決定とは別軸の整理**である。`router/` `auth/` `logger/` `constants/` `config/` `di/` は
+**技術基盤 6 パッケージを `common/` 配下に置くことも同 §3.5.1 の決定である** (却下案とその理由も同節)。
+`router/` `auth/` `logger/` `constants/` `config/` `di/` は
 **layer-first/domain-first のどちらの分類にも属さない技術基盤**であり (4 層 + entity + gateway の
 どの層にも当てはまらず、L-1〜L-6 の依存規則の対象にもならない)、ルート直下に 6 つ並ぶとリポジトリ直下が
 層構成とそれ以外の混在で見通しにくくなる。**技術基盤を 1 段掘って集約しただけ**で、以下は変わらない:
@@ -70,19 +72,24 @@
   ①の走査対象 (`usecase/` `service/` `repository/` の**2 段目**ディレクトリ名) とは別物 — 影響しない
   (同ファイルの注記を参照)
 
-### 1.2 `.claude/` の配置 (雛形は `agents/` のみ。`rules/` `skills/` は立ち上げ時に合流)
+### 1.2 `.claude/` の配置 (雛形は `agents/` + backend 固有の `rules/05-architecture-coding-rules.md`。
+共通 `rules/` `skills/` は立ち上げ時に合流)
 
 **決定と立ち上げ手順の正は [`../README.md`](../README.md)** (本節は概要のみ。二重管理しない)。
 
 - **`aidlc-planner` / `architecture-designer` / `design-reviewer` / `poc-analyst` は設計リポ (hassan_v3) 側に残す** —
   実装リポには持ってこない (設計判断は hassan_v3 で行う。役割分離は `.claude/rules/02-agents.md` と同じ理由)
-- 本テンプレートが持つのは **実装リポ固有のエージェント** (`go-developer.md` / `code-reviewer.md`) だけ。
+- 本テンプレートが持つのは **実装リポ固有のエージェント** (`go-developer.md` / `code-reviewer.md`) と
+  **backend 固有の `rules/05-architecture-coding-rules.md`** (層の責務・依存規則 L-1〜L-6・エラー契約・
+  Managed Agent 運用・DB 変更フロー。frontend / infra には無い。旧 `CLAUDE.md` の埋め込み節を切り出した)。
   **3 リポ (backend / frontend / infra) で共通の rules・skills は `templates/shared/.claude/` にあり**、
   立ち上げ時に `.claude/rules/` `.claude/skills/` へコピーして合流させる
   (`cp -R templates/shared/.claude/{rules,skills} <impl-repo>/.claude/`)
-- **`.claude/rules/feedback_review_patterns.md` は設計リポから直接コピーする** (`shared/` 経由ではない) —
-  設計リポ側の更新 (新しい BE/FE パターンの追記) が実装リポへ伝わる唯一の経路なので、
-  コピー元を取り違えると更新が反映されなくなる
+- **`.claude/rules/feedback_review_patterns.md` は `templates/shared/.claude/rules/` 経由でコピーする**
+  (他の共通 rules と同じ `cp -R` に含まれる)。**SSOT は設計リポ直下の `.claude/rules/feedback_review_patterns.md`**
+  であり、`templates/shared/` 側はその同期コピー — 設計リポ側で更新したら
+  `cp .claude/rules/feedback_review_patterns.md templates/shared/.claude/rules/` を同じ差分で実行し、
+  同期を怠らないこと (`templates/README.md` が正)
 - `.claude/settings.json` (エージェントの自律範囲) は雛形に置いていない — **立ち上げ時に作る**
   (許可 / 拒否の初期値は `shared/.claude/rules/04-human-checkpoints.md` §3.2 が正)
 

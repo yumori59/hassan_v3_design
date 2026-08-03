@@ -6,7 +6,7 @@ hassan_v3 で確定した設計を**実装するリポジトリ**を立ち上げ
 ```
 templates/
   shared/.claude/skills/     3 リポで共通の skill (実装の思考ステップ・TDD)
-  shared/.claude/rules/      3 リポで共通の運用ルール (作業ループ / issue 粒度 / モデル運用 / 人間承認点)
+  shared/.claude/rules/      3 リポで共通の運用ルール (作業ループ / issue 粒度 / モデル運用 / 人間承認点 / 頻出バグパターン)
   backend-repo/              Go / gin / 4 層 + entity / gateway の計 6 パッケージ層 / sqlc / wire / Managed Agents
   frontend-repo/             Next.js on Vercel / OpenAPI 生成型
   infra-repo/                Terraform (AWS: ECS / RDS / VPC / IAM / Secrets)
@@ -15,7 +15,11 @@ templates/
 `aidlc-planner` / `design-reviewer` / `poc-analyst` / `architecture-designer` と rules 01〜08 は
 **設計リポ (hassan_v3) 側に残す**。実装リポには実装・レビューに必要なものだけを持っていく。
 ただし `.claude/rules/feedback_review_patterns.md` は**各実装リポにもコピーする**
-(BE/FE パターンは実装時のチェックリストとして機能する)。
+(BE/FE パターンは実装時のチェックリストとして機能する)。**SSOT は設計リポ直下の
+`.claude/rules/feedback_review_patterns.md`** — `templates/shared/.claude/rules/feedback_review_patterns.md`
+はその同期コピー。**設計リポ側で本ファイルを更新したら、同じ差分で `templates/shared/` 側にも
+`cp .claude/rules/feedback_review_patterns.md templates/shared/.claude/rules/` を実行し追随させる**
+(忘れると shared 経由で立ち上げた実装リポが古いパターンのままになる)。
 
 ## 立ち上げ手順 (各リポジトリ共通)
 
@@ -26,8 +30,8 @@ cp -R templates/$R/scripts            <impl-repo>/
 cp -R templates/$R/.github            <impl-repo>/       # ci.yml / deploy.yml / ISSUE_TEMPLATE / pull_request_template.md
 cp    templates/$R/CLAUDE.md.tmpl     <impl-repo>/CLAUDE.md
 cp -R templates/shared/.claude/skills <impl-repo>/.claude/
-cp -R templates/shared/.claude/rules  <impl-repo>/.claude/   # 作業ループ (01) / issue 粒度 (02) / モデル運用 (03) / 人間承認点 (04)
-cp    .claude/rules/feedback_review_patterns.md <impl-repo>/.claude/rules/
+cp -R templates/shared/.claude/rules  <impl-repo>/.claude/
+  # 作業ループ (01) / issue 粒度 (02) / モデル運用 (03) / 人間承認点 (04) / 頻出バグパターン (feedback_review_patterns.md)
 ```
 
 1. `CLAUDE.md` の `<...>` プレースホルダを実際の構成 (モジュール名・コマンド・ディレクトリ) で埋める。

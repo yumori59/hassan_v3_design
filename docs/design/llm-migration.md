@@ -121,7 +121,7 @@ Dify YAML 内のモデル (GPT-4o 系) は**見直しの対象ではない** —
 
 > 本節が回答する ID: **A-6** (Agent 数を減らすことが越境面を減らす) / 対応 AC: **AC-3.8** (1 要素目の前提)
 
-**[templates/backend-repo/CLAUDE.md.tmpl](../../templates/backend-repo/CLAUDE.md.tmpl) の「LLM の使い分け」表と
+**[templates/backend-repo/.claude/rules/05-architecture-coding-rules.md](../../templates/backend-repo/.claude/rules/05-architecture-coding-rules.md) の「LLM の使い分け」表と
 [architecture.md](architecture.md) の D-B' が判定線の SSOT**。本節はそれを**適用手順に具体化するだけ**で、
 判定線を変えない。
 
