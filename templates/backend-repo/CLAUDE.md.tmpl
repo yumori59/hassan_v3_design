@@ -35,13 +35,9 @@ lint も CI で機械強制される。
 
 **層の責務・依存規則 (L-1〜L-6)・エラー契約・設定値の SSOT・Managed Agent 運用・LLM の使い分け・
 DB 変更フローは `.claude/rules/05-architecture-coding-rules.md` に集約した** — 実装前に必ず読む
-(決定の正は設計リポの `docs/design/architecture.md` §3)。
-
-要点だけ: Clean Architecture 4 層 (Controller → UseCase → Service → Repository) +
-`entity/` (副作用のない計算) + `gateway/` (外部システムのアダプタ) の計 6 パッケージ層。
-依存規則 L-1〜L-6 は `.golangci.yml` の depguard で機械強制 (**適用範囲は v3 新規ドメインのみ**。
-v2 移植分は v2 の 3 層規約を維持)。LLM / エージェント層は Anthropic Managed Agents (PoC 方式)。
-**Dify は使わない** (廃止決定)。
+(決定の正は設計リポの `docs/design/architecture.md` §3)。**依存方向は `rules/05` の図が正
+(直列ではない — `repository` / `gateway` は IF を満たす側)**。
+ディレクトリ構成の索引は [`STRUCTURE.md`](STRUCTURE.md) を参照。
 
 ## Claude Code 運用ルール
 
@@ -54,7 +50,7 @@ v2 移植分は v2 の 3 層規約を維持)。LLM / エージェント層は An
 | `.claude/rules/05-architecture-coding-rules.md` | **層の責務・依存規則 L-1〜L-6・エラー契約・Managed Agent 運用・DB 変更フロー (backend 固有)** |
 | `.claude/agents/go-developer.md` | Go 実装エージェント |
 | `.claude/agents/code-reviewer.md` | 実装レビュー (本番基準) |
-| `.claude/rules/feedback_review_patterns.md` | 頻出バグパターン (SSOT。設計リポと還流) |
+| `.claude/rules/feedback_review_patterns.md` | 頻出バグパターン (設計リポの同期コピー。新パターンは設計リポへ還流する) |
 | `.claude/skills/implementing-robustly/` | 着手前の影響半径測定・完了前セルフレビュー |
 | `.claude/skills/test-driven-development/` | Red→Green の進め方 |
 

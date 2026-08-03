@@ -45,6 +45,15 @@ if [[ -n "$tables_staged" ]]; then
   fi
 fi
 
+sync_staged=$(echo "$staged" | grep -E '^(\.claude/rules/feedback_review_patterns\.md|templates/shared/\.claude/rules/feedback_review_patterns\.md)$' || true)
+if [[ -n "$sync_staged" ]]; then
+  echo "[pre-commit] check-template-sync (同期コピーの整合)"
+  if ! bash scripts/check-template-sync.sh; then
+    echo "[pre-commit] FAIL: templates/shared/ の同期コピーが SSOT とずれています — 出力の再同期コマンドを実行してください" >&2
+    exit 1
+  fi
+fi
+
 if [[ -n "$sh_staged" ]]; then
   echo "[pre-commit] bash -n (staged シェルスクリプト)"
   while IFS= read -r f; do

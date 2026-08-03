@@ -59,7 +59,7 @@ LLM 応答の表示は必須のレビュー観点です。
 
 ### 7. 頻出パターン
 
-**`.claude/rules/feedback_review_patterns.md` (SSOT) の FE パターン全件**を、
+**`.claude/rules/feedback_review_patterns.md` (設計リポの同期コピー) の FE パターン全件**を、
 変更が触れる箇所について確認する。新たに再発したバグは SSOT へ 1 行追記する。
 
 ### 8. 設計との整合

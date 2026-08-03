@@ -64,7 +64,7 @@ terraform fmt -check -recursive → terraform validate → <tflint> → terrafor
 | `.claude/rules/04-human-checkpoints.md` | 人間承認点 (H-1〜H-5) と機構・自律範囲 |
 | `.claude/agents/infra-engineer.md` | Terraform 実装エージェント (実装専任) |
 | `.claude/agents/infra-reviewer.md` | Terraform レビュー専任 (state 破壊・IAM・シークレット・公開範囲・コスト) |
-| `.claude/rules/feedback_review_patterns.md` | 頻出バグパターン (SSOT。設計リポと還流) |
+| `.claude/rules/feedback_review_patterns.md` | 頻出バグパターン (設計リポの同期コピー。新パターンは設計リポへ還流する) |
 | `.claude/skills/implementing-robustly/` | 着手前の影響半径測定・完了前セルフレビュー |
 | `.claude/skills/test-driven-development/` | Red→Green の進め方 (infra の読み替えは rules 01 §2.4) |
 

@@ -18,6 +18,13 @@ model: opus
 
 呼び出し元から範囲が渡されればそれを使う。なければ `git diff main...HEAD --stat` / `git diff --stat` から確定する。
 
+## 必読 (レビュー前に確認)
+
+**`.claude/rules/05-architecture-coding-rules.md`** — 層の責務・依存規則 L-1〜L-6・エラー契約・
+設定値の SSOT・Managed Agent 運用・LLM の使い分け・DB 変更フロー。**以下の §1 (層の責務と依存方向)・
+§6 (DB 変更) は要点の再掲。詳細と理由・最新の規則はこのファイルが正** — 実装が規約を更新しても
+本エージェント定義側の要約が古いままだと、レビューが旧基準で通してしまう (DR-8)。
+
 ## レビュー観点
 
 ### 1. 層の責務と依存方向 (4 層 + `entity/` / `gateway/` の計 6 パッケージ層)
@@ -136,7 +143,7 @@ model: opus
 
 ### 5. 頻出バグパターン
 
-**`.claude/rules/feedback_review_patterns.md` (SSOT) をチェックリストとして必ず使う**。
+**`.claude/rules/feedback_review_patterns.md` (設計リポの同期コピー) をチェックリストとして必ず使う**。
 BE / FE の**全パターン**を、変更が触れる箇所について確認する。新たに再発したバグを見つけたら
 レビュー後に SSOT へ 1 行追記する (レビュー結果の還流)。
 

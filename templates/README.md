@@ -17,9 +17,15 @@ templates/
 ただし `.claude/rules/feedback_review_patterns.md` は**各実装リポにもコピーする**
 (BE/FE パターンは実装時のチェックリストとして機能する)。**SSOT は設計リポ直下の
 `.claude/rules/feedback_review_patterns.md`** — `templates/shared/.claude/rules/feedback_review_patterns.md`
-はその同期コピー。**設計リポ側で本ファイルを更新したら、同じ差分で `templates/shared/` 側にも
-`cp .claude/rules/feedback_review_patterns.md templates/shared/.claude/rules/` を実行し追随させる**
+はその同期コピー (冒頭に同期コピーである旨の注記を持つ)。**設計リポ側で本ファイルを更新したら、同じ差分で
+`templates/shared/` 側にも `cp .claude/rules/feedback_review_patterns.md templates/shared/.claude/rules/`
+を実行し追随させる**こと。**`make check-template-sync` (`make check` に含まれる) が乖離を機械検出する**
 (忘れると shared 経由で立ち上げた実装リポが古いパターンのままになる)。
+
+**`shared/.claude/rules/` の番号は 01〜04 のみ**。各実装リポ固有の rules (例: backend の
+`05-architecture-coding-rules.md`) は **05 以降の番号を使い、`shared/` には置かない** —
+`cp -R templates/shared/.claude/rules <impl-repo>/.claude/` は既存の `.claude/rules/` に**マージ**されるため
+(同名ファイルは上書きされる)、`shared/` 側に `05` を追加すると各リポ固有ファイルを静かに壊す。
 
 ## 立ち上げ手順 (各リポジトリ共通)
 

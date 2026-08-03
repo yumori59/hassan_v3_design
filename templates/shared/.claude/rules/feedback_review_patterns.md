@@ -1,3 +1,10 @@
+<!-- SYNCED COPY — 本ファイルは設計リポ hassan_v3 の `.claude/rules/feedback_review_patterns.md` の
+     同期コピー。SSOT はそちら。編集はコピーではなく SSOT に対して行い、同じ差分で
+     `cp .claude/rules/feedback_review_patterns.md templates/shared/.claude/rules/feedback_review_patterns.md`
+     を実行して反映すること (`make check-template-sync` が乖離を検出する)。
+     DR-x は設計リポ専用の観点。実装リポのレビューでは BE-x / FE-x を使う
+     (DR-x が参照する `aidlc-docs/reviews/...` `docs/design/...` `scripts/check-*.sh` は実装リポに存在しない)。 -->
+
 # 頻出バグ・設計欠陥パターン (SSOT)
 
 このファイルが**頻出パターンの単一の正 (Single Source of Truth)**。

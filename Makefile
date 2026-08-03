@@ -1,4 +1,4 @@
-.PHONY: check doc-lint check-traceability check-workflow-shell check-table-counts check-endpoint-mapping install-hooks new-feature help
+.PHONY: check doc-lint check-traceability check-workflow-shell check-table-counts check-endpoint-mapping check-template-sync install-hooks new-feature help
 
 help:
 	@echo "hassan_v3 — 本番化のための設計リポジトリ"
@@ -9,10 +9,11 @@ help:
 	@echo "  make check-workflow-shell  templates のワークフローに埋めた複数行 run の bash 構文検査"
 	@echo "  make check-table-counts data-model.md のテーブル件数と、他文書・CI 期待値への転記の整合"
 	@echo "  make check-endpoint-mapping API 設計のエンドポイント件数・移植チェックリストの対応の整合"
+	@echo "  make check-template-sync templates/ 配下の同期コピー (feedback_review_patterns.md 等) が SSOT と一致するか照合"
 	@echo "  make install-hooks      scripts/hooks/pre-commit を .git/hooks へリンク"
 	@echo "  make new-feature F=<名前>  AIDLC の feature ディレクトリと雛形を作成"
 
-check: doc-lint check-traceability check-workflow-shell check-table-counts check-endpoint-mapping
+check: doc-lint check-traceability check-workflow-shell check-table-counts check-endpoint-mapping check-template-sync
 
 doc-lint:
 	@bash scripts/doc-lint.sh

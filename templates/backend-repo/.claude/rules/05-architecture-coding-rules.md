@@ -5,8 +5,10 @@
 このファイルは **backend リポ固有** (frontend / infra には適用しない。`01`〜`04` と違い
 `templates/shared/` には置かない — Go の層構造に固有の規約のため)。
 
-**決定の正は設計リポ hassan_v3 の `docs/design/architecture.md` §3**。本ファイルは実装リポの
-`CLAUDE.md` から独立させた運用コピーであり、内容は同期させる。次は他の SSOT が持つ (ここに複製しない):
+**決定の正は設計リポ hassan_v3 の `docs/design/architecture.md` §3。本ファイルはその写しであり、
+`architecture.md` §3 が変わったら本ファイルを追随させる**
+(実装リポの `CLAUDE.md` から本文を独立させた節であり、`CLAUDE.md` との対比では正本)。
+次は他の SSOT が持つ (ここに複製しない):
 
 | 事項 | SSOT |
 |---|---|

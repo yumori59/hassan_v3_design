@@ -57,7 +57,7 @@ Wave 順に行う**。並列で 12 点を分担すると衝突する。
 | [API/assets.md](../../../docs/design/API/assets.md) | `:108` (D-AS-10) / `:161-162` | 同上 |
 | [API/knowledge.md](../../../docs/design/API/knowledge.md) | `:161` / `:193` | 同上 |
 | [design_memo.md](../../../docs/design/design_memo.md) | `:145` (反映状況 1.) | 「D-A' は実質反映済み」の記述が本増分で無効化される → 反映状況の更新 (**ユーザーの生メモのため追記のみ・要確認**) |
-| `templates/backend-repo/CLAUDE.md.tmpl` | `:31-45` (アーキテクチャ節) + `:47` (エラー規約) | **雛形は旧定義のまま** — ①`:41` が Service を「複数 UseCase から再利用される処理」と定義 (C-L3 で差し替え済みの旧定義) ②`:45` の禁止依存に **`service`→`service` (L-2) が無い** ③**gateway / entity の行が無い** ④`:34` の図が `Controller → UseCase → Service → Repository → DB` の直列 ⑤`:47` が「`fmt.Errorf` 禁止」= v2 の全面禁止方式 (Q-L1=B で層境界のみに変更)。**実装リポ立ち上げ時にこの雛形がコピーされるため、放置すると旧規約が実装リポの正になる** |
+| `templates/backend-repo/.claude/rules/05-architecture-coding-rules.md` (旧 `CLAUDE.md.tmpl:31-45` + `:47`) | **実施済み (2026-08-03)** — 層説明・エラー規約は本増分どおりに反映済み。**2026-08-03 に `CLAUDE.md.tmpl` から `.claude/rules/05-architecture-coding-rules.md` へ本文を切り出した** (`CLAUDE.md.tmpl` は要点 + 参照ポインタのみに圧縮)。旧懸念 (Service の旧定義・L-2 の禁止依存欠落・gateway/entity 行の欠落・直列図・`fmt.Errorf` 全面禁止) はいずれも解消済み。**実装リポ立ち上げ時はこのファイルが雛形の実体** |
 | `templates/backend-repo/.github/workflows/ci.yml` | golangci-lint ステップ (**実施後の実測値: `:46-49`**。着手時点では `:41-42`) | **`templates/backend-repo/` に `.golangci*` が存在しない**ため既定ルールのみ = 層規約もサイズも検査されない → `.golangci.yml` を新規追加し (depguard **18 規則** + **`dupl` 150 / `cyclop` 15 / `funlen` 150 行・80 ステートメント**) 参照させる |
 | [plan.md](plan.md) / [requirements.md](requirements.md) | Task-3f / AC-5.1 の行 | 本増分への参照を追記 (AC-5.1 の定義更新の記録) |
 
