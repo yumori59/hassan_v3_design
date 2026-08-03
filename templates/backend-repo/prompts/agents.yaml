@@ -1,0 +1,36 @@
+# agents.yaml — Managed Agent の宣言的な列挙 (雛形)
+#
+# **このファイルが実体の SSOT** (設計リポ hassan_v3 docs/design/llm-migration.md §6.3)。
+# Agent 再発行のトリガは `prompts/` 全体ではなく、**このファイルが列挙したファイル群と
+# tool schema のハッシュ**である (同 operations.md §5.2)。
+# 列挙外のプロンプト (直接 API 用) の変更は、コードのデプロイのみで反映される。
+#
+# 検査: scripts/check-tool-contract.sh が
+#   ① schema ↔ handler ↔ prompt の 3 者一致
+#   ② 発行コマンドが実際に送る prompt / tool の集合と、この列挙の一致
+# を見る。不一致は CI で落ちる。
+#
+# 注意:
+# - Agent の Tools は更新時に**全置換**される (BE-9)。既存ツールを落とさないこと
+# - 列挙を増減したら、設計リポの docs/design/API/conversation.md §3.1 と
+#   docs/design/llm-migration.md §6.3 を同じ PR で更新する
+# - `post_diverge_chat` を列挙しない (orchestrator に統合済み。存在しない Agent の再発行が走る)
+
+agents:
+  # 対話の本体。custom tool の呼び出し判断を行う。呼び出し元は service/conversation.Runner
+  - name: orchestrator
+    system_prompt: prompts/conversation/orchestrator.md
+    # 登録する tool 名は設計リポ docs/design/API/conversation.md §4.1 の表が正
+    # (本ファイルに件数を転記しない)。実装時にその表の tool 名をすべて列挙する。
+    # 空のままだと check-tool-contract.sh が実ハンドラとの不一致で落ちる (無言で緑にしない)。
+    tools: []
+
+  # アイデア発散。generate_ideas の custom tool ハンドラから呼ぶ
+  - name: diverge
+    system_prompt: prompts/idea/diverge.md
+    tools: []
+
+  # 企画書タブの生成。generate_plan の custom tool ハンドラ / タブ再生成 REST から呼ぶ
+  - name: plan
+    system_prompt: prompts/plan/tab.md
+    tools: []

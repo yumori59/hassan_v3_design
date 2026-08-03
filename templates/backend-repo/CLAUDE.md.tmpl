@@ -99,6 +99,22 @@ flowchart TB
 `XxxService` を許すと「とりあえず Service」の受け皿になり、1 ドメインに閉じるという定義が崩れる。
 **ディレクトリ名は `service/` のままでよい** (層としての位置を示すため)。
 
+**DTO と入出力構造体の置き場所**: HTTP のリクエスト/レスポンス構造体 (DTO) は **`controller/dto/`**
+に集約する (v2 踏襲)。**UseCase / Service が使う入出力構造体は DTO ではなく、その UseCase / Service
+自身が定義する** — UseCase は「1 エンドポイント = 1 ファイル」の原則に沿ってファイル内に
+`XxxInput` / `XxxOutput` として置く (v2 実例: `usecase/theme/create_theme.go` の `CreateThemeInput`)。
+Controller のハンドラは DTO を bind した後、この入力型に変換して UseCase を呼ぶ — **DTO を UseCase /
+Service まで持ち込まない** (HTTP のバリデーションタグがビジネスロジックの型に混入するのを防ぐ。
+詳細は雛形リポの `STRUCTURE.md` §1.3)。
+
+**バリデーションの責務分離 (DTO と entity で同じ制約を二重に持たない)**: **DTO (`binding` タグ) は
+HTTP リクエストとして受理可能か** (必須・型・大まかな長さ) だけを見る。**ドメインとして意味を持つ値か**
+(許可された enum 値・複合的な整合性ルール) は **entity のコンストラクタ** (`func NewXxx(...) (Xxx, error)`
+の形。不正な値からはインスタンスを作れない) が唯一の関所になる。**同じ制約を両方に書かない** —
+迷ったら「DTO を消しても entity のコンストラクタだけで同じ不正値を拒否できるか」で判断し、
+できないならドメインルールなので entity 側に書く。**HTTP を経由しない呼び出し元
+(custom tool ハンドラ等) がある処理ほど、DTO 側だけの制約は抜け道になる**。
+
 ### 層配置の判断基準 (上から順に当てはめ、最初に Yes になった層に置く)
 
 | 問い | Yes → |
@@ -113,6 +129,14 @@ flowchart TB
 どれにも当てはまらない処理は責務が混ざっている — 配置を設計し直す。
 **UseCase は「1 エンドポイント = 1 ファイル」**。複数で使うヘルパーは同じ `usecase/<domain>/` 内の
 機能名ファイルへ分離する。
+
+**集約ルート (DDD) を置くとき**: 「集約ルート」という言葉自体は層を決めない — **振る舞いが副作用を
+持つかどうかで上表がそのまま振り分ける**。**不変条件の検証・状態遷移・自分の内部状態だけを見る判定
+(副作用なし) は entity** (v2 実例: `IdeaBoard.CanEdit(accountID)` — 集約ルートが自分のメンバー一覧だけを
+見て判定する純粋なメソッド。この形を増やすのが望ましい)。**永続化・イベント発行・他集約への参照を
+集約ルート自身に持たせる Active Record 的な設計は採らない** (L-1 違反) — その振る舞いは **Service** に
+置く。v3 は「Application Service が集約をロードしてメソッドを呼ぶ」古典的 DDD ではなく、
+**Service 自身が Repository を呼びながら手続き的に業務ロジックを実行する**分業を採る。
 
 ### 依存規則 L-1〜L-6 (CI で depguard により機械強制)
 
@@ -131,8 +155,8 @@ flowchart TB
 | 区分 | 対象パス | 適用する規約 |
 |---|---|---|
 | **v3 新規ドメイン** | `usecase/{theme,asset,conversation,idea,plan}/**`<br>`service/**`<br>`repository/{theme,asset,conversation,idea,plan}/**` | **4 層 + entity + gateway**。L-1〜L-6 を depguard で強制 |
-| **共通層** | `entity/**` / `gateway/**` / `controller/**` / `config/**` | L-1 / L-4 / L-5 を全体に適用 |
-| **配線** | `di/**` (`provider.go` / `wire.go` / `wire_gen.go`) | **どの depguard 規則の対象にもしない** — 全層の具体パッケージを import する唯一の層だから |
+| **共通層** | `entity/**` / `gateway/**` / `controller/**` / `common/config/**` | L-1 / L-4 / L-5 を全体に適用 |
+| **配線** | `common/di/**` (`provider.go` / `wire.go` / `wire_gen.go`) | **どの depguard 規則の対象にもしない** — 全層の具体パッケージを import する唯一の層だから |
 | **v2 移植分** | `usecase/` の上記以外のドメイン (認証・アカウント等) と `repository/*.go` (フラット構成のまま) | **v2 の 3 層規約**。`service/` パッケージを作らない。L-2 / L-5 の強制対象外 |
 
 - **本表に無いパッケージを新設する PR は、本表と `.golangci.yml` と `layering-scopes.yml` への追記を同一 PR に含める**。
@@ -229,8 +253,10 @@ gateway/anthropic/               ← 外部システムのアダプタ層
 
 - **同じ値を Go / FE / `prompts/` の 3 箇所に持たない**。FE が必要とする上限値は **API レスポンスに含めて配る**。
   プロンプトが必要とする値は**テンプレート引数として注入**する (テンプレート内に数値を書かない)
-- 環境で変わる値 (使用モデル・エンドポイント・ログレベル) は env var / Secrets Manager を **`config` が読む**。
-  **他のパッケージが `os.Getenv` を直接呼ぶことを禁止する** (CI 検査対象)
+- 環境で変わる値 (使用モデル・エンドポイント・ログレベル) は **非秘密なら `env/<env>.env`
+  (git 管理・秘密を置かない・イメージに同梱)、秘密なら Secrets Manager (タスク定義の `secrets` 注入)** を
+  **`config` が読む**。**他のパッケージが `os.Getenv` を直接呼ぶことを禁止する** (CI 検査対象)。
+  **`env/<env>.env` のキー集合は `config` の非秘密環境値の定義と CI で照合する** (秘密の混入・未知キーで失敗)
 - 安全弁のしきい値は**再デプロイなしで変更できる形にする**
 
 **③ 監査ログ** — **本処理とは別トランザクションの best-effort** とし、書き込み失敗で本処理を巻き戻さない。
