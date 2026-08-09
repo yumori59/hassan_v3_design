@@ -8,12 +8,12 @@
 - `docs/design/architecture.md` (244 行・全節)
 - `docs/design/observability.md` (217 行・全節)
 - `templates/README.md`
-- `templates/backend-repo/CLAUDE.md.tmpl` / `templates/backend-repo/.github/workflows/ci.yml` /
-  `templates/backend-repo/scripts/hooks/pre-commit` /
-  `templates/backend-repo/.claude/agents/go-developer.md` / `templates/backend-repo/.claude/agents/code-reviewer.md`
-- `templates/frontend-repo/CLAUDE.md.tmpl` / `templates/frontend-repo/.github/workflows/ci.yml` /
-  `templates/frontend-repo/scripts/hooks/pre-commit` /
-  `templates/frontend-repo/.claude/agents/react-developer.md` / `templates/frontend-repo/.claude/agents/frontend-reviewer.md`
+- `templates/app-monorepo/backend/CLAUDE.md.tmpl` / `templates/app-monorepo/.github/workflows/ci.yml` /
+  `templates/app-monorepo/scripts/hooks/pre-commit` /
+  `templates/app-monorepo/backend/.claude/agents/go-developer.md` / `templates/app-monorepo/backend/.claude/agents/code-reviewer.md`
+- `templates/app-monorepo/frontend/CLAUDE.md.tmpl` / `templates/app-monorepo/.github/workflows/ci.yml` /
+  `templates/app-monorepo/scripts/hooks/pre-commit` /
+  `templates/app-monorepo/frontend/.claude/agents/react-developer.md` / `templates/app-monorepo/frontend/.claude/agents/frontend-reviewer.md`
 - `templates/infra-repo/CLAUDE.md.tmpl` / `templates/infra-repo/.github/workflows/ci.yml` /
   `templates/infra-repo/scripts/hooks/pre-commit` / `templates/infra-repo/.claude/agents/infra-engineer.md`
 - `templates/shared/.claude/skills/test-driven-development/SKILL.md` /
@@ -105,9 +105,9 @@ $ bash scripts/doc-lint.sh aidlc-docs/reviews/productionization/review-architect
 
 **該当**: `docs/design/architecture.md:124`-`:126` (補助原則)、`:146`-`:149` (ステップ 12・13・15)、
 `:153`-`:155` (迷いやすい点 1)、`:83` (責務表の Service 禁止事項)。
-雛形側の同趣旨: `templates/backend-repo/CLAUDE.md.tmpl:45`、
-`templates/backend-repo/.claude/agents/go-developer.md:44`、
-`templates/backend-repo/.claude/agents/code-reviewer.md:25`-`:26`。
+雛形側の同趣旨: `templates/app-monorepo/backend/CLAUDE.md.tmpl:45`、
+`templates/app-monorepo/backend/.claude/agents/go-developer.md:44`、
+`templates/app-monorepo/backend/.claude/agents/code-reviewer.md:25`-`:26`。
 
 **矛盾の中身**:
 
@@ -115,7 +115,7 @@ $ bash scripts/doc-lint.sh aidlc-docs/reviews/productionization/review-architect
 |---|---|
 | `architecture.md:124` | 「**Service から UseCase は禁止**」 |
 | `architecture.md:154` | 「採番・一意制約に関わる書き込みは **UseCase 側の関数を呼び出す形にする**」 |
-| `templates/backend-repo/CLAUDE.md.tmpl:45` | 「禁止依存: … **Service→UseCase** …」 |
+| `templates/app-monorepo/backend/CLAUDE.md.tmpl:45` | 「禁止依存: … **Service→UseCase** …」 |
 
 `generate_plan` / `set_theme_name` / `match_functions` は **ツールとしてループ中に呼ばれ**
 (`claude_managed_agents/cmd/devui/conversation.go:616` / `:642` / `:655`)、そこで生成物を保存する。
@@ -160,15 +160,15 @@ vacuum を詰まらせる方が本番リスクが大きい)。
 
 **該当**: `docs/design/architecture.md:182` (A-4「所有者引数の無い単一取得メソッドを **CI で禁止**」)、
 `:198` (D-6「**CI で** schema ↔ handler ↔ prompt の 3 者一致を検査する」)、
-`:194` (D-2 の実現物として `templates/backend-repo/.github/workflows/ci.yml` を指名)。
+`:194` (D-2 の実現物として `templates/app-monorepo/.github/workflows/ci.yml` を指名)。
 `docs/design/auth.md:450` / `:491` も CI 検査をマージ条件に含めると規定 (別レビュー範囲だが
 `architecture.md` §5 が参照している)。
 
-**雛形の実態** (`templates/backend-repo/.github/workflows/ci.yml` 全 64 行):
+**雛形の実態** (`templates/app-monorepo/.github/workflows/ci.yml` 全 64 行):
 `go build` / `go vet` / `golangci-lint` / `go test` / 生成物差分 / OpenAPI 差分の **6 ステップのみ**。
-上記 3 検査はいずれも無い。`templates/backend-repo/scripts/hooks/pre-commit:57`-`:64` の
+上記 3 検査はいずれも無い。`templates/app-monorepo/scripts/hooks/pre-commit:57`-`:64` の
 Agent 関連は `echo` による注意喚起だけで**非ブロック**。人手の観点として
-`templates/backend-repo/.claude/agents/code-reviewer.md:49`-`:50` に残っているのみ。
+`templates/app-monorepo/backend/.claude/agents/code-reviewer.md:49`-`:50` に残っているのみ。
 
 **裏取り**: AC-3.3 (「Managed Agent の発行・更新がデプロイ手順に組み込まれている / コードだけ先行して
 デプロイされない仕組みがある」) を参照している成果物は
@@ -184,7 +184,7 @@ Agent 関連は `echo` による注意喚起だけで**非ブロック**。人�
 
 **修正案**:
 
-1. `templates/backend-repo/.github/workflows/ci.yml` に 3 ジョブを追加する:
+1. `templates/app-monorepo/.github/workflows/ci.yml` に 3 ジョブを追加する:
    - **agent-consistency**: `prompts/*.md` のツール説明・tool schema (JSON)・Go handler のパースキーを
      突き合わせ、不一致で `exit 1`。実装は Go の小さな `tools/agentcheck` として雛形に骨格を置く
      (schema を単一ソースから生成する構成なら「生成物差分チェック」に統合してもよい)
@@ -192,7 +192,7 @@ Agent 関連は `echo` による注意喚起だけで**非ブロック**。人�
      (`AccountID` / `ContractID` 型) を持たない `Get*ByID` / `List*` を検出して `exit 1`
    - **route-auth**: router 登録の全パスが認証ミドルウェアを通ることを検査 (許可リストは
      `/alive` 等に限定し、リストの変更は PR で目に見えるようにする)
-2. `templates/backend-repo/.github/workflows/deploy.yml` を追加し、**Agent 発行/更新ステップを
+2. `templates/app-monorepo/.github/workflows/deploy-backend.yml` を追加し、**Agent 発行/更新ステップを
    イメージデプロイの前段に置く** (`prompts/` または schema に差分がある場合のみ実行し、失敗したら
    デプロイを止める)。
 3. `architecture.md` §5 の D-6 を「**部分** (方針のみ。手順は `docs/design/operations.md` = Task-3d)」に、
@@ -202,8 +202,8 @@ Agent 関連は `echo` による注意喚起だけで**非ブロック**。人�
 
 ### 重大 3. pre-commit フックが実行権限なしで配布されており、README の手順どおり導入しても 1 度も走らない
 
-**該当**: `templates/backend-repo/scripts/hooks/pre-commit`、
-`templates/frontend-repo/scripts/hooks/pre-commit`、`templates/infra-repo/scripts/hooks/pre-commit`
+**該当**: `templates/app-monorepo/scripts/hooks/pre-commit`、
+`templates/app-monorepo/scripts/hooks/pre-commit`、`templates/infra-repo/scripts/hooks/pre-commit`
 (3 ファイルすべて `-rw-r--r--`)。導入手順は `templates/README.md:36`
 (`ln -sf ../../scripts/hooks/pre-commit .git/hooks/pre-commit` のみ。`chmod` が無い)。
 
@@ -345,8 +345,8 @@ Managed Agent の `SpanModelRequestEnd` から
 `plan.md:33` も「Q-1/Q-2 待ち」と同じ誤りを持つ。
 正しい依存は **Q-8 (環境戦略と DB 自動適用範囲 = AC-3.7)** と Q-1 (データモデル)。
 
-さらに**雛形は既に psqldef で確定している**: `templates/backend-repo/CLAUDE.md.tmpl:15` (`make psqldef`)、
-`:71`-`:78` (DB 変更フロー)、`templates/backend-repo/scripts/hooks/pre-commit:41`
+さらに**雛形は既に psqldef で確定している**: `templates/app-monorepo/backend/CLAUDE.md.tmpl:15` (`make psqldef`)、
+`:71`-`:78` (DB 変更フロー)、`templates/app-monorepo/scripts/hooks/pre-commit:41`
 (`db/schema.sql` / `db/queries/` を検出)。設計が「未回答」なのに雛形が確定している逆転状態。
 
 **修正案**: D-4 の依存を Q-8 / Q-1 に直し、「**方式は psqldef で確定** (雛形もこの前提)、
@@ -368,8 +368,8 @@ AC-5.1 の受入基準 (「責務境界と禁止依存が定義され、代表�
 
 ### 中 4. 生成物差分チェックが `git diff --exit-code` のみで、**新規生成ファイルをすり抜ける**
 
-`templates/backend-repo/.github/workflows/ci.yml:49`-`:64` と
-`templates/frontend-repo/.github/workflows/ci.yml:41`-`:50` は
+`templates/app-monorepo/.github/workflows/ci.yml:49`-`:64` と
+`templates/app-monorepo/.github/workflows/ci.yml:41`-`:50` は
 `make sqlc wire` / `make docs` / `npm run generate` の後に `git diff --exit-code` を実行する。
 `git diff` は**追跡済みファイルの変更しか見ない**ため、新エンドポイント・新クエリ追加時に
 生成物が**新規ファイル (untracked) として作られるケースでは差分 0 と判定されて緑になる**。
@@ -419,7 +419,7 @@ PR コメント (`:77`-`:88`) にエラー文が貼られるだけで**マージ
 
 ### 中 7. frontend pre-commit は「関連テストが 0 件」でコミットを止める
 
-`templates/frontend-repo/scripts/hooks/pre-commit:34` `npx vitest related --run $ts_staged`。
+`templates/app-monorepo/scripts/hooks/pre-commit:34` `npx vitest related --run $ts_staged`。
 vitest は対象テストが 0 件のとき既定で終了コード 1 を返す (`--passWithNoTests` が必要)。
 設定ファイル・型定義・まだテストが無いコンポーネントを触るたびに commit が失敗するため、
 これも `--no-verify` の常用圧力になる。
@@ -433,7 +433,7 @@ CI に到達するまで型エラーに気付けない (二層化の意図とし
 `aidlc-docs/inception/productionization/requirements.md` AC-5.2 は
 「雛形が TDD と lint 強制を**機械的に**担保していること」を求め、`plan.md:42` は「雛形済み」と評価している。
 しかし 3 リポの `ci.yml` にはカバレッジ下限も「新規の振る舞いに対応するテストの存在検査」も無い。
-現状 TDD を支えているのは `templates/backend-repo/.claude/agents/go-developer.md:17`-`:24` と
+現状 TDD を支えているのは `templates/app-monorepo/backend/.claude/agents/go-developer.md:17`-`:24` と
 `templates/shared/.claude/skills/test-driven-development/SKILL.md` の**文章だけ**で、
 `feedback_review_patterns.md` が禁じる「実装時に気をつける」に等しい。
 
@@ -445,7 +445,7 @@ CI に到達するまで型エラーに気付けない (二層化の意図とし
 
 ### 中 9. backend CI は Postgres を起動して `DATABASE_URL` を渡すが、**スキーマを適用していない**
 
-`templates/backend-repo/.github/workflows/ci.yml:17`-`:26` で `postgres:16` を立て、
+`templates/app-monorepo/.github/workflows/ci.yml:17`-`:26` で `postgres:16` を立て、
 `:44`-`:47` で `DATABASE_URL` を渡して `go test ./...` を実行する。しかし
 `make psqldef` (スキーマ適用) に相当するステップが無いため、**DB を使う UT は空のデータベースに当たる**。
 BE-5 (「本番ではインメモリ・フォールバックを持たない」) を守る設計なら、
@@ -494,7 +494,7 @@ infra: `terraform apply`・`destroy`・`state`・`import`・`.tfstate` 読取)�
 
 **修正案**: D-3 に「マルチステージビルド / 実行用は最小イメージ (distroless 等) / 非 root /
 `.dockerignore` で `.env`・`.git`・テストを除外 / タグは immutable (コミット SHA)」を追加し、
-`templates/backend-repo/` に `Dockerfile` と `.dockerignore` の雛形を置く。
+`templates/app-monorepo/backend/` に `Dockerfile` と `.dockerignore` の雛形を置く。
 
 ### 中 13. A-6 の「該当なし」応答が観測項目になっていない — 実装バグと越境試行が両方とも静かに消える
 
@@ -563,11 +563,11 @@ prompts と FE に複製しない」を D-B'' か `observability.md` §4.4 に�
 
 ## 軽微 (Nice to Have)
 
-1. **エージェント定義の description が古い**: `templates/backend-repo/.claude/agents/go-developer.md:3`
-   と `templates/backend-repo/.claude/agents/code-reviewer.md:3` が「**3 層**」と書いている
+1. **エージェント定義の description が古い**: `templates/app-monorepo/backend/.claude/agents/go-developer.md:3`
+   と `templates/app-monorepo/backend/.claude/agents/code-reviewer.md:3` が「**3 層**」と書いている
    (本文の表は正しく 4 層)。`code-reviewer.md:3` は backend リポなのに「Next.js」を含み、
    D-I (3 分割) と不整合。description は呼び出し側が読む部分なので直す価値がある
-2. **`golangci-lint-action` のバージョン非固定**: `templates/backend-repo/.github/workflows/ci.yml:41`-`:42`
+2. **`golangci-lint-action` のバージョン非固定**: `templates/app-monorepo/.github/workflows/ci.yml:41`-`:42`
    に `version:` 指定が無く、lint 本体が上がった日に無関係な PR が赤くなる。`concurrency` group も無く、
    `push` と `pull_request` の両方に反応するため同一コミットで 2 重実行される (3 リポ共通)
 3. **`permissions` の粒度**: `templates/infra-repo/.github/workflows/ci.yml:13`-`:16` の
@@ -583,7 +583,7 @@ prompts と FE に複製しない」を D-B'' か `observability.md` §4.4 に�
    手順 2 を飛ばすとガード無しで動き出す (中 11 と同根)。手順 2 を「必須」と強調するか、
    雛形を同梱してコピー対象にする
 7. **シェルの引用**: `templates/infra-repo/scripts/hooks/pre-commit:42` の `for d in $(...)` と
-   `templates/backend-repo/scripts/hooks/pre-commit:28` の `xargs -n1 dirname` は、
+   `templates/app-monorepo/scripts/hooks/pre-commit:28` の `xargs -n1 dirname` は、
    空白を含むパスで壊れる。`while IFS= read -r` + `-0` 系に寄せると安全
 8. **`tflint` の初期化**: `templates/infra-repo/.github/workflows/ci.yml:42`-`:44` は
    `tflint --recursive` を直接実行しており、プラグイン利用時は `tflint --init` が必要
@@ -620,7 +620,7 @@ prompts と FE に複製しない」を D-B'' か `observability.md` §4.4 に�
 | D-4 DB マイグレーション | **未回答** | `docs/design/architecture.md:196`。方式は psqldef 推奨で雛形も確定済みだが、適用タイミング・自動/手動の区別が未確定。**依存先の記述が誤り** → **中 2**。先送り先: `plan.md:33` (Task-3a) |
 | D-5 シークレット管理 | 回答 | `docs/design/architecture.md:197`。Secrets Manager / SSM から task 定義の `secrets` で注入。`.dockerignore` の明記が要る → **中 12** |
 | D-6 Agent ライフサイクル | **「回答」と書かれているが機構が無い** | `docs/design/architecture.md:198`。CI 検査・デプロイ手順・雛形のいずれも未実装 (AC-3.3 は設計成果物から未参照) → **重大 2** |
-| D-7 段階リリース | **部分** | `docs/design/architecture.md:199`。全面切替は確定、フラグ方式は Q-8 待ち (正当な依存)。FE 側の扱いは `templates/frontend-repo/CLAUDE.md.tmpl:46` に「判定の正は backend」と先行記述あり |
+| D-7 段階リリース | **部分** | `docs/design/architecture.md:199`。全面切替は確定、フラグ方式は Q-8 待ち (正当な依存)。FE 側の扱いは `templates/app-monorepo/frontend/CLAUDE.md.tmpl:46` に「判定の正は backend」と先行記述あり |
 | D-8 IaC の管理範囲 | **未回答** | `docs/design/architecture.md:200`。Q-7 とインフラ構成要素の確認待ち (正当な依存)。先送り先: `plan.md:35` (Task-3e)。雛形が未作成文書を参照 → **中 10** |
 
 **本番観点で未回答のまま残る ID**: **D-4 / D-8** (どちらも先送り先は `plan.md` にあり、

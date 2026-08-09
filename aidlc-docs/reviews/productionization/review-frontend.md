@@ -2,8 +2,8 @@
 
 - **レビュー対象 (リポジトリ相対パス)**
   - `docs/design/frontend.md` (806 行・新規。**本レビューの唯一の対象**)
-  - 付随確認 (編集していない): `templates/frontend-repo/.github/workflows/ci.yml` /
-    `templates/frontend-repo/CLAUDE.md.tmpl` / `templates/frontend-repo/` 配下の全ファイル一覧
+  - 付随確認 (編集していない): `templates/app-monorepo/.github/workflows/ci.yml` /
+    `templates/app-monorepo/frontend/CLAUDE.md.tmpl` / `templates/app-monorepo/frontend/` 配下の全ファイル一覧
   - 整合確認のため参照: `docs/design/API/README.md` / `docs/design/auth.md` §6.1 §6.2 §6.6 §6.9 /
     `docs/design/testing.md` §4.2 §9 §10 / `docs/design/operations.md` §3.3 §7.2 /
     `docs/design/observability.md` §4.3 §4.4 / `docs/design/data-model.md` DM-1 /
@@ -43,7 +43,7 @@ $ make check
 |---|---|---|---|
 | 1 | **V-9「SSE の読み取りループが 7 ファイル」** | `grep -rl "text/event-stream\|getReader()" src` (hassan-v2-frontend) | **一致 (7 件)**。内訳も本文どおり (ai-sheet 2 / business-plan 4 / research 1)。**数え方の grep 条件が本文に明記されている**ため再現できた。オーケストレーター側の 5 件は条件 (`EventSource`) 違いで、本文の主張が正しい |
 | 2 | V-9「未対応コメントが残る」 | `create-stream-research-chat.ts:17` | **一致** (「ストリーム処理は共通化する」の未対応コメントが同行に実在) |
-| 3 | §16.2-1「ci.yml に 5 検査のうち 4 つが無い」 | `templates/frontend-repo/.github/workflows/ci.yml` 全文 + `find templates/frontend-repo -type f` | **一致だが過小評価**。再生成差分検査 (`:41-49`) は実在。**雛形に eslint 設定ファイルが 1 件も無い**ため lint zone も実体ゼロ → 重大 4 |
+| 3 | §16.2-1「ci.yml に 5 検査のうち 4 つが無い」 | `templates/app-monorepo/.github/workflows/ci.yml` 全文 + `find templates/app-monorepo/frontend -type f` | **一致だが過小評価**。再生成差分検査 (`:41-49`) は実在。**雛形に eslint 設定ファイルが 1 件も無い**ため lint zone も実体ゼロ → 重大 4 |
 | 4 | §16.2-2②「雛形が `GET /api/features` を例示」 | `grep -rn "api/features" templates/` → **0 件** | **不一致 (陳腐化)** → 中 1 |
 | 5 | design_memo:149 / :150 / :169 | `sed -n '149p;150p;169p'` | **3 件すべて一致** (SSE 型の単一ソース化 / 共通クライアント 1 本 / 履歴 GET + 再接続) |
 | 6 | §9「BE は 401 に本文を返さない」/ 404 は本文あり / 429 に `Retry-After` | `auth.md` §6.6 の表 | **一致** (`D-API-6` の「404/403 も本文を返す」とも矛盾しない) |
@@ -126,7 +126,7 @@ $ make check
 - 該当: `docs/design/frontend.md:658-668` (§14 の担保手段列) / `:772-775` (§16.2-1) /
   `:650` (§13 D-2「段とマージ条件の SSOT は testing.md §9」)
 - 実測 (照合 #3):
-  - `templates/frontend-repo/` の全ファイルは **8 件** (`.claude/agents/` 2 / `.github/ISSUE_TEMPLATE/task.yml` /
+  - `templates/app-monorepo/frontend/` の全ファイルは **8 件** (`.claude/agents/` 2 / `.github/ISSUE_TEMPLATE/task.yml` /
     `pull_request_template.md` / `workflows/ci.yml` / `workflows/e2e.yml` / `CLAUDE.md.tmpl` /
     `scripts/hooks/pre-commit`)。**eslint 設定・`package.json`・`tsconfig`・vitest 設定が無い**。
   - `ci.yml` は `npm run lint` を実行するが、**何を検査するかを決める設定が雛形に無い**ため
@@ -183,7 +183,7 @@ $ make check
 
 - 該当: `docs/design/frontend.md:779-781`
 - 実測: `grep -rn "api/features" templates/` → **0 件** (雛形は 2026-07-30 に是正済みで、現在は
-  `templates/frontend-repo/CLAUDE.md.tmpl:46-51` が「配布方法は未確定」と明記している)。
+  `templates/app-monorepo/frontend/CLAUDE.md.tmpl:46-51` が「配布方法は未確定」と明記している)。
   さらに `docs/design/operations.md` §7.2 (OP-I) は **「フラグの実装形態 = 環境変数のみ
   (BE = ECS タスク定義、**FE = Vercel の環境変数**)・フラグを API で配らない」を確定済み**で、
   `GET /features` のような API は却下案 (a) として明示的に却下されている。
@@ -407,8 +407,8 @@ DR-7 = 根拠列で区分しており**良好** (軽微 1 のみ)。
 
 | 追加物 | 内容 |
 |---|---|
-| **`templates/frontend-repo/.eslintrc.json.tmpl` (新規)** | L-F1〜L-F6 の依存 zone (`import/no-restricted-paths` + `no-restricted-imports`) / **生 hex と `style` 属性の禁止** (FE-3) / `fetch` の直呼び禁止 (L-F5) / **`tailwindcss/no-arbitrary-value` + `no-custom-classname`** / **`X-Admin-Token` を `lib/api/admin-mutator.ts` 以外で禁止** (FE-D')。v2 の 5 ルール (no-console / consistent-type-imports / unused-imports / `as` 禁止) は踏襲 |
-| **`templates/frontend-repo/.github/workflows/ci.yml`** | 検査 4 本を追加 — ①併置テストの存在 (FE-4 / FE-6) ②公開パス許可リストと `(auth)` の照合 (FE-K。`PUBLIC_PATHS` の不在と `check-public-paths.sh` 未実装で `exit 1`) ③`NEXT_PUBLIC_` 許可リスト (A-1) ④`globals.css` の行数可視化 (ブロックしない) |
+| **`templates/app-monorepo/frontend/.eslintrc.json.tmpl` (新規)** | L-F1〜L-F6 の依存 zone (`import/no-restricted-paths` + `no-restricted-imports`) / **生 hex と `style` 属性の禁止** (FE-3) / `fetch` の直呼び禁止 (L-F5) / **`tailwindcss/no-arbitrary-value` + `no-custom-classname`** / **`X-Admin-Token` を `lib/api/admin-mutator.ts` 以外で禁止** (FE-D')。v2 の 5 ルール (no-console / consistent-type-imports / unused-imports / `as` 禁止) は踏襲 |
+| **`templates/app-monorepo/.github/workflows/ci.yml`** | 検査 4 本を追加 — ①併置テストの存在 (FE-4 / FE-6) ②公開パス許可リストと `(auth)` の照合 (FE-K。`PUBLIC_PATHS` の不在と `check-public-paths.sh` 未実装で `exit 1`) ③`NEXT_PUBLIC_` 許可リスト (A-1) ④`globals.css` の行数可視化 (ブロックしない) |
 | **`templates/README.md`** | 立ち上げ手順に「`.eslintrc.json.tmpl` を `.eslintrc.json` にリネームし zone と許可リストを実構成に合わせる」を追記 |
 
 **この作業中にメインセッションが自分の欠陥を 1 件検出して修正した**:
@@ -429,8 +429,8 @@ eslint の `overrides` における `no-restricted-syntax` は**マージでは�
 **レビューした成果物 (リポジトリ相対パス)**:
 
 - `docs/design/frontend.md` (主対象。1251 行)
-- `templates/frontend-repo/.eslintrc.json.tmpl` (新規・付随確認)
-- `templates/frontend-repo/.github/workflows/ci.yml` (付随確認)
+- `templates/app-monorepo/frontend/.eslintrc.json.tmpl` (新規・付随確認)
+- `templates/app-monorepo/.github/workflows/ci.yml` (付随確認)
 - `docs/design/testing.md` §9.1.1 / §10 / §13.3-11 (付随確認)
 
 **実行した検証**:
@@ -447,7 +447,7 @@ $ make check
 ```
 
 ```
-$ python3 (json.loads + セレクタ数の実測) templates/frontend-repo/.eslintrc.json.tmpl
+$ python3 (json.loads + セレクタ数の実測) templates/app-monorepo/frontend/.eslintrc.json.tmpl
 JSON parse OK
 base rules.no-restricted-syntax: 3 (as / hex / style)
 override[0] files=[src/lib/**, src/features/*/lib/**]            rules=[no-restricted-imports]
@@ -535,7 +535,7 @@ frontend.md 側の記述は:
 併せて `§16.2-6`②(Task-3i への要求) に **ロック API の入出力**を含める
 (`auth.md` §10.2 R-3 が対象に含んでいるかを確認のうえ)。
 
-#### 新規重大 2. `templates/frontend-repo/.eslintrc.json.tmpl:88-121` / `:141-161` — `no-restricted-imports` に**同じ「override は上書き」欠陥が残っており**、`src/features/*/lib/**` で FE-5 の担保 (react / next 禁止) が消える
+#### 新規重大 2. `templates/app-monorepo/frontend/.eslintrc.json.tmpl:88-121` / `:141-161` — `no-restricted-imports` に**同じ「override は上書き」欠陥が残っており**、`src/features/*/lib/**` で FE-5 の担保 (react / next 禁止) が消える
 
 メインセッションが `no-restricted-syntax` について自己検出・修正した欠陥
 (「overrides の同ルールはマージではなく上書き」) が、**`no-restricted-imports` では未修正**である。
@@ -590,7 +590,7 @@ frontend.md 側の記述は:
 `§15.1` は**実装リポへの引き渡し指示そのもの**であり、ここが古いと
 「管理者用の許可リスト 2 本が作られない」「すでにある検査を二重に作る」形で実装リポに伝播する。
 
-#### 中 3. `templates/frontend-repo/.github/workflows/ci.yml:84` / `docs/design/frontend.md:1007` — 公開パス照合 (F-C4) の受入条件が雛形にもスクリプト要求にも落ちていない
+#### 中 3. `templates/app-monorepo/.github/workflows/ci.yml:84` / `docs/design/frontend.md:1007` — 公開パス照合 (F-C4) の受入条件が雛形にもスクリプト要求にも落ちていない
 
 雛形の検査 2 が存在を確認するのは `ALLOWLIST_NAME="PUBLIC_PATHS"` の **1 本のみ**。
 §11.2.3 が要求する ①`(auth)` ↔ 2 本の和集合 ②`(admin)` ↔ 管理者 2 本の和集合
@@ -634,7 +634,7 @@ frontend.md 側 4 箇所と testing.md 側 2 箇所を同じ増分で消すこ�
 `except` が `from` 配下でないため成立しない → `no-restricted-imports` の override で
 `src/features/!(admin)/**` から禁止する) を実装リポで入れる」を明記する。
 
-#### 中 6. `templates/frontend-repo/.eslintrc.json.tmpl:72-83` — L-F6 zone の `except` が `from` の外を指しており、ルール自体が config エラーになる可能性 (**確信度: 中。要確認**)
+#### 中 6. `templates/app-monorepo/frontend/.eslintrc.json.tmpl:72-83` — L-F6 zone の `except` が `from` の外を指しており、ルール自体が config エラーになる可能性 (**確信度: 中。要確認**)
 
 zone は `target: "./src"` / `from: "./src/generated"` / `except: ["../features/*/api", …]` である。
 `eslint-plugin-import` の `no-restricted-paths` は **`except` を `from` からの相対パスとして解決し、
@@ -691,7 +691,7 @@ L-F2 / L-F3 も同じルールの中にあるため、雛形の zone 検査が�
 | 指摘 | 反映先 | 内容 |
 |---|---|---|
 | **重大 1 (ロック実行 UI が無い)** | `docs/design/frontend.md` §11.1 の `/settings/members` 行 + 直後の「ロック操作の UI 要件」節 (新設) | `auth.md` §6.9 は実行者 2 経路のうち**契約内管理者がロックを実行する**と定めているのに、FE の画面一覧に**ロックの実行がなく解除だけ**だった (社内管理者の `/admin/accounts` は解除専用なので、**製品内に即時遮断手段が存在しない**状態)。行を「手動ロック / 解除 / ロック状態の表示」に改め、**UI 要件 3 点**を追記 — ①「最後の契約内管理者」「自分自身」の 403 は**正常系**なので操作前の無効化 + 理由表示で表現する ②確認ダイアログを必須にする ③ロック状態を一覧に常時表示する (BE-10 の読む側) |
-| **重大 2 (`no-restricted-imports` の override 上書き)** | `templates/frontend-repo/.eslintrc.json.tmpl` | 指摘どおり再現。`src/features/*/lib/**` は L-F4 の override が後勝ちで L-F1 を置き換え、**react / next の import 禁止 (FE-5 の担保) が消えていた**。**`src/features/*/lib/**` 専用の override を新設し L-F1 と L-F4 の両方を再掲**した (`src/lib/**` の override は `src/lib` のみに限定)。JSON パースと 3 override のセレクタ数を機械確認 |
+| **重大 2 (`no-restricted-imports` の override 上書き)** | `templates/app-monorepo/frontend/.eslintrc.json.tmpl` | 指摘どおり再現。`src/features/*/lib/**` は L-F4 の override が後勝ちで L-F1 を置き換え、**react / next の import 禁止 (FE-5 の担保) が消えていた**。**`src/features/*/lib/**` 専用の override を新設し L-F1 と L-F4 の両方を再掲**した (`src/lib/**` の override は `src/lib` のみに限定)。JSON パースと 3 override のセレクタ数を機械確認 |
 | **重大 4 の残り (§14 / §15.1 の stale)** | `docs/design/frontend.md` §14 FE-5 / `docs/design/testing.md` の F-C1 行 | 「実装済み ✓」と宣言していたが上記の欠陥で**未担保だった**ため、両文書の判定文を実測値 (override の行番号と再掲の事実) へ更新 |
 
 **プロセス側の是正**: `.claude/rules/06-delegation-prompts.md` に

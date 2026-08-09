@@ -47,12 +47,12 @@
 
 | メソッド | パス | 概要 | スコープ | 主なリクエスト / レスポンス項目 (暫定) | 固有ステータス | LLM | SSE |
 |---|---|---|---|---|---|---|---|
-| GET | `/asset-folders` | フォルダツリー取得 | 個人 / 契約 | Q: `scope` (**`contract` は増分 1 から有効** — C-16) — R: `{items:[{id, name, parent_id, depth, asset_count}]}` (**フラット配列 + `parent_id`**) | 200 / **400** (増分 1 で `scope=contract`) | — | — |
+| GET | `/asset-folders` | フォルダツリー取得 | 個人 / 契約 | Q: `scope` (**`contract` は増分 1 から有効** — C-16) — R: `{items:[{id, name, parent_id, depth, asset_count}]}` (**フラット配列 + `parent_id`**) | 200 / **400** (`scope` の値域外) | — | — |
 | POST | `/asset-folders` | フォルダ作成 | 個人 | B: `name` (必須) / `parent_id` (null = 最上位) — R: `Folder` | **201** / **400** (深さ上限超過・親が他人) | — | — |
 | PUT | `/asset-folders/{folder_id}` | 改名・親の変更 | 個人 | B: `name` / `parent_id` — R: `Folder` | 200 / 404 / **400** (循環参照・深さ上限超過) | — | — |
 | DELETE | `/asset-folders/{folder_id}` | 削除 | 個人 | Q: `on_conflict` (`reject` 既定 \| `move_to_parent`) | **204** / 404 / **409** (配下にアセットまたは子フォルダがあり `reject` の場合) | — | — |
-| GET | `/assets` | 一覧 | 個人 / 契約 | Q: `scope` (**`contract` は増分 1 から有効** — C-16) / `folder_id` / `include_descendants` (bool, 既定 `true`) / `status` / `created_by` / `asset_type` / `keyword` / `limit` / `offset` / `sort` (`updated_at`\|`name`\|`patent_count`) — R: `{items:[Asset], total_count}` | 200 / **400** (増分 1 で `scope=contract`) | — | — |
-| POST | `/assets` | 作成 (抽出結果のレビュー確定を含む) | 個人 | B: `folder_id` / `name` (必須) / `asset_type` / `description` / `tags[]` / `ref_urls[]` / `status` / **`visibility` (`private`\|`contract`。既定 `private`。**増分 2 で有効**)** / `function_tree` / `extraction_id` (任意。抽出由来を示す) — R: `Asset` | **201** / **404** (`extraction_id` が他人 or 不存在) / **409** (`extraction_id` が既に確定済み) | — | — |
+| GET | `/assets` | 一覧 | 個人 / 契約 | Q: `scope` (**`contract` は増分 1 から有効** — C-16) / `folder_id` / `include_descendants` (bool, 既定 `true`) / `status` / `created_by` / `asset_type` / `keyword` / `limit` / `offset` / `sort` (`updated_at`\|`name`\|`patent_count`) — R: `{items:[Asset], total_count}` | 200 / **400** (`scope` の値域外) | — | — |
+| POST | `/assets` | 作成 (抽出結果のレビュー確定を含む) | 個人 | B: `folder_id` / `name` (必須) / `asset_type` / `description` / `tags[]` / `ref_urls[]` / `status` / **`visibility` (`private`\|`contract`。既定 `private`。**増分 1 から有効** — C-16。2026-08-02 に「増分 2」から改訂)** / `function_tree` / `extraction_id` (任意。抽出由来を示す) — R: `Asset` | **201** / **404** (`extraction_id` が他人 or 不存在) / **409** (`extraction_id` が既に確定済み) | — | — |
 | GET | `/assets/{asset_id}` | 取得 | 個人 / 契約 (§3.2) | R: `Asset` (+ `visibility` / `function_tree_summary` / `used_by_themes[]`) | 200 / 404 | — | — |
 | PUT | `/assets/{asset_id}` | 更新 | 個人 | B: `POST /assets` と同じ項目 (`extraction_id` を除く) — R: `Asset` | 200 / 404 | — | — |
 | DELETE | `/assets/{asset_id}` | 削除 (論理削除) | 個人 | — | **204** / 404 | — | — |
@@ -165,7 +165,7 @@ C-16 (v2 の仕様は原則すべて引き継ぐ。操作の後退を認めな�
 | # | 処理 | 理由 |
 |---|---|---|
 | AS-M1 | 既存アセットの `visibility` を、**所属契約の `sharing_settings` (category = asset) から決める**: `is_shared = true` → `contract` / `false` またはレコード無し → `private` | **切替前後で見える範囲を変えない** ([themes.md](themes.md) TM-1 と同じ規則。カテゴリのみ asset) |
-| AS-M2 | `visibility` カラムは増分 1 でスキーマに用意し、**書き込み API (`PUT /assets/{id}/visibility`) と `scope=contract` も増分 1 で開ける** (**2026-07-31 改訂**。[requirements.md](../../../aidlc-docs/inception/productionization/requirements.md) **C-16**。理由の SSOT は [../auth.md](../auth.md) §6.12) | 後から足すと初期値決定が増分 2 まで遅れ、その間のアセットの既定が二重管理になる |
+| AS-M2 | `visibility` カラムは増分 1 でスキーマに用意し、**書き込み経路 (`POST /assets` / `PUT /assets/{asset_id}` の body の `visibility`) と `scope=contract` も増分 1 で開ける** (**専用エンドポイントは作らない** — 2026-08-02 に是正。旧記述は存在しない `PUT /assets/{id}/visibility` を参照していた) (**2026-07-31 改訂**。[requirements.md](../../../aidlc-docs/inception/productionization/requirements.md) **C-16**。理由の SSOT は [../auth.md](../auth.md) §6.12) | 後から足すと初期値決定が増分 2 まで遅れ、その間のアセットの既定が二重管理になる |
 | AS-M3 | **フォルダは v2 に存在しない**ため、既存アセットは全て「フォルダ未割当」として移行する。フォルダ分けはユーザーが切替後に行う | v2 の `assets` にフォルダ相当のカラムが無い (`hassan-v2-backend/db/schema.sql:104-116`)。推測でフォルダを自動生成しない (DR-1) |
 
 ---
@@ -197,7 +197,7 @@ C-16 (v2 の仕様は原則すべて引き継ぐ。操作の後退を認めな�
 | AS-Q3 | **一括インポート** | **クローズを撤回 → 引き継ぐ (2026-08-01)**。2026-07-30 に「更新版プロトタイプからボタンが消えた」を理由にクローズしたが、**v2 に稼働中の実装がある** (`POST /assets/upload` = `hassan-v2-backend/router/router.go:114`) ため **C-16 違反**だった。**§3.3 で `POST /asset-imports` として仕様化済み** | 解決済み (§3.3 の D-AS-16 / D-AS-17) |
 | AS-Q4 | **特許明細書の除外** | 注意書きのみ (`:13055`)。判定手段が無い | 抽出プロンプト設計 (§3.1) |
 | AS-Q5 | **アップロード基盤の共用** | プロトタイプはアセットとナレッジで別 UI | data-model / 実装リポ設計 (D-AS-4 の却下案 (b)) |
-| **AS-Q11** | **アップロード経路が 4 系統目になる** (2026-07-31 のエンドポイント一覧の再照合で発見) | **D-AS-4 は「アップロード実装が 3 系統になり、拡張子・サイズ検証の SSOT が割れる (BE-2)」を理由に専用 API を却下した**が、更新版プロトタイプの**会話画面の「持ち込みアイデア入力」が PDF のドラッグ&ドロップを持つ** (`setFile` `:9720`〜`:9728` が `File` を受け取り `PDF · N KB` と表示、`summarizeIdeaInput` `:9742` 経由で送信。ウィジェット全体は `:9606`〜`:9861`)。これは①アセット添付 ②抽出用の未紐付けアップロード ③ナレッジファイル に続く **4 系統目**にあたる | **会話型アイデア創出の API 設計** ([README.md](README.md) §0 の対象外領域)。**同設計に「4 系統目を作らず、既存 3 系統のどれかに寄せる (または共通のアップロード基盤へ統合する)」制約として引き継ぐ** — D-AS-4 の却下理由が 3 系統を前提にしているため、4 系統目が黙って増えると同じ判断の根拠が崩れる。**本ファイルの範囲では新規エンドポイントを追加しない** |
+| **AS-Q11** | **アップロード経路が 4 系統目になる** (2026-07-31 のエンドポイント一覧の再照合で発見) | **D-AS-4 は「アップロード実装が 3 系統になり、拡張子・サイズ検証の SSOT が割れる (BE-2)」を理由に専用 API を却下した**が、更新版プロトタイプの**会話画面の「持ち込みアイデア入力」が PDF のドラッグ&ドロップを持つ** (`setFile` `:9720`〜`:9728` が `File` を受け取り `PDF · N KB` と表示、`summarizeIdeaInput` `:9742` 経由で送信。ウィジェット全体は `:9606`〜`:9861`)。これは①アセット添付 ②抽出用の未紐付けアップロード ③ナレッジファイル に続く **4 系統目**にあたる | **クローズ済み (2026-08-01)** — **CV-Q12=A のユーザー決定**により、会話画面の持ち込み PDF は**既存②「抽出用の未紐付けアップロード」に寄せる** ([conversation.md](conversation.md) §4.3)。**4 系統目は作らず、`POST /asset-extractions` 相当の既存経路でアップロードして会話は返ってきた ID を参照する**。**D-AS-4 の「3 系統に留める」という却下根拠は維持されている**。会話から参照する際の所有者スコープ検証はハンドラのクロージャで行う (A-6。同 §4.4)。**本ファイルの範囲では新規エンドポイントを追加しない** |
 | AS-Q6 | **スペック表** | 選択アセットに関わらず固定の静的表示 (実データ非連動) | data-model 設計。PoC の `asset_specs` が入力 |
 | AS-Q7 | **特許情報** | `patents` は件数のみのモック。個々の特許データの入出力 UI が無い | data-model 設計。PoC の `asset_patents` が入力 |
 | AS-Q8 | **利用テーマ欄** | 固定の静的表示 | v2 の `asset_usage_histories` (`hassan-v2-backend/db/schema.sql:350`) を引き継ぐかを data-model で判断 |

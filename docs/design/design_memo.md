@@ -27,7 +27,7 @@
 **未完成機能を隠すフラグ方式 (Q-8) のみ検討中** (暫定: trunk-based + 環境変数フラグ)
 
 ~~TODO: DB更新を自動化できないか~~
-→ 半自動化で確定 (2026-07-30): deploy.yml で **差分検査 → 破壊的変更の機械判定 → 承認 (environment) → 適用**
+→ 半自動化で確定 (2026-07-30): deploy-backend.yml で **差分検査 → 破壊的変更の機械判定 → 承認 (environment) → 適用**
 の流れを設計 (H-2)。非破壊は dev で自動。**マイグレーションツールの選定 (D-4: psqldef か golang-migrate か) は未確定**
 
 ## アーキテクチャ
@@ -54,7 +54,7 @@
 - **手法**: AIDLC を維持 (設計 = 本リポの Inception / 実装 = 実装リポで TDD)。実装・レビューはサブエージェント委譲
 - **作業ループ**: 1 issue を S-1 (受領) 〜 S-10 (マージ) の固定ステップで回す —
   [templates/shared/.claude/rules/01-construction-loop.md](../../templates/shared/.claude/rules/01-construction-loop.md)
-- **issue 粒度**: 1 issue = 1 PR = 「同じ層・同じ検証で閉じる AC 群」(Q-1=A)。3 リポ跨ぎは独立 issue + 固定マージ順序 (Q-2=B) —
+- **issue 粒度**: 1 issue = 1 PR = 「同じ層・同じ検証で閉じる AC 群」(Q-1=A)。リポ跨ぎ (infra ↔ app) は独立 issue + 固定マージ順序 (Q-2=B)。**FE/BE 跨ぎは後方互換なら 1 issue に統合可** (2026-08-03 のモノレポ化) —
   [02-issue-granularity.md](../../templates/shared/.claude/rules/02-issue-granularity.md)
 - **モデル運用**: 実装 sonnet / レビュー opus、オーケストレーターが着手前判定 + 実行中トリガーで昇格 (Q-5=A) —
   [03-model-escalation.md](../../templates/shared/.claude/rules/03-model-escalation.md)
@@ -172,7 +172,7 @@ v2 / PoC の実コード調査に基づくセッションでの決定。[archite
 ### v2 との関係・リポ構成 (architecture.md と同じ決定の再確認)
 
 - v3 は v2 の**全面置き換え** (D-J と一致)。データは v2 → v3 移行
-- FE / BE 別リポ (D-I の 3 分割のうち 2 つと一致。infra リポは D-I 参照)
+- FE / BE は**同一の app モノレポ内のサブツリー** (**2026-08-03 に 3 分割から方針転換**。infra リポのみ分離。D-I / [architecture.md](architecture.md) §3.11 参照)
 
 ### architecture.md への反映待ち差分 → 反映状況 (2026-07-29 更新)
 

@@ -33,12 +33,12 @@ Inception 産物:
 
 ハーネス雛形:
 
-- `templates/backend-repo/CLAUDE.md.tmpl`
-- `templates/backend-repo/.golangci.yml`
-- `templates/backend-repo/.github/workflows/ci.yml`
-- `templates/backend-repo/.github/ISSUE_TEMPLATE/task.yml`
-- `templates/backend-repo/.claude/agents/go-developer.md`
-- `templates/backend-repo/.claude/agents/code-reviewer.md`
+- `templates/app-monorepo/backend/CLAUDE.md.tmpl`
+- `templates/app-monorepo/backend/.golangci.yml`
+- `templates/app-monorepo/.github/workflows/ci.yml`
+- `templates/app-monorepo/.github/ISSUE_TEMPLATE/task-backend.yml`
+- `templates/app-monorepo/backend/.claude/agents/go-developer.md`
+- `templates/app-monorepo/backend/.claude/agents/code-reviewer.md`
 - `templates/README.md`
 - `templates/shared/.claude/rules/02-issue-granularity.md`
 - `templates/shared/.claude/rules/03-model-escalation.md`
@@ -148,7 +148,7 @@ type Tx interface {
   `:200`「**違反した PR はマージできない**」、`:583` (§5 の D-2 ①) は「**depguard による L-1〜L-6**」と書く
 - `docs/design/architecture.md:177`「**`service` → `usecase` は禁止**」、同 `:139` の責務表も Service の禁止事項に
   「UseCase への依存」を挙げる
-- `templates/backend-repo/.golangci.yml` の depguard 規則は 14 本 (`:59`, `:76`, `:85`, `:98`, `:111`, `:125`,
+- `templates/app-monorepo/backend/.golangci.yml` の depguard 規則は 14 本 (`:59`, `:76`, `:85`, `:98`, `:111`, `:125`,
   `:138`, `:151`, `:164`, `:177`, `:193`, `:207`, `:226`, `:242`)。このうち **`files: ["**/service/**"]` を対象に
   `<module-path>/usecase` または `<module-path>/controller` を deny する規則は 1 本も無い**
   (`L2-L3-service-*` は `service` と `repository` のみ deny、`L6-service-no-connection-pool` は `pgxpool` のみ)
@@ -163,7 +163,7 @@ Service から UseCase を呼ばれると **`tx` の二重開始 (L-6 違反) �
 本設計が A-6 / BE-10 / BE-11 の防御として立てた「境界は 1 箇所」という前提が崩れる。
 同一ドメイン内の循環 (`service/A` → `usecase/A`) は Go のコンパイラが弾くが、**異ドメインは弾かない** —
 つまり「コンパイルエラーになるから大丈夫」も成立しない。
-`templates/backend-repo/.claude/agents/code-reviewer.md:28` は人手のレビュー項目として挙げているが、
+`templates/app-monorepo/backend/.claude/agents/code-reviewer.md:28` は人手のレビュー項目として挙げているが、
 同 `:24`〜`:25` が「**depguard が L-1〜L-6 を機械強制する。lint が通ったことを前提に**、機械では見られない
 責務の中身をレビューする」と明示しているため、**レビュアー側は機械で見られている前提で読む**。
 F9 (v2 は lint 無しで 113 件の規約違反が溜まった) を根拠に機械強制を選んだ設計として、この穴は致命的である。
@@ -193,7 +193,7 @@ L1-service-no-upper-layers:
 
 - `docs/design/architecture.md:198` (L-6) 「**型で担保** (Service は `tx` (`pgx.Tx` 相当) のみ受け取る)」
 - 同 `:261`「Service は `Begin` / `Commit` / `Rollback` を**呼ばない** (**呼べる型を受け取らない**)」
-- 同 `:300` / `templates/backend-repo/CLAUDE.md.tmpl` の Agent 節:
+- 同 `:300` / `templates/app-monorepo/backend/CLAUDE.md.tmpl` の Agent 節:
   `type ToolHandler = func(ctx context.Context, tx pgx.Tx, args json.RawMessage) (any, error)`
 - `aidlc-docs/inception/productionization/requirements-layering.md:94` (L-6) 「型で担保 (Service は `tx`
   インターフェースのみ受け取る)」/ 同 `:194` (AC-6.7) 「`*sql.Tx` はドメイン型ではない」
@@ -245,12 +245,12 @@ type ToolHandler = func(ctx context.Context, tx Tx, args json.RawMessage) (any, 
   (§5 の D-2)」。同 `:218`「追記漏れは『新規ドメインが除外側に落ちて無検査になる』形の事故になる」
 - `docs/design/architecture.md:583` (§5 の D-2) は本増分で追加する検査を **①〜⑧** 列挙し、
   「**検査スクリプト本体は実装リポで実装する** (雛形は**未実装なら落ちるステップ**を配置)」と書く
-- 実物 `templates/backend-repo/.github/workflows/ci.yml` は **105 行**で、ステップは
+- 実物 `templates/app-monorepo/.github/workflows/ci.yml` は **105 行**で、ステップは
   build / vet / golangci-lint / test / sqlc・wire 差分 / OpenAPI 差分 / **A-1 検査** / **A-4 検査** /
   **D-6 検査** のみ。**②層境界 `CodedError` 検査・③型エイリアス検出・④`errors.As` 以外の型アサーション禁止・
   ⑥`os.Getenv` 禁止・⑦対象パス表の一致検査・⑧`_ =` 破棄検出・`math/rand` 禁止検査の 7 つはステップ自体が無い**
   (A-1 / A-4 / D-6 は「未実装なら `exit 1`」の placeholder があるのに、この 7 つには placeholder すら無い)
-- `templates/backend-repo/.golangci.yml` の未登録ドメイン番犬 (`L2-L3-service-unregistered-domain`, `:193`) は
+- `templates/app-monorepo/backend/.golangci.yml` の未登録ドメイン番犬 (`L2-L3-service-unregistered-domain`, `:193`) は
   **`**/service/**` だけ**を見る。`L5-no-external-sdk` (`:226`) の対象は
   `usecase/{theme,asset,conversation,idea,plan}/**` の **5 ドメイン列挙**、
   `exclusions.rules[].path-except` (`:255`) も同じ 5 ドメインの正規表現列挙
@@ -284,7 +284,7 @@ L-5 (外部 SDK 直接 import 禁止) と `dupl` / `cyclop` / `funlen` の対象
 
 **① 事実**
 
-- `docs/design/architecture.md:300` / `templates/backend-repo/CLAUDE.md.tmpl`:
+- `docs/design/architecture.md:300` / `templates/app-monorepo/backend/CLAUDE.md.tmpl`:
   `type ToolHandler = func(ctx context.Context, tx pgx.Tx, args json.RawMessage) (any, error)`
 - `.claude/rules/feedback_review_patterns.md` の **BE-12**: 「読み手の構造体が、書き手に存在しない
   フィールドを期待している (PoC 実例: 読み手 `claude_managed_agents/cmd/devui/conversation_plan_grounding.go:100`〜`:102`
@@ -292,7 +292,7 @@ L-5 (外部 SDK 直接 import 禁止) と `dupl` / `cyclop` / `funlen` の対象
   `notes` は `[]string`)。**テストが合成 JSON を渡していると契約違反が隠れる** — 読み手・書き手・テストを
   同じスキーマ定義から導くこと」
 - 本増分の成果物 (`architecture.md` / `requirements-layering.md` / `plan-layering.md` /
-  `templates/backend-repo/*`) に **BE-12 への言及は 0 件** (`grep -rn "BE-12"` のヒットは
+  `templates/app-monorepo/backend/*`) に **BE-12 への言及は 0 件** (`grep -rn "BE-12"` のヒットは
   `docs/analysis/poc-conversation-flow.md:535` のみ)。BE-10 は §3.7-5 (LedgerStore を読み書き対で定義)、
   BE-11 は §3.7-3 (採番を Repository メソッドに閉じる) で構造的に潰されており、**BE-12 だけが抜けている**
 - 本増分が触る経路は BE-12 の発生箇所そのものである — §3.10 のステップ 12 (深掘りの外部検索) →
@@ -365,7 +365,7 @@ F-1 / F-3 (`observability.md:156`〜`:158`) と同じ扱いが必要なのに、
 
 - **事実**: `docs/design/architecture.md:127`〜`:129` (図の読み方 3) 「**`usecase` は `repository` /
   `gateway` の具体パッケージに依存しない**」。一方 同 `:196` (L-4) 「`service` / `usecase` → `gateway` は**可**」。
-  `templates/backend-repo/CLAUDE.md.tmpl` も両方の記述をそのまま持つ。
+  `templates/app-monorepo/backend/CLAUDE.md.tmpl` も両方の記述をそのまま持つ。
   depguard 側は `usecase/**` → `gateway/**` を deny していない (`L5-no-external-sdk` は SDK パッケージのみ)
 - **問題**: L-5 (「gateway 実装の型を公開 IF に露出させない」) の担保が、
   「`usecase` が `gateway/anthropic` を import しないこと」に依存するのか、
@@ -378,7 +378,7 @@ F-1 / F-3 (`observability.md:156`〜`:158`) と同じ扱いが必要なのに、
 
 ### 中 4. `dupl` / `cyclop` / `funlen` の対象から `controller/` / `gateway/` / `entity/` が除外されている — F5 / F14 の再発地点が検査対象外
 
-- **事実**: `templates/backend-repo/.golangci.yml:255` の
+- **事実**: `templates/app-monorepo/backend/.golangci.yml:255` の
   `path-except: '(^|/)(usecase/(theme|asset|conversation|idea|plan)|service|repository/(theme|asset|conversation|idea|plan))/'`
   により、`controller/` / `gateway/` / `entity/` は 3 linter すべての対象外。
   `docs/design/architecture.md:487`「対象パスは §3.5.2 の『v3 新規ドメイン』区分に限る」と整合はしている
@@ -415,10 +415,10 @@ F-1 / F-3 (`observability.md:156`〜`:158`) と同じ扱いが必要なのに、
 - **事実**: `aidlc-docs/inception/productionization/plan-layering.md:6`「ステータス: **未着手 (着手可)**」。
   Task-L3 以降のチェックボックスは**すべて `[ ]`** (完了は Task-L0a / L0b のみ)。
   実際には `architecture.md` は 264 → 669 行に改訂済み、`.golangci.yml` は新規作成済み、
-  `templates/backend-repo/*` は更新済み。
+  `templates/app-monorepo/backend/*` は更新済み。
   また §2.1 の影響範囲表に **`.golangci.yml` の新規作成**は ci.yml 行の中で言及されるのみで独立行が無く、
   `templates/README.md` / `templates/shared/.claude/rules/02-issue-granularity.md` / `03-model-escalation.md` /
-  `templates/backend-repo/.claude/agents/*` / `templates/infra-repo/.github/ISSUE_TEMPLATE/task.yml` は**行が無い**
+  `templates/app-monorepo/backend/.claude/agents/*` / `templates/infra-repo/.github/ISSUE_TEMPLATE/task.yml` は**行が無い**
 - **問題**: rule 05 の「完了報告」と push ゲートの鮮度チェックが依拠する計画の状態が信用できなくなる。
   次のセッションが「未着手」と読んで二重に着手する / 逆に触ったファイルが影響範囲に無いため
   レビュー対象の特定が漏れる (今回は依頼側が §2 で列挙してくれたので事故にならなかった)
@@ -442,7 +442,7 @@ F-1 / F-3 (`observability.md:156`〜`:158`) と同じ扱いが必要なのに、
 - **事実**: `docs/design/architecture.md:201`「**depguard の 6 規則それぞれについて、違反サンプルで CI が
   落ちることを実装リポで確認する**」/ 同 `:606`「`.golangci.yml` (depguard 6 規則 + `dupl` / `cyclop` / `funlen`)」。
   `aidlc-docs/inception/productionization/plan-layering.md:39` も「depguard 6 規則」。
-  実物 `templates/backend-repo/.golangci.yml` の規則名は **14 本**
+  実物 `templates/app-monorepo/backend/.golangci.yml` の規則名は **14 本**
   (L-1 系 5 本 / L-2・L-3 系 6 本 / L-4 / L-5 / L-6)
 - **問題**: 「6 規則を違反サンプルで検証する」という受入手順に従うと、**14 本のうち 8 本が未検証で通る**。
   特に `L2-L3-service-unregistered-domain` (`:193`) は `files` の否定パターン (`!**/service/theme/**`) と
@@ -480,7 +480,7 @@ F-1 / F-3 (`observability.md:156`〜`:158`) と同じ扱いが必要なのに、
    両者の SSOT 関係 (層 = architecture / 時期 = observability §6.1) は明記されているので実害は小さいが、
    §3.8.3 に「メトリクス送出は observability §6.1 の ⑦」と 1 行足すと読み替えが不要になる
 4. **行番号参照の陳腐化** — `requirements-layering.md:174` / `:301` が
-   「`templates/backend-repo/.github/workflows/ci.yml:41-42` の golangci-lint ステップ」を指すが、
+   「`templates/app-monorepo/.github/workflows/ci.yml:41-42` の golangci-lint ステップ」を指すが、
    実物では 42〜46 行付近。行番号ではなくステップ名 (`- name: golangci-lint`) で参照する方が腐らない
 
 ---
@@ -506,11 +506,11 @@ F-1 / F-3 (`observability.md:156`〜`:158`) と同じ扱いが必要なのに、
 | **O-6 監査ログ** | **回答 (本増分で「未回答」から解消)** | `docs/design/architecture.md:449`〜`:463` (§3.9③) / `:580` / `docs/design/observability.md` §4.5 |
 | O-7 アラート | 回答 (通知先の実体は運用設計へ先送り。理由明記) | `docs/design/architecture.md:581` / `docs/design/observability.md` §4.6 |
 | D-1 環境 | 部分 (先送り先明記) | `docs/design/architecture.md:582` / `:440` |
-| **D-2 CI ゲート** | **回答 (本増分で 8 検査を追加)** | `docs/design/architecture.md:583` / `:191`〜`:202` (§3.5.1) / `:465`〜`:487` (§3.9④) / `templates/backend-repo/.golangci.yml` / `templates/backend-repo/.github/workflows/ci.yml`。**重大 1 / 重大 3 / 中 4 / 中 8 の欠落あり** |
+| **D-2 CI ゲート** | **回答 (本増分で 8 検査を追加)** | `docs/design/architecture.md:583` / `:191`〜`:202` (§3.5.1) / `:465`〜`:487` (§3.9④) / `templates/app-monorepo/backend/.golangci.yml` / `templates/app-monorepo/.github/workflows/ci.yml`。**重大 1 / 重大 3 / 中 4 / 中 8 の欠落あり** |
 | D-3 デプロイ手順 | 部分 (対象外・先送り先明記) | `docs/design/architecture.md:584` |
 | D-4 マイグレーション | 未回答 (理由と決定タイミング明記) | `docs/design/architecture.md:585` / `:561` |
 | D-5 シークレット | 回答 | `docs/design/architecture.md:586` |
-| **D-6 Agent ライフサイクル** | **回答** (3 者一致検査 + 起動時チェック) | `docs/design/architecture.md:373`〜`:387` (§3.8.4) / `:587` / `templates/backend-repo/.github/workflows/ci.yml` の D-6 ステップ |
+| **D-6 Agent ライフサイクル** | **回答** (3 者一致検査 + 起動時チェック) | `docs/design/architecture.md:373`〜`:387` (§3.8.4) / `:587` / `templates/app-monorepo/.github/workflows/ci.yml` の D-6 ステップ |
 | D-7 段階リリース | 回答 | `docs/design/architecture.md:588` / `:595`〜`:597` (層規約併存下の移植手順) |
 | D-8 IaC | 回答 (対象外・先送り先明記) | `docs/design/architecture.md:589` |
 
@@ -564,7 +564,7 @@ F-1 / F-3 (`observability.md:156`〜`:158`) と同じ扱いが必要なのに、
    型 (後付け不可) → 初期実装 / 明細 (append-only で遡れない) → 第 1 リリース前 /
    集計・コスト算出 (明細から再計算できる) → v2 併用期間中。08 が要求する
    「理由 + 先送り先」を満たすだけでなく、**基準が読者に再利用できる形**になっている
-7. **雛形 (`templates/backend-repo/*`) への反映が設計と同時に行われている**。
+7. **雛形 (`templates/app-monorepo/backend/*`) への反映が設計と同時に行われている**。
    `.golangci.yml` の冒頭に転記元の節番号 (§3.5.1 / §3.5.2 / §3.9④ / §3.3) と
    実装リポでの置換手順が書かれており、雛形が「設計から切れた初期値」になっていない
 8. **`entity/` を層として立て、CA との差 (逸脱 2 点) を明示**したことで、
@@ -603,12 +603,12 @@ F-1 / F-3 (`observability.md:156`〜`:158`) と同じ扱いが必要なのに、
 
 ### 追加レビュー対象 (リポジトリ相対パス)
 
-- `templates/backend-repo/layering-scopes.yml` (**新規作成**)
-- `templates/backend-repo/.github/workflows/ci.yml`
-- `templates/backend-repo/.golangci.yml`
-- `templates/backend-repo/CLAUDE.md.tmpl`
-- `templates/backend-repo/.claude/agents/code-reviewer.md`
-- `templates/backend-repo/.claude/agents/go-developer.md`
+- `templates/app-monorepo/backend/layering-scopes.yml` (**新規作成**)
+- `templates/app-monorepo/.github/workflows/ci.yml`
+- `templates/app-monorepo/backend/.golangci.yml`
+- `templates/app-monorepo/backend/CLAUDE.md.tmpl`
+- `templates/app-monorepo/backend/.claude/agents/code-reviewer.md`
+- `templates/app-monorepo/backend/.claude/agents/go-developer.md`
 - `docs/design/architecture.md`
 - `docs/design/observability.md`
 - `docs/design/auth.md`
@@ -626,7 +626,7 @@ F-1 / F-3 (`observability.md:156`〜`:158`) と同じ扱いが必要なのに、
 - `templates/shared/.claude/rules/02-issue-granularity.md`
 - `templates/shared/.claude/rules/03-model-escalation.md`
 - `templates/infra-repo/.github/ISSUE_TEMPLATE/task.yml`
-- `templates/backend-repo/.github/ISSUE_TEMPLATE/task.yml`
+- `templates/app-monorepo/.github/ISSUE_TEMPLATE/task-backend.yml`
 
 ### `make check` (再実行)
 
@@ -652,7 +652,7 @@ F-1 / F-3 (`observability.md:156`〜`:158`) と同じ扱いが必要なのに、
 
 ### 重大 1 (depguard に `service → usecase` / `controller` の deny が無い) → **解消**
 
-- **確認した実物**: `templates/backend-repo/.golangci.yml:126`〜`:134` に **`L1-service-no-upper-layers`** が新設され、
+- **確認した実物**: `templates/app-monorepo/backend/.golangci.yml:126`〜`:134` に **`L1-service-no-upper-layers`** が新設され、
   `files: ["**/service/**"]` / `deny: <module-path>/usecase`, `<module-path>/controller`。
   `allow` を持たない独立規則なので、`L2-L3-service-<domain>` (`:179` 以降) の `allow` とは干渉しない
 - **「規則は独立評価される」という前提の判定**: 妥当。depguard v2 は 1 ファイルに対して
@@ -690,7 +690,7 @@ F-1 / F-3 (`observability.md:156`〜`:158`) と同じ扱いが必要なのに、
 
 ### 重大 3 (D-2 の宣言と `ci.yml` の乖離 / 新ドメインの無検査化) → **解消 (条件付き)**
 
-- **1 対 1 の照合結果** (`grep -n "^      - name:" templates/backend-repo/.github/workflows/ci.yml`):
+- **1 対 1 の照合結果** (`grep -n "^      - name:" templates/app-monorepo/.github/workflows/ci.yml`):
 
   | 宣言 (§5 の D-2) | ci.yml のステップ | 未実装時 |
   |---|---|---|
@@ -707,7 +707,7 @@ F-1 / F-3 (`observability.md:156`〜`:158`) と同じ扱いが必要なのに、
   **①〜⑨ + `math/rand` が全数対応し、placeholder はすべて `else` 分岐で `exit 1`** している
   (無言スキップは無い)。ステップ名に検査 ID を入れた設計 (§5 の D-2 が明文化) により、
   **今後の乖離が grep で照合できる**形になった。D-2 の宣言を絞らずに検査を増やして一致させた判断も妥当
-- **新ドメインの無検査化**: `templates/backend-repo/layering-scopes.yml` の新設と D-2⑦ により、
+- **新ドメインの無検査化**: `templates/app-monorepo/backend/layering-scopes.yml` の新設と D-2⑦ により、
   `usecase/<新>` / `repository/<新>` が `.golangci.yml` の列挙から漏れた場合に落ちる経路ができた。
   `.golangci.yml:12`〜`:19` に「(a) L-2/L-3 規則 (b) L5 の files (c) exclusions (d) layering-scopes.yml を
   同一 PR で更新」という手順も入った
@@ -753,7 +753,7 @@ F-1 / F-3 (`observability.md:156`〜`:158`) と同じ扱いが必要なのに、
   §3.4 の決定木も「SQL を実行するか → **Repository**」。D-A'''' (`:50`) は
   「**同一パッケージ内の参照は import 制約で表現できないため、L-3 の機械強制にはパッケージ境界が必要**」として
   `repository/<domain>/` の分割を決めている
-- `templates/backend-repo/.golangci.yml` の 15 規則に、**sqlc 生成パッケージ (v2 では `db/rdb`) を
+- `templates/app-monorepo/backend/.golangci.yml` の 15 規則に、**sqlc 生成パッケージ (v2 では `db/rdb`) を
   `repository/**` 以外から deny する規則は無い**。`L2-L3-service-<domain>` は
   `<module-path>/service` と `<module-path>/repository` しか deny しない
 - **v2 の実測 (2026-07-30)**: `grep -rl "hassan-v2-backend/db/rdb" --include='*.go'` の結果を
@@ -795,7 +795,7 @@ v3 の depguard はこの方向を一切見ていない。
 
 ### 中 1. D-2⑦ の仕様が `ported_domains` を扱えない (非空になった瞬間に必ず落ちる)
 
-- **事実**: `templates/backend-repo/layering-scopes.yml:12`〜`:15` と `ci.yml:162`〜`:174` は、
+- **事実**: `templates/app-monorepo/backend/layering-scopes.yml:12`〜`:15` と `ci.yml:162`〜`:174` は、
   検査⑦を「①実ディレクトリ集合 ②`v3_domains + ported_domains` ③`.golangci.yml` に現れるドメイン名 の
   **3 つを突き合わせ、1 つでも食い違えば落とす**」と定義している。
   一方 `.golangci.yml` に登録すべきなのは **`v3_domains` だけ** (移植分は L-2 / L-3 / L-5 と肥大化 lint の
@@ -814,7 +814,7 @@ v3 の depguard はこの方向を一切見ていない。
 
 ### 中 2. `layering-scopes.yml` と §3.5.2 の表がすでにずれている / 設計リポ側は機械照合できるのに残課題扱いになっている
 
-- **事実**: `templates/backend-repo/layering-scopes.yml:35`〜`:40` の `common_layers` は
+- **事実**: `templates/app-monorepo/backend/layering-scopes.yml:35`〜`:40` の `common_layers` は
   **`entity` / `gateway` / `controller` / `config` の 4 つ**。
   `docs/design/architecture.md:213` (§3.5.2 の共通層の行) は
   **`entity/**` / `gateway/**` / `controller/**` の 3 つ**で、`config` は含まれない
@@ -823,7 +823,7 @@ v3 の depguard はこの方向を一切見ていない。
   §3.5.2 が「本表に無いパッケージを新設する PR は本表への追記を同一 PR に含める」を運用ルールにしている以上、
   `config` がどの区分に属するのか (共通層なのか、区分外なのか) は表側で決める必要がある
 - **加えて**: `architecture.md:709`〜`:712` (§8) は「**写しの同期は機械では検査できない**ため
-  レビュー観点として残る」と書くが、**`templates/backend-repo/layering-scopes.yml` は設計リポ内にある**ので、
+  レビュー観点として残る」と書くが、**`templates/app-monorepo/backend/layering-scopes.yml` は設計リポ内にある**ので、
   **設計リポ側の同期は機械照合できる** (`scripts/doc-lint.sh` か新しい make ターゲットで
   §3.5.2 の表と yml のドメイン集合を突き合わせられる)。機械化できないのは
   **実装リポへ切り出した後の写し**だけである
@@ -973,11 +973,11 @@ v3 の depguard はこの方向を一切見ていない。
 `docs/design/architecture.md` / `docs/design/observability.md` / `docs/design/auth.md` /
 `docs/design/API/README.md` / `docs/design/API/assets.md` / `docs/design/API/knowledge.md` /
 `docs/analysis/gap-analysis.md` /
-`templates/backend-repo/.golangci.yml` / `templates/backend-repo/.github/workflows/ci.yml` /
-`templates/backend-repo/layering-scopes.yml` / `templates/backend-repo/CLAUDE.md.tmpl` /
-`templates/backend-repo/.claude/agents/code-reviewer.md` /
-`templates/backend-repo/.claude/agents/go-developer.md` /
-`templates/backend-repo/.github/ISSUE_TEMPLATE/task.yml` /
+`templates/app-monorepo/backend/.golangci.yml` / `templates/app-monorepo/.github/workflows/ci.yml` /
+`templates/app-monorepo/backend/layering-scopes.yml` / `templates/app-monorepo/backend/CLAUDE.md.tmpl` /
+`templates/app-monorepo/backend/.claude/agents/code-reviewer.md` /
+`templates/app-monorepo/backend/.claude/agents/go-developer.md` /
+`templates/app-monorepo/.github/ISSUE_TEMPLATE/task-backend.yml` /
 `templates/infra-repo/.github/ISSUE_TEMPLATE/task.yml` / `templates/README.md` /
 `templates/shared/.claude/rules/02-issue-granularity.md` /
 `templates/shared/.claude/rules/03-model-escalation.md` /
@@ -1010,7 +1010,7 @@ v3 の depguard はこの方向を一切見ていない。
 
 | # | 対応 | 確認箇所 |
 |---|---|---|
-| 1 | `L3-no-sqlc-outside-repository` の新設 | `templates/backend-repo/.golangci.yml:305`〜。`files` = `usecase/{theme,asset,conversation,idea,plan}/**` + `service/**` + `controller/**` + `entity/**` の 8 件、`deny` = `<module-path>/db/rdb` |
+| 1 | `L3-no-sqlc-outside-repository` の新設 | `templates/app-monorepo/backend/.golangci.yml:305`〜。`files` = `usecase/{theme,asset,conversation,idea,plan}/**` + `service/**` + `controller/**` + `entity/**` の 8 件、`deny` = `<module-path>/db/rdb` |
 | 2 | 設計側の規則化 | `docs/design/architecture.md:195` (L-3 行の更新) / **`:212`〜 の「sqlc 生成パッケージの扱い」節** (規則 1〜4 + 担保列) / `:310` (§3.6 に「『外部の型』には sqlc の生成物も含める」) |
 | 3 | backstop | `ci.yml` の **`D-2⑨`** が (a) `Exec`/`Query`/`QueryRow` (b) **sqlc パッケージの import** (c) `.(pgx.Tx)` / `.(*sql.Tx)` の 3 種を検出し、いずれかで `fail=1` |
 | 4 | 適用範囲 | `files` が `**/usecase/**` ではなく **5 ドメインの個別列挙**なので `usecase/account` 等の移植分はマッチしない。§6 に「移植時に発生する作業 (sqlc 生成型の切り離し)」、§8 に残課題 |
@@ -1074,7 +1074,7 @@ repository 外は 0 件**) は**完全一致**。新規引用 4 件も実在を�
 ### 中 A. `gateway/**` だけが sqlc 生成パッケージと DB ドライバを import できる (同一クラスの最後の開口部)
 
 - **事実**: `L3-no-sqlc-outside-repository` の `files` は `usecase/{5}` / `service/**` / `controller/**` /
-  `entity/**` の **8 件で、`**/gateway/**` を含まない** (`templates/backend-repo/.golangci.yml:305`〜`:320`)。
+  `entity/**` の **8 件で、`**/gateway/**` を含まない** (`templates/app-monorepo/backend/.golangci.yml:305`〜`:320`)。
   `ci.yml` の D-2⑨ の `targets` も
   `"service usecase/theme usecase/asset usecase/conversation usecase/idea usecase/plan controller entity"` で
   **gateway が入っていない**。`L4-gateway-no-upper-layers` が deny するのは `<module-path>/repository` までで、
@@ -1137,7 +1137,7 @@ repository 外は 0 件**) は**完全一致**。新規引用 4 件も実在を�
 ### 軽微 C. `dupl` 発火時の一次対応が書かれていない (gateway 拡大に伴う運用)
 
 - **事実**: `architecture.md:633` 以降が `dupl` の対象に `gateway/**` を含める理由を F14 で説明し、
-  `templates/backend-repo/.claude/agents/code-reviewer.md` は
+  `templates/app-monorepo/backend/.claude/agents/code-reviewer.md` は
   「`dupl` / `cyclop` / `funlen` の指摘を**除外設定で黙らせた形跡があれば重大指摘**」と定めている
 - **問題**: LLM プロバイダごとの gateway 実装は **SDK の型が異なるため共通化できない形の重複**が残り得る
   (F14 が 4 重複したのは共通化しなかったからだが、型が違えば共通化に generics か reflection が要る)。

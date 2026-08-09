@@ -110,12 +110,12 @@ V-3 のロールを平坦化すると **viewer が編集できるようになる
 | POST | `/idea-board-phases` | フェーズ作成 | 契約 | B: `name` (必須) / `color_code` / `order` — R: `Phase` | **201** / **409** (同一契約内の `name` 重複 — v2 に `UNIQUE(contract_id, name)` が実在。D-IB-4') |
 | PUT | `/idea-board-phases/{phase_id}` | フェーズ更新 | 契約 | B: `name` / `color_code` / `order` — R: `Phase` | 200 / 404 / **409** (改名先の `name` が既存と重複) |
 | DELETE | `/idea-board-phases/{phase_id}` | フェーズ削除 | 契約 | Q: `on_conflict` (`reject` 既定 \| `unassign`) | **204** / 404 / **409** (使用中のフェーズで `reject`) |
-| GET | `/ideas` | アイデア一覧 (参照専用) | 個人 / 契約 (**`contract` は増分 1 から有効** — C-16。[../auth.md](../auth.md) §6.12) | Q: `scope` / `theme_id` / `keyword` / `min_stars` / `limit` / `offset` / `sort` — R: `{items:[Idea], total_count}` | 200 |
-| GET | `/ideas/{idea_id}` | アイデア取得 (参照専用) | 個人 / 契約 (§2.2) | R: `Idea` (+ 評価・ステージ) | 200 / 404 |
-| PUT | `/ideas/{idea_id}/star` | スター評価更新 | 個人 | B: `{stars: 0..5}` — R: `Idea` | 200 / 404 / **400** (範囲外) |
-| GET | `/ideas/csv` | **アイデア一覧の CSV エクスポート** (**2026-07-31 に C-16 で追加** — v2 の `GET /ideas/csv` を引き継ぐ。§7 の TH-Q1) | 個人 / 契約 | Q: **`GET /ideas` と同一の絞り込み** (`scope` / `theme_id` / `conversation_session_id` / `keyword` / `min_stars` / `sort`。**`limit` / `offset` は受け付けない** = 絞り込み結果の全件を出す) — R: **`text/csv`** (§2.4) | 200 / **400** (絞り込みが不正) |
 
 Q = クエリパラメータ / B = リクエストボディ / R = レスポンス。
+
+> **`GET /ideas` / `GET /ideas/{idea_id}` / `PUT /ideas/{idea_id}/star` / `GET /ideas/csv` の 4 本は
+> [ideas.md](ideas.md) へ移設した** (2026-08-02。§7 / [ideas.md](ideas.md) §1.2)。
+> `ideas` テーブルの API SSOT は本ファイルではなく [ideas.md](ideas.md) 1 箇所になった。
 
 ### 2.1 `BoardItem` オブジェクト (暫定)
 
@@ -129,7 +129,7 @@ Q = クエリパラメータ / B = リクエストボディ / R = レスポン�
     "tag": "半導体検査",
     "stars": 4,
     "stage": { "code": "plan", "label": "企画作成" },
-    "evaluation": { "rank": "B+", "score": 4.1 },
+    "evaluation": { "grade": "B+", "score": 4.1 },
     "theme": { "id": 12, "name": "超音波センシング 新規事業探索 v2" },
     "deleted": false
   },
@@ -140,58 +140,24 @@ Q = クエリパラメータ / B = リクエストボディ / R = レスポン�
 }
 ```
 
-**`idea` はスナップショットではなく結合結果** (§3 D-IB-1)。`evaluation.rank` と `score` は
+**`idea` はスナップショットではなく結合結果** (§3 D-IB-1)。`evaluation.grade` と `score` は
 プロトタイプの `"B+・4.1"` という**表示用の連結文字列を分解した形**で返す (§3 D-IB-3)。
 **IB-Q11=a (2026-07-30)**: ボード詳細の表表示のため、`idea` に**企画書サマリ
 (事業コンセプト / 想定顧客 / 課題 / 解決方法 相当) をサーバ結合で含める**方針を採る。
 **具体的なフィールド名と形は企画書ドメインの API 設計時に確定**し、本 JSON 例へ追記する
 (D-IB-1 と同じ「参照が正・表示用はサーバ結合」の原則に従う。FE に文字列スナップショットを持たせない)。
 
-### 2.2 単体取得の可視性判定 (`GET /ideas/{idea_id}`)
+### 2.2 単体取得の可視性判定 → [ideas.md](ideas.md) へ移設済み (2026-08-02)
 
-`scope` パラメータはパスで 1 件を指定する取得系では意味を持たないため、**サーバが可視性を判定**する。
-アイデアが読めるのは次のいずれかを満たす場合で、**それ以外は 404** ([README.md](README.md) §2.5)。
+`GET /ideas/{idea_id}` の可視性判定 (所有者 / ボードメンバーシップ / `visibility=contract` の 3 条件)
+は [ideas.md](ideas.md) §1.4 へ移設した。**ボードメンバーシップによる可視性条件は同節の②**であり、
+`GET /idea-boards/{board_id}/items` のメンバーシップ判定と揃っている必要がある点は変わらない
+([ideas.md](ideas.md) §8 の **R-IDA-1**)。
 
-| # | 条件 | 増分 |
-|---|---|---|
-| 1 | 自分が作成したアイデア (`idea_hassans.account_id` = 認証ユーザー) | 1 |
-| 2 | 自分がメンバーであるボードに載っているアイデア (`idea_board_items` 経由) | 1 |
-| 3 | 同一契約かつアイデアの可視性が契約内 | **1** (`visibility` は増分 1 から読み書きする — C-16 / [../auth.md](../auth.md) §6.12) |
+### 2.4 CSV エクスポートの応答仕様 → [ideas.md](ideas.md) へ移設済み (2026-08-02)
 
-条件 2 が必要な理由: **共有ボードには他メンバーが作成したアイデアが載る**ため、
-条件 1 だけだと**ボード上のアイテムは見えるのに詳細が 404 になる**。
-`GET /idea-boards/{board_id}/items` はボードのメンバーシップで判定するため、両者の整合が要る。
-
-### 2.4 CSV エクスポートの応答仕様 (`GET /ideas/csv`)
-
-**2026-07-31 に C-16 で追加** (v2 の `GET /ideas/csv` = `hassan-v2-backend/router/router.go:127` を引き継ぐ。§7 TH-Q1)。
-**v2 の実装を実測して仕様化した**もので、新しい機能ではない。
-
-| 項目 | v3 の仕様 | v2 の実装 (出典) |
-|---|---|---|
-| Content-Type | `text/csv` | `hassan-v2-backend/controller/idea.go:481` |
-| ファイル名 | `Content-Disposition: attachment; filename="ideaList.csv"` | `同:482` |
-| 文字コード | **UTF-8 + BOM** (Excel で開いたときに文字化けしないため。**踏襲する**) | `同:483` (`0xEF 0xBB 0xBF`) |
-| 改行 | **CRLF** | `同:487` (`writer.UseCRLF = true`) |
-| 1 行目 | **ヘッダ行 (日本語の列名)** | `hassan-v2-backend/usecase/idea/get_ideas_csv.go:43`〜`:59` |
-| テナント境界 | **`contract_id` を `WHERE` に持つ** (§6.4 の読み取り検査の対象。`Get*` ではなく `List*` として実装する) | `同:35` (`ListIdeasByIdeaHassanID(ctx, input.ContractID, ...)` — **v2 も契約で絞っている**) |
-| 絞り込み | **`GET /ideas` と同一のパラメータ**。`limit` / `offset` は受け付けず**絞り込み結果の全件**を出す | v2 は `idea_hassan_id` (発散の実行単位) の**必須指定 1 本のみ** (`同controller:452`〜`:455`。未指定は 400) |
-
-**v2 との差 (いずれも C-16 の「操作の可否」は変えない)**:
-
-- **絞り込みの入口が広がる**: v2 は `idea_hassan_id` 必須の 1 通りだけだったが、v3 は
-  `theme_id` / `conversation_session_id` / `keyword` / `min_stars` / `scope` で絞れる。
-  **v2 の `idea_hassan_id` は v3 の `conversation_session_id` に対応する**
-  (v2 の `idea_hassans` = 発散の実行単位。v3 は `ideas.conversation_session_id` — [../data-model.md](../data-model.md) §4.6)
-- **列は v2 の 16 列を維持する**。v3 のフィールドへの写像:
-  アイデアタイトル (`title`) / コンセプト (`summary`) / 顧客 (`customer`) / 課題 (`issue`) / 解決策 (`solution`) /
-  価値提案 (`target_market`) / 市場規模 (`market_size`) / CAGR (`cagr`) / 新規性 (`uniqueness`) /
-  ミッション整合性 (`mission_alignment`) / 総合スコア (`score`) / 各軸スコア 4 列 / 作成日 (`created_at`)。
-  **列の増減は行わない** — 増やすと v2 のエクスポートを取り込んでいる利用者側の集計が壊れる
-
-**却下 (非同期ジョブ + ダウンロード URL にする)**: v2 は同期で返しており件数も 1 発散分の規模である。
-非同期化すると**状態を持つ先が必要になり** (BE-10)、v2 にできていた「押したら落ちてくる」操作が 2 段になる。
-**件数が問題になった時点で再検討する** (契機: 1 契約のアイデアが数万件規模になったとき)。
+`GET /ideas/csv` の応答仕様 (Content-Type・BOM・改行・列の写像・v2 との差分) は
+[ideas.md](ideas.md) §2.6 へ移設した ([ideas.md](ideas.md) §8 の **R-IDA-1**)。
 
 ---
 
@@ -202,7 +168,7 @@ Q = クエリパラメータ / B = リクエストボディ / R = レスポン�
 | **D-IB-0** | **ボードの中身の決定方式** (filter 評価 か 実体アイテム か) | **実体アイテム (`idea_board_items` テーブル)** を採る。ボードに載っているアイデアは行として存在し、`POST` / `DELETE /items` で増減する | (a) **v2 の filter 方式を継続する** (V-1。`idea_boards.filter` jsonb を評価して毎回算出): **プロトタイプが要求する per-item のコメントスレッドとフェーズ・メモに実体が必要**。filter 方式では「どのアイデアにどのコメントが付いたか」を保持する先が無く、条件に合致しなくなったアイデアのコメントが行き場を失う。またフェーズを per-item で持てないため、フェーズ変更が filter の条件と循環する (フェーズで絞ったボードでフェーズを変えると、そのアイテムがボードから消える)。(b) filter + 実体アイテムの併存 (動的 + 手動追加): 「なぜこのアイデアが載っているのか」が 2 系統になり、削除の意味 (filter から除外 か item 削除 か) が決まらない。**却下の代償**: v2 の filter が持つ「条件に合う新アイデアが自動で載る」性質を失う (§6 IB-Q1 で要確認として明示) |
 | D-IB-1 | **アイデアの参照 vs スナップショット** | **参照 (`idea_id`) を正**とし、表示用フィールド (テーマ名・アイデア名・評価・ステージ) は**サーバが結合して返す** | (a) プロトタイプ方式 (文字列を転記して保存 — `BOARDS[].items[].theme` / `ideaTitle` / `verdict` が `:11936-11957` で文字列リテラル): **アイデアをブラッシュアップして評価が変わってもボードが古い値を表示し続ける** (BE-1 / BE-4 の再発形)。プロトタイプの `PAST_THEMES` (`:12630`) が `TM_THEMES` と別系統のモックである点も、スナップショット設計が整合を失う実例。(b) 参照 + スナップショットの両持ち: 「どちらを表示するか」の判断が UI ごとに散り、`verdict` の不一致がユーザーから見て不可解になる |
 | D-IB-2 | パス命名 (`ideas` → `items`) | **`/idea-boards/{board_id}/items`** に改名 | (a) v2 の `/idea-boards/:id/ideas/:idea_id` 踏襲 (`hassan-v2-backend/router/router.go:135-136`): 同じ URL が「アイデア」と「ボード上のアイデア (フェーズ・メモ・コメントを持つ別エンティティ)」の 2 概念を指す。**v2 ではこの `PUT` が実際に `ideas` テーブルを更新している** (`UPDATE ideas SET memo = $2, phase = $3 WHERE id = $1` — `hassan-v2-backend/db/queries/idea_board.sql:64-67`、呼び出しは `hassan-v2-backend/usecase/idea_board/update_board_idea.go:58`)。つまり **URL はボード配下なのに、更新結果は同じアイデアを載せた全ボードに波及する** — この曖昧さを v3 では item 単位に変え、URL の形でも表明する。**改名と更新先の変更はどちらも v2 からの意図的な逸脱**であり、移行が必要 (§4) |
-| D-IB-3 | 評価の返し方 | **`{rank, score}` に分解**して返す | (a) プロトタイプの `"B+・4.1"` をそのまま返す: FE で文字列を分解する処理が必要になり、**「120-420億円」を「-420億円」と誤抽出した FE-6 と同種のパーサ**を書かせることになる。数値化はサーバ側で 1 度だけ行う |
+| D-IB-3 | 評価の返し方 | **`{grade, score}` に分解**して返す (**キー名は `rank` ではなく `grade`** — [ideas.md](ideas.md) §2.1 の `evaluation.grade` に統一。[ideas.md](ideas.md) §8 の **R-IDA-1** で改名) | (a) プロトタイプの `"B+・4.1"` をそのまま返す: FE で文字列を分解する処理が必要になり、**「120-420億円」を「-420億円」と誤抽出した FE-6 と同種のパーサ**を書かせることになる。数値化はサーバ側で 1 度だけ行う |
 | D-IB-4 | フェーズの所有単位 | **契約単位のマスタ** (`/idea-board-phases`) + ボードアイテムが参照 (v2 踏襲) | (a) ボードごとのフェーズ定義 (プロトタイプは `BOARDS[].phases` としてボード内に持つ — `:11932`): **v2 の `idea_board_phases` は `contract_id` を持つ既存テーブル** (`hassan-v2-backend/db/schema.sql:615-625`) であり、本番 DB に既存データがある。v2 も全ボードに同じ集合を渡している (`hassan-v2-backend/usecase/idea_board/list_idea_boards.go:38`, `:52`)。ボード単位に変えると移行が必要になる (DR-3)。プロトタイプの「ボードごとのフェーズ」表示は、契約マスタの部分集合 + 件数集計で再現できる |
 | D-IB-4' | フェーズのカラムと一意性 | **`color_code` は v2 と同名を使う** (`text NOT NULL DEFAULT '#0455C5'` — `hassan-v2-backend/db/schema.sql:619`)。**`order` は v3 の新設カラム** (v2 に相当カラムは無く `ORDER BY name ASC` で返している — `hassan-v2-backend/db/queries/idea_board.sql:32-36`)。**同名フェーズの作成・改名は 409** | (a) API 側の項目名を `color` にする: DB カラム名と API 項目名が無意味に食い違い、DTO で毎回変換が必要になる。(b) **v2 の upsert 挙動を踏襲する** (`UpsertIdeaBoardPhase` は `ON CONFLICT (contract_id, name) DO UPDATE SET color_code = ...` — `hassan-v2-backend/db/queries/idea_board.sql:38-42`): **「作成したつもりが既存フェーズの色を書き換えていた」が起きる**。`POST` が既存リソースを黙って更新するのは D-API-11 (作成は 201) と矛盾する。色を変えたいなら `PUT /idea-board-phases/{phase_id}` を使う明示的な経路に寄せる。**この 409 化は v2 からの逸脱** (§3.2)。(c) `order` を作らない: プロトタイプのフェーズは選定プロセスの段階 (要検討 → 深掘り中 → 投資判断) を表し、名前のアルファベット順では意味が壊れる |
 | D-IB-5 | コメント | **アイテムに紐づく新テーブル + 3 エンドポイント**。**編集は提供せず、削除のみ** (投稿者本人または board admin。それ以外は 403 — §3.1) | (a) 編集も提供する: プロトタイプに編集 UI が無く (`items[].thread` は表示と投稿のみ)、議論の記録が後から書き換わることの是非が未確認。(b) v2 の `business_plan_chats` を流用: あちらは LLM チャットの履歴であり、人間同士のコメントとは検索・通知の要件が異なる |
@@ -332,13 +298,13 @@ Q = クエリパラメータ / B = リクエストボディ / R = レスポン�
 
 | ID | 回答 | 備考 |
 |---|---|---|
-| A-1 | [README.md](README.md) §2.1。全 21 本が認証必須 | AC-1.1 |
+| A-1 | [README.md](README.md) §2.1。**全 18 本**が認証必須 (2026-08-02。`/ideas` 系 4 本の [ideas.md](ideas.md) への移設後の実測 — 移設前は旧版で「21 本」と自称していたが、その時点の表の実測は 22 本で既に不一致だった。移設に伴う機械照合は `scripts/check-endpoint-mapping.sh` の検査④) | AC-1.1 |
 | A-2 | 認証ロールは `AuthRoleUser` のみ。その上で **ボード内ロール (`admin` / `editor` / `viewer`) がリソース単位の権限を決める** ([README.md](README.md) §2.2 の R-2)。権限表は §3.1 | v2 の 3 段ロールを引き継ぐ (D-IB-8) |
 | A-3 | `idea_boards` / `idea_board_phases` は `contract_id` + 作成者列 (v2 の既存構造を踏襲)。新設する `idea_board_items` / `idea_board_comments` にも **`contract_id` と作成者列**を持たせる ([../auth.md](../auth.md) §6.3 の 2 番) | data-model で確定 |
 | A-3' | **`ideas` テーブルは v2 の構造が [../auth.md](../auth.md) §6.3 の方針を満たしていない**。事実: ① 所有者列 (`account_id` / `contract_id`) を持たず `idea_hassan_id` → `idea_hassans.account_id` の **2 段チェーン**で所有者に到達する (`hassan-v2-backend/db/schema.sql:151-178`。[../auth.md](../auth.md) §2.3 の集計と一致) ② **`is_deleted` カラムが無い** (同スキーマ)。したがって v3 では **`ideas` への所有者列 1 段化と論理削除列の追加が新規作業**として必要 (D-IB-7 が論理削除を前提にしている) | **data-model 設計への申し送り** (Q-1 待ち。本ファイルでは確定できない) |
 | A-4 | 全エンドポイントで Repository のクエリ条件に `contract_id`。`board_id` / `item_id` / `comment_id` / `phase_id` / `idea_id` は**すべて契約と組で検証**する (他契約の ID は 404) | §2 |
 | A-5 | 本表の「固有ステータス」列 + **§3.1 の権限表** + [README.md](README.md) §2.5。**403 は 8 本** — admin 限定 3 本 (`PUT`/`DELETE /idea-boards/{board_id}` / `PUT /members`)、投稿者限定 1 本 (`DELETE /comments/{comment_id}`)、viewer の編集操作 4 本 (`POST`/`PUT`/`DELETE .../items` 系 + `POST .../comments`)。v2 の `IdeaBoardForbidden` (403) と同じ判断 (§3.1)。非メンバーは一律 404 | **AC-1.4** |
-| A-6 | 本ファイルに LLM 経路は無い。アイデア参照 API は**読み取り専用**であり、生成は対象外ファイルが担う | — |
+| A-6 | 本ファイルに LLM 経路は無い。アイデアの参照・生成・評価は [ideas.md](ideas.md) / [conversation.md](conversation.md) が担う (§7 の移設後) | — |
 | A-7 | **回答**: ボードは v2 の契約内共有 (`idea_boards.contract_id` + `viewer_account_ids` / `editor_account_ids`) と **3 段ロールをそのまま引き継ぐ** (D-IB-8 / §3.1 / §4 M-4)。可視性はメンバーシップで決まる (D-IB-11)。**[../auth.md](../auth.md) §7 の「本増分では共有機能を持たない」と食い違う** — 既存データがある機能に対しては A-7 を「対象外」にできない ([README.md](README.md) §5 API-Q3) | 要ユーザー確認 |
 | O-6 | ボードの作成・削除、アイテムの追加・削除、コメントの投稿・削除、**メンバー・ロールの変更**は監査対象。契約内の他メンバーに影響する操作であり、v2 の `activity_logs` 相当に記録する。**v2 も `PUT /members` の成功・失敗を活動ログに記録している** (`hassan-v2-backend/usecase/idea_board/manage_board_members.go:80-95` の `recordIdeaBoardActionFailed` / `recordIdeaBoardActionSuccess`) | 記録項目は [../observability.md](../observability.md) §4.5 |
 | DR-3 (既存データ) | **§4 の移行手順 M-1〜M-4 が回答**。v2 のデータは読み取るだけで書き換えないため、ロールバックは v3 側を捨てるだけで成立する | 切り戻し期限は operations 設計 |
@@ -355,7 +321,7 @@ Q = クエリパラメータ / B = リクエストボディ / R = レスポン�
 | IB-Q4 | **共有メンバー編集 UI のロール選択** | ボード詳細ヘッダの共有メンバー編集ボタンは**配線なし**で、プロトタイプの `BOARDS[].members` は**ロールの区別を持たない** (アカウント ID の配列のみ — `:11934`)。一方 v2 の API は `role` (viewer\|editor) を要求する (`hassan-v2-backend/usecase/idea_board/manage_board_members.go:52-53`) | **UI 要件の確認**。API は v2 を踏襲して `role` を必須にした (D-IB-8) ため、**FE にロール選択 UI が必要**。[themes.md](themes.md) TH-Q5 (テーマメンバーの権限差) と揃えるかも同時に判断する |
 | IB-Q5 | **フェーズの色の値域** | ~~色カラムの有無~~ → **確認済み**: `color_code text NOT NULL DEFAULT '#0455C5'` が実在 (`hassan-v2-backend/db/schema.sql:619`)。**残る未確定は値域の検証**のみ — プロトタイプは任意の 16 進色 (`PHASE_OPTIONS` — `:12003`)、v2 は text で検証なし | 実装設計 (`#RRGGBB` 形式のバリデーションを入れるかを決める。入れる場合 400 が増える) |
 | IB-Q6 | **アイデア参照 API のスコープ** | プロトタイプのボード作成ウィザードは「過去のテーマから統合アイデアを選ぶ」(`:12705-12972`)。**他メンバーのアイデアを選べるのか**が未定義 | 要件確認。暫定で `scope=mine` を既定とした (他人のアイデアを既定で見せない) |
-| IB-Q7 | **アイテムのステージ表示** | `items[].stage` (発散 / 企画作成) はアイデアの進行状況の派生値 | 会話型アイデア創出の設計 (ステージ定義の SSOT。[themes.md](themes.md) TH-Q3 と同じ課題) |
+| IB-Q7 | **アイテムのステージ表示** | **クローズ (2026-08-01)**。[conversation.md](conversation.md) §2.3 が「**会話の `stage` を他ドメインへ配らない**」と決めたため、`items[].stage` は**会話セッションの stage を引かず、アイデア自身の事実から導出する** — 「企画書 (`plans`) が 1 件以上あれば企画作成、無ければ発散」。**会話セッションを持たないアイデア (手動登録・v2 移行分) でも成立する**のが採用理由 (会話の stage を引くと `conversation_session_id` が NULL の行でステージが決まらない) | **クローズ済み** (導出規則は本表のとおり。stage の値域そのものは [conversation.md](conversation.md) §2.3 が SSOT) |
 | IB-Q8 | **コメント投稿を viewer に許すか** | §3.1 で `CanEdit` (admin / editor) のみに限定した。プロトタイプにロールの概念が無いため要件から判断できない | 要件確認。許す場合は「閲覧のみ」の招待の意味が変わる (§3.1 の却下案 a) |
 | IB-Q9 | **`filter` が空のボードの件数** | §4 M-1 で `filter` が NULL / 空のボードは**契約内の全アイデアが対象**になる (v2 のクエリは条件が全て無効化される)。契約ごとの件数が未計測 | **移行前にユーザー側で件数を計測**する (plan.md の Task-2f と同じ性質の作業)。件数が大きい契約では M-1 の実行時間と `idea_board_items` の行数見積もりが必要 |
 | IB-Q10 | **memo のスコープ変更の告知** | §4 M-2 の代償として、切替後は同じアイデアの memo がボードごとに独立する (v2 はグローバル) | リリースノート / ユーザー告知の要否 (`docs/design/operations.md` の切替手順) |
@@ -390,32 +356,21 @@ Q = クエリパラメータ / B = リクエストボディ / R = レスポン�
 
 ---
 
-## 7. アイデア参照 API をこのファイルに置く理由
+## 7. アイデア参照 API の暫定配置 → [ideas.md](ideas.md) へ移設済み (2026-08-02)
 
-[README.md](README.md) §0 のとおり、**アイデアの生成 (発散) は本ディレクトリの対象外**だが、
-**参照・管理系** (`GET /ideas`, `GET /ideas/{idea_id}`, `PUT /ideas/{idea_id}/star`) は対象に含めた。
-配置を本ファイルにした理由:
+**参照系は [ideas.md](ideas.md) へ移設済み**。`GET /ideas` / `GET /ideas/{idea_id}` /
+`PUT /ideas/{idea_id}/star` / `GET /ideas/csv` の 4 本は、旧版の本節が暫定配置していた
+参照専用 API だったが、生成系 (会話型アイデア創出) の設計が [conversation.md](conversation.md) /
+[ideas.md](ideas.md) として確定したため、`ideas` テーブルを主対象とする API の SSOT を
+[ideas.md](ideas.md) 1 箇所に統合した ([ideas.md](ideas.md) §8 の **R-IDA-1**。移設の判断は同書 §1.2)。
 
-1. **消費者としての結合が最も強い**。ボードはアイデアの一覧・単体・スター・評価・ステージのすべてを使う。
-   [knowledge.md](knowledge.md) はアイデア引継ぎ時に一覧と単体しか使わない
-2. **v2 に既存の前例がここにある**。`GET /idea-boards/:id/ideas` は既に `ideas` を返す経路として
-   実装済み (`hassan-v2-backend/controller/idea_board.go:256` が `gin.H{"ideas", "total", "filter"}` を返す)
-3. `PUT /ideas/{idea_id}/star` は v2 でもアイデア単体の操作として存在し
-   (`hassan-v2-backend/router/router.go:128`)、ボード上のスター表示 (`items[].stars`) の更新経路になる
+**旧版が置いていた制約 (アイデアの作成・本文更新・削除のエンドポイントを本ファイルに追加しない) は解除した**
+— 当時の制約は「生成側の設計が確定するまで」という条件付きであり ([README.md](README.md) §6.1 の依存順序)、
+その条件が満たされたため。**作成・本文更新・削除・版・評価は [ideas.md](ideas.md) §1.1 が定義する**。
+本ファイルの範囲は §0 のとおりボードとその中身 (`idea_board_items` / コメント / フェーズ) に限られ、
+アイデア自体の CRUD をここに追加することはない。
 
-**却下した配置**:
-
-- **[README.md](README.md) に置く**: README は共通規約と索引の SSOT であり、
-  ドメイン固有の入出力を書くと「規約を読む」目的が薄まる
-- **専用ファイル `ideas.md` を新設**: 生成系 (会話型アイデア創出の設計) と参照系が別ファイルに分かれ、
-  **同じ `ideas` テーブルの SSOT が 2 ファイルに割れる**。参照系だけを持つファイルは、
-  生成系の設計が確定した時点で統合され直す可能性が高い
-- **[knowledge.md](knowledge.md) に置く**: ナレッジはアイデアを**読むだけ**の弱い消費者であり、
-  スター更新の置き場として不自然
-
-**制約**: 生成側 (会話型アイデア創出) の設計が確定するまで、この 3 本は**読み取りとスター更新のみ**とし、
-アイデアの作成・本文更新・削除のエンドポイントを本ファイルに追加しない
-([README.md](README.md) §6.1 の依存順序)。
+配置の判断 (集約する案の採用理由・却下した代替案) は [ideas.md](ideas.md) §7 の **D-IDA-1** が持つ。
 
 ---
 
@@ -425,28 +380,29 @@ Q = クエリパラメータ / B = リクエストボディ / R = レスポン�
 他ドメインファイル (§2 相当) が持っている「プロトタイプ ↔ v2 ↔ v3」の
 フィールド対応表が `Idea` について存在しない**ことが分かった。参照系 3 本を
 §7 の理由で後から本ファイルに置いたため、対応表を作る手順が抜けた。
-以下がその対応表で、**IB-Q14 として未確定を 4 件起票する**。
+以下がその対応表で、**当初 IB-Q14 として未確定 4 件を起票した (2026-07-31)**。
+**IB-Q14-1〜3 は解決済み** (2026-08-02。下表参照)。**残る未確定は IB-Q14-4 の 1 件のみ**。
 
 | プロトタイプの表示・データ | 出典 | v2 の列 | v3 の列 ([../data-model.md](../data-model.md) §4.6) | 現在の `Idea` (§2.1) | 判定 |
 |---|---|---|---|---|---|
 | `num` (通番) | `TM_THEMES[].ideas[].num` | — | `seq_no` | `num` | あり |
 | `title` | 同上 | `title` | `title` | `title` | あり |
-| `score` / `tier` | 同上 | `score` + 各軸スコア | `score` + 各軸スコア | `evaluation.{rank,score}` | あり (D-IB-3 で分解済み) |
+| `score` / `tier` | 同上 | `score` + 各軸スコア | `score` + 各軸スコア | `evaluation.{grade,score}` | あり (D-IB-3 で分解済み。**キー名は `grade`** — [ideas.md](ideas.md) §8 の R-IDA-1) |
 | スター | `renderStarRater` | `star_rating` | `star_rating` | `stars` | あり |
 | **`tags` (配列)** | `TM_THEMES[].ideas[].tags:["脱炭素","内部検査"]` (`:10488`)。ボード一覧のモックも配列 (`:12675`) | **無い** (`asset_tags` はアセット専用) | **無い** (§4.6 に `tag` 列・タグテーブルなし。`asset_tags` のみ — 同 §4.4) | **`tag` (単数)** — JSON 例 (§2.1) に 1 回だけ現れ、フィールド表・出典・格納先の記述が無い | **IB-Q14-1 (要確定)** |
-| **`tam` (市場規模)** | テーマ内アイデア一覧の列 `i.tam` (`renderTmIdeasTable` が表示) | **`market_size text`** (`hassan-v2-backend/db/schema.sql:159`) | **`market_size`** | **無い** | **IB-Q14-2 (欠落)** |
-| **`cagr` (成長率)** | 同上 `i.cagr` | **`cagr text`** (`同:160`) | **`cagr`** | **無い** | **IB-Q14-2 (欠落)** |
-| **`hasPlan` / `hasKnowledge`** | テーマ内アイデア一覧のバッジ | — | `plans` の存在 / `knowledge_*` の存在で導出可能 | `stage.{code,label}` のみ | **IB-Q14-3 (要確定)** |
+| **`tam` (市場規模)** | テーマ内アイデア一覧の列 `i.tam` (`renderTmIdeasTable` が表示) | **`market_size text`** (`hassan-v2-backend/db/schema.sql:160`) | **`market_size`** | [ideas.md](ideas.md) §2.1 の `market_size` (表示用文字列をそのまま返す) | **IB-Q14-2 (回答済み — [ideas.md](ideas.md) §2.1)** |
+| **`cagr` (成長率)** | 同上 `i.cagr` | **`cagr text`** (`hassan-v2-backend/db/schema.sql:161`) | **`cagr`** | [ideas.md](ideas.md) §2.1 の `cagr` (同上) | **IB-Q14-2 (回答済み — [ideas.md](ideas.md) §2.1)** |
+| **`hasPlan` / `hasKnowledge`** | テーマ内アイデア一覧のバッジ | — | `plans` の存在 / `knowledge_*` の存在で導出可能 | [ideas.md](ideas.md) §2.1 の `has_knowledge` (**`has_plan` は持たない** — `stage.code=="plan"` と同値になるため) | **IB-Q14-3 (回答済み — [ideas.md](ideas.md) §2.1 / D-IDA-12)** |
 | 事業コンセプト / 想定顧客 / 課題 / 解決方法 | `_ideaDetails` → ボード詳細の行内展開・企画書モーダル | `concept` / `customer` / `issue` / `solution` (`同:155`〜`:158`) | **`summary`** / `customer` / `issue` / `solution` | IB-Q11=a で「含める」と決定済み・形は未定 | **IB-Q14-4 (列名の対応が未記録)** |
 | `projectRef` | `TM_THEMES[].projectRef` (`:10485` / `:11283`) | — | — | — | **対象外** — 宣言のみで**参照箇所 0 件の死んだフィールド**。設計に持ち込まない |
 
-### IB-Q14 (要確認 — 上表の未確定 4 件)
+### IB-Q14 (要確認 — 残るは IB-Q14-4 の 1 件)
 
 | # | 項目 | 論点 | 確定先 |
 |---|---|---|---|
 | ~~**IB-Q14-1**~~ | **`Idea.tag` の単複と格納先** → **回答済み (2026-07-31)** | §2.1 の JSON 例は `"tag": "半導体検査"` の**単数**だが、プロトタイプは**配列**。さらに **v2・v3 のどちらにもアイデア用のタグ列・タグテーブルが無かった** — **API が返すと宣言しているフィールドに書き込む側が存在しない** (BE-10 の「読む側と書く側を対で設計する」に該当) | **(a) 配列で持ち `idea_tags` テーブルを新設する** (ユーザー決定)。却下: (b) 単数の `ideas.tag` 列 — プロトタイプが 2 個以上のタグを表示しており 1 件目しか出せない / (c) タグを採らない — 探索の手掛かりを落とす。**API 側の確定**: `Idea.tag` (単数) を **`tags: string[]`** に改める (下記 §8.1)。**data-model.md への是正要求は §8.2** |
-| **IB-Q14-2** | **`market_size` / `cagr` を `Idea` に載せるか** | v2・v3 の双方に列があり、**プロトタイプのテーマ内アイデア一覧が列として表示している**のに `Idea` に無い。載せない場合、この列を FE が描けない | 本ファイル §2.1。**載せる場合は表示用の文字列 (`"12.4 兆円"`) をそのまま返すか数値+単位に分解するかを D-IB-3 と同じ方針で決める** — v2 の型は `text` であり、FE-6 (「120-420億円」の誤抽出) の再発点になる |
-| **IB-Q14-3** | **`has_plan` / `has_knowledge` を返すか** | プロトタイプはバッジで企画書・ナレッジの有無を示す。`stage.code` は進行段階であって「企画書が存在するか」とは別 (段階が `plan` でも実体が無い状態があり得る) | 本ファイル §2.1。導出元は `plans` (UNIQUE `(idea_id)`) と ナレッジの紐付け。**導出クエリを一覧で N+1 にしない形 (EXISTS の結合) を明記すること** |
+| ~~**IB-Q14-2**~~ | **`market_size` / `cagr` を `Idea` に載せるか** → **回答済み (2026-08-01。[ideas.md](ideas.md) §2.1)** | v2・v3 の双方に列があり、**プロトタイプのテーマ内アイデア一覧が列として表示している**のに `Idea` に無かった | **(a) 載せる。表示用の文字列 (`"12.4 兆円"`) をそのまま返し、数値には分解しない** ([ideas.md](ideas.md) §2.1) — 数値は `evaluation.axis_scores.market_size` / `.market_cagr` として別途返すため、FE が文字列をパースする必要が無い (FE-6 の再発点を作らない) |
+| ~~**IB-Q14-3**~~ | **`has_plan` / `has_knowledge` を返すか** → **回答済み (2026-08-01。[ideas.md](ideas.md) §2.1 / §7 D-IDA-12)** | プロトタイプはバッジで企画書・ナレッジの有無を示す。`stage.code` は進行段階であって「企画書が存在するか」とは別 | **`has_knowledge` のみ返す。`has_plan` は持たない** — `stage.code == "plan"` と同値になり、同じ事実を 2 つの名前で返すことになるため ([ideas.md](ideas.md) D-IDA-12) |
 | **IB-Q14-4** | **v2 `ideas.concept` → v3 `ideas.summary` の写像** | v3 の列名は `summary` だが、[../data-model.md](../data-model.md) に **`concept` の言及が 1 件も無い** (リネームなのか意味が変わったのかが未記録)。移行時にどちらへ入れるかが決まらない | **[../data-model.md](../data-model.md) §6 の写像規則**への是正要求。IB-Q11=a の「4 項目を含める」を実装する前提になる |
 
 ### 8.1 IB-Q14-1 の反映 (API 側・確定)
@@ -459,7 +415,7 @@ Q = クエリパラメータ / B = リクエストボディ / R = レスポン�
 | 型 | `tags: string[]` (**空配列可**。null は返さない — FE の分岐を増やさない) |
 | 並び順 | **登録順** (`idea_tags.sort_order` 昇順)。`asset_tags` と同じ規約 ([../data-model.md](../data-model.md) §4.4) |
 | 検索 | `GET /ideas` の `keyword` の対象に**タグを含める** — [assets.md](assets.md) D-AS-9 が `name` / `description` / `tags` を対象にしたのと同じ扱いに揃える |
-| 更新経路 | **本ファイルでは持たない**。アイデアの本文更新は §7 の制約により会話型 API 設計 (Task-3p) の担当。**`tags` の書き込み側もそこで定義する** — 読む側だけ実装して書く側が無い状態 (BE-10) を作らないこと |
+| 更新経路 | **本ファイルでは持たない**。[ideas.md](ideas.md) §5 が `PUT /ideas/{idea_id}` の `tags` (全置換) として書き手を確定させた (**BE-10 クローズ** — 読む側だけあって書く側が無い状態を解消済み) |
 
 ### 8.2 [../data-model.md](../data-model.md) への是正要求 (IB-Q14-1 の帰結。**2026-07-31 に全 15 箇所を反映済み**)
 

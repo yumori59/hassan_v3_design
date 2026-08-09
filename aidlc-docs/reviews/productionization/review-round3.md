@@ -37,9 +37,9 @@
 
 ### 0.3 雛形 (templates/)
 
-- `templates/backend-repo/.github/workflows/ci.yml`
-- `templates/backend-repo/.golangci.yml`
-- `templates/frontend-repo/.github/workflows/ci.yml`
+- `templates/app-monorepo/.github/workflows/ci.yml`
+- `templates/app-monorepo/backend/.golangci.yml`
+- `templates/app-monorepo/.github/workflows/ci.yml`
 
 ### 0.4 レビュー範囲外として扱ったもの (理由付き)
 
@@ -85,8 +85,8 @@
 
 | # | 主張 (出典) | 照合方法 | 結果 |
 |---|---|---|---|
-| 1 | depguard **18 規則** (`docs/design/architecture.md:237` / `:832` / `aidlc-docs/inception/productionization/plan-layering.md:61`) | `templates/backend-repo/.golangci.yml` の 8 スペース字下げキーを列挙 → `L1-entity-no-other-layers` (`:113`) 〜 `L6-service-no-connection-pool` (`:400`) の **18 件** | **一致** |
-| 2 | golangci-lint ステップ = **`ci.yml:46-49`** (`plan-layering.md:61` / `:116`) | `templates/backend-repo/.github/workflows/ci.yml:46`〜`:49` = `- name: D-2①⑤ golangci-lint …` 〜 `args: --config=.golangci.yml` | **一致** |
+| 1 | depguard **18 規則** (`docs/design/architecture.md:237` / `:832` / `aidlc-docs/inception/productionization/plan-layering.md:61`) | `templates/app-monorepo/backend/.golangci.yml` の 8 スペース字下げキーを列挙 → `L1-entity-no-other-layers` (`:113`) 〜 `L6-service-no-connection-pool` (`:400`) の **18 件** | **一致** |
+| 2 | golangci-lint ステップ = **`ci.yml:46-49`** (`plan-layering.md:61` / `:116`) | `templates/app-monorepo/.github/workflows/ci.yml:46`〜`:49` = `- name: D-2①⑤ golangci-lint …` 〜 `args: --config=.golangci.yml` | **一致** |
 | 3 | D-2⑨ の `targets` に **`gateway`** (`architecture.md:800` / `§3.7 の 3`) | `ci.yml:264` = `targets="service usecase/theme … controller entity gateway"` | **一致** |
 | 4 | sqlc 規則 1 の deny 対象に `gateway/**` (`architecture.md:262`) | `.golangci.yml:322` = `- "**/gateway/**"` (`L3-no-sqlc-outside-repository` の `files`) | **一致** |
 | 5 | `L4-gateway-no-upper-layers` の deny に `database/sql` / `pgx` (同 `:262`) | `.golangci.yml:344` / `:346` に両 desc が実在 | **一致** |
@@ -100,7 +100,7 @@
 | 13 | AS-Q11 の `setFile` `:9720`〜`:9728` / `summarizeIdeaInput` `:9742` / ウィジェット `:9606`〜`:9861` (`docs/design/API/assets.md:179`) | 4 箇所すべて実測一致 (`9606 function addIdeaInputWidget()` / `9720 function setFile(f)` / `9742 function summarizeIdeaInput(file, text)`) | **一致** |
 | 14 | `projectRef` = `:10485` / `:11283` (`idea-boards.md:409`) | 両行に `projectRef:true,` が実在。**参照箇所 0 件**の主張も grep で確認 | **一致** |
 | 15 | `PHASE_OPTIONS` `:12003` / `BOARDS[].members` `:11934` (同 `:323` / `:324`) | 両行実在 (`const PHASE_OPTIONS = [` / `members: ["uchiho",…]`) | **一致** |
-| 16 | FE 併置テスト検査 = `templates/frontend-repo/.github/workflows/ci.yml:58`〜`71` (`docs/design/testing.md:650` / `:667`) | 実測 `:58` = `- name: 検査 1 併置テストの存在` / `:71` = `exit $missing` | **一致** (`frontend.md:633` / `:1225` の `:58-72` は 1 行過大 → §5 軽微 1) |
+| 16 | FE 併置テスト検査 = `templates/app-monorepo/.github/workflows/ci.yml:58`〜`71` (`docs/design/testing.md:650` / `:667`) | 実測 `:58` = `- name: 検査 1 併置テストの存在` / `:71` = `exit $missing` | **一致** (`frontend.md:633` / `:1225` の `:58-72` は 1 行過大 → §5 軽微 1) |
 | 17 | `asset_tags` = 個人境界 / `contract_id`+`account_id` / `sort_order` / GIN trgm (`idea-boards.md:428` / `:442`〜`:443` が `idea_tags` の同型根拠にしている) | `data-model.md:324` (境界・所有者列) と `:468` (`tag` / `sort_order` / `(asset_id)` / GIN trgm) が一致 | **一致** |
 | 18 | `auth-accounts.md` は **36 本** (`docs/design/API/README.md:320`。合計 109 = 73 + 36) | `docs/design/API/auth-accounts.md:86` = 「合計 **37 本**」/ 同 `:508` = 「§2 の全 **37 本**」 | **不一致** → §3 重大 3 |
 | 19 | Vercel の数値 (Node.js `maxDuration` Hobby 300s / Pro 800s / Edge ストリーム 300s / 同時実行 30,000 / active CPU は I/O 待ちを含まない。`docs/design/frontend.md:1105`〜`:1109`) | **未照合** — 本セッションはネットワークに出られないため公式ドキュメント原文を確認できない。**記載内容はモデルの知識と矛盾しない**が、これは照合ではない | **未照合** |
@@ -113,7 +113,7 @@
 
 | 2 巡目の指摘 | 判定 | 根拠 |
 |---|---|---|
-| testing 中 R-2: `TestMain` 規約だけでは `t.Skip` の抜け道が塞げない | **解消** | `docs/design/testing.md:651` に存在検査 **#7** を新設 (`repository/`・`controller/` の `t.Skip` 禁止・許可は `testing.Short()` の 1 箇所)。判定規則と根拠 (`ci.yml:73`〜`74` が常に `DATABASE_URL` を設定するため `TestMain` の `log.Fatal` は CI で発火しない) まで書かれている。雛形 `templates/backend-repo/.github/workflows/ci.yml:111`〜`:113` も 3 検査列挙へ更新済み |
+| testing 中 R-2: `TestMain` 規約だけでは `t.Skip` の抜け道が塞げない | **解消** | `docs/design/testing.md:651` に存在検査 **#7** を新設 (`repository/`・`controller/` の `t.Skip` 禁止・許可は `testing.Short()` の 1 箇所)。判定規則と根拠 (`ci.yml:73`〜`74` が常に `DATABASE_URL` を設定するため `TestMain` の `log.Fatal` は CI で発火しない) まで書かれている。雛形 `templates/app-monorepo/.github/workflows/ci.yml:111`〜`:113` も 3 検査列挙へ更新済み |
 | 中 R-3: `feature` 識別子の対象集合が未定義で存在検査 #5 が「0 件を検査して緑」になる | **解消** | `docs/design/observability.md:137` に「Go の const 群として `entity/` の 1 ファイルに列挙・リテラル直書き禁止・追加は同一 PR」を追記。`testing.md:649` が同行を対象集合の SSOT として参照 |
 | R-3 / R-4: `route_kind` の NULL 許容範囲が曖昧 / 相関キーとの書き分け | **解消** | `observability.md:141` / `:144` / `:155` で「NULL を許すのはこの `route_kind` のみ」が**トークン系 4 カウンタ + `stop_reason` の 5 フィールドに限る**ことを明記し、`:157` で**相関キーは計測漏れ CHECK の対象外**を明記 |
 | data-model R-2: §7.2 検査 6 が存在しない列を探す | **解消** | テーブル別の実在列のみの表に変更 (`llm_call_records` = `account_id`/`session_id`/`theme_id` / `audit_logs` = `actor_id`)。R-DM-8 は「実施済み」へ |
@@ -142,14 +142,14 @@
   - 同 `:979` (D-2 行) = 「**FE の検査を同書に登録する是正要求を §16.2-1 に出した**」
   - 同 `:1233`〜`:1236` = 「**同書 §10 の「必須テストの存在検査 5 種」は 5 件すべて backend であり、FE の検査が 1 つも無い**」「①§10 の一覧に FE の併置テスト存在検査 (検査 3) を加える」
   - `docs/design/testing.md:101` (T-N) = 「**6 種**の「必須テストの存在検査」を機械強制する (§10。うち 1 種は FE の併置テスト検査 = §9.1.1 の F-C3)」← §10 は 7 種
-  - `templates/backend-repo/.github/workflows/ci.yml:102` のコメント = 「(testing.md §10 の **#4 / #5**)」← 同ファイル `:111`〜`:113` のエラーメッセージは #4/#5/**#7** を列挙している
+  - `templates/app-monorepo/.github/workflows/ci.yml:102` のコメント = 「(testing.md §10 の **#4 / #5**)」← 同ファイル `:111`〜`:113` のエラーメッセージは #4/#5/**#7** を列挙している
 - **DR-8 該当**: 「機構を直したのに、その機構を語る文書が『未対応』のまま」— `.claude/rules/06-delegation-prompts.md` が **3 巡連続の最上位指摘**として明記した型の **4 巡目の再発**。
 - **修正案**:
   1. `frontend.md:634`〜`:638` を「**登録済み** (testing.md §10 の検査 **6** = F-C3。`testing.md:650`)」へ書き換える (是正要求ではなく状態の記述にする)
   2. `frontend.md:994` の「登録は未了」→「**登録済み** (同 §10 の 6 番)」
   3. `frontend.md:979` / `:1231`〜`:1236` の §16.2-1 の①②を **状態列付きで「実施済み (2026-07-30)」**にする (`06-delegation-prompts.md` の「是正要求の表は状態列を持たせる」に従う)。**③ (E-1 の CORS 記述の陳腐化) は FE-Q7/FE-Q2 待ちなので「未対応」で残す**
   4. `testing.md:101` の「6 種」→「**7 種**」
-  5. `templates/backend-repo/.github/workflows/ci.yml:102` のコメントを「#4 / #5 / **#7**」へ
+  5. `templates/app-monorepo/.github/workflows/ci.yml:102` のコメントを「#4 / #5 / **#7**」へ
   6. **完了の証拠として** `grep -rn "5 種\|6 種" docs/` の出力を報告に含める (自己申告の排除)
 
 ### 重大 2. `docs/design/API/idea-boards.md` §8.2 の「連動 6 箇所」が不完全 (実測 **9 箇所**) で、うち 1 件は**実行すると設計を壊す誤った是正要求**
@@ -229,7 +229,7 @@
 - **なぜ問題か**: `auth.md` は**認証の SSOT**。実装リポが `auth.md` を読んで WAF ルールを前提に設計すると、`frontend.md` FE-D (BE 呼び出しは全てサーバ側 = ALB が見る送信元は Vercel の Function) の下で**成立しない防御を「担保済み」と数えてしまう**。A-2 の多層防御の実効性が文書上だけの状態になる。
 - **修正案**: FE-Q7 をユーザーに確定させる。**Freeze を先に通すなら**、`auth.md:557` に「**FE-D 採用により FE 経由の管理者経路では IP 制限が成立しない (frontend.md §11.3.2 / FE-Q7)。成立するのは BE を直接叩く経路のみ**」の 1 文を**同じ差分で**入れる (矛盾を「未確定」として可視化する)。
 
-### 中 6. `templates/backend-repo/.github/workflows/ci.yml:102` のコメントが「#4 / #5」のまま
+### 中 6. `templates/app-monorepo/.github/workflows/ci.yml:102` のコメントが「#4 / #5」のまま
 
 - 同ファイル `:111`〜`:113` のエラーメッセージは #4 / #5 / **#7** を列挙しているのに、直上のコメント (`:102`) は「(testing.md §10 の #4 / #5)」。**機構は直っているがコメントが旧版** — 実装リポでスクリプトを書く人はコメントを先に読む。重大 1 の修正 5 と同じ差分で直す。
 
@@ -248,7 +248,7 @@
 
 | スコープ | 対象ファイル | 判定 | 条件 |
 |---|---|---|---|
-| **層構成・依存規則・CI ゲート** | `docs/design/architecture.md` / `templates/backend-repo/.golangci.yml` / `templates/backend-repo/.github/workflows/ci.yml` | **Freeze 可** | 中 6 (ci.yml のコメント) は軽微。18 規則・`:46-49`・D-2⑨ の `gateway` は 5 件すべて実測一致 |
+| **層構成・依存規則・CI ゲート** | `docs/design/architecture.md` / `templates/app-monorepo/backend/.golangci.yml` / `templates/app-monorepo/.github/workflows/ci.yml` | **Freeze 可** | 中 6 (ci.yml のコメント) は軽微。18 規則・`:46-49`・D-2⑨ の `gateway` は 5 件すべて実測一致 |
 | **可観測性** | `docs/design/observability.md` | **Freeze 可** | ただし重大 3 の副次項目 (R-AA-7 の認証系 6 事象) が未反映。**`auth-accounts.md` を Freeze 範囲に入れるなら不可** |
 | **データモデル** | `docs/design/data-model.md` | **条件付き可** | 重大 2 の連動 7・8 (`:195` / `:1061` の「31 件」が機械検査の期待値であること) を §8.2 側に記録すること。§6.4 の `[Answer]` 未回答は既知の DR-3 追跡項目として許容 |
 | **運用・インフラ** | `docs/design/operations.md` / `docs/design/infrastructure.md` | **条件付き可** | **中 1 (D-6 回答表の旧記述) を直すこと**。`[Answer]` 未回答 3 件 (Q-INF-1 / Q-INF-3 / アラート宛先) は「IaC の適用範囲と宛先の値」であり、設計判断ではなく値の確定なので Freeze 後の埋め込みで可 |
@@ -286,7 +286,7 @@
 | 指摘 | 反映先 | 内容 |
 |---|---|---|
 | **重大 1** の一部 (起草側の波及漏れ) | `docs/design/testing.md`:101 | **T-N の要約行が「6 種」のまま**だった (§10 は 7 種)。→ **7 種**へ。#7 の中身も 1 行で明記 |
-| 同 | `templates/backend-repo/.github/workflows/ci.yml`:102 | コメントが「§10 の **#4 / #5**」のまま。→ **#4 / #5 / #7** へ |
+| 同 | `templates/app-monorepo/.github/workflows/ci.yml`:102 | コメントが「§10 の **#4 / #5**」のまま。→ **#4 / #5 / #7** へ |
 | 同 | `docs/design/frontend.md`:634〜638 | 「§10 の存在検査 **5 種**に本検査は含まれていない / 登録を是正要求として出す」→ **「登録は完了済み (#6 として 6 種へ、7/31 に #7 が加わり 7 種)」**へ。要求が解消済みである旨を明記 |
 | 同 | 同 `:1233`〜 | 「§10 への登録が**必要**」→ **①は反映済み**と状態を明示 (②③は未反映のまま残す) |
 | **重大 2** | `docs/design/API/idea-boards.md` §8.2 | **連動箇所を 6 → 9 件へ修正**。漏れていた 3 件 (`data-model.md:195` / `:1061` = **どちらも機械検査の期待値 31 件** / `plan.md:103`) を表に追加。**7・8 を落とすと「設計どおり実装した検査が必ず落ちる」形で実装リポに出る**ことを明記 |

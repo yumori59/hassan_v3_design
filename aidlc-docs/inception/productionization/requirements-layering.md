@@ -24,7 +24,7 @@ architecture.md を改訂するための要件を定める。
 
 - 層の定義と依存規則 (C-L1〜C-L11、L-1〜L-6)
 - 層をまたぐ横断規約 3 点 (エラー型の契約 / 設定値の SSOT / 監査ログ失敗時の挙動 — C-L12)
-- 上記を CI で機械強制する要件 (C-L8) と、実装リポ雛形 (`templates/backend-repo`) への反映
+- 上記を CI で機械強制する要件 (C-L8) と、実装リポ雛形 (`templates/app-monorepo/backend`) への反映
 - 決定の変更によって**参照が古くなる他の設計書**の追随 (影響範囲は [plan-layering.md](plan-layering.md) §2)
 
 **スコープ外** (本増分では扱わない):
@@ -189,9 +189,9 @@ domain-first (`<domain>/{controller,usecase,...}`) を却下する理由は「v2
 - **AC-6.14** L-1〜L-6 が **CI で機械強制される**ことが D-2 に追記され、次を満たすこと (C-L8 / D-2。Q-L3=A で範囲確定):
   1. 使用するツール (depguard 等) と**規則ごとの設定方針**が L-1〜L-6 の各 ID に対応づけて書かれている
   2. **違反した PR がマージできない**ことが明記されている
-  3. `templates/backend-repo` に **lint 設定ファイル (`.golangci.yml`) が配置され**、
-     CI (`templates/backend-repo/.github/workflows/ci.yml:46-49` の golangci-lint ステップ (D-2①⑤)) から使われる状態になっている
-     (現状は `templates/backend-repo/` に `.golangci*` が存在せず既定ルールのみ = 層規約は検査されない)
+  3. `templates/app-monorepo/backend` に **lint 設定ファイル (`.golangci.yml`) が配置され**、
+     CI (`templates/app-monorepo/.github/workflows/ci.yml` の「D-2①⑤ golangci-lint」ステップ) から使われる状態になっている
+     (現状は `templates/app-monorepo/backend/` に `.golangci*` が存在せず既定ルールのみ = 層規約は検査されない)
   4. **機械強制の対象は v3 新規ドメインのパスのみ**であり (Q-L3=A)、除外パス (v2 移植分) は
      AC-6.19 の一覧と一致していること。**L-3 の検査は `repository/<domain>/` の分割 (AC-6.3) が
      成立しているパスでのみ有効**であることが書かれていること
@@ -323,7 +323,7 @@ domain-first (`<domain>/{controller,usecase,...}`) を却下する理由は「v2
   3. **テストが合成 JSON を手書きしないこと** — 同じ型定義から組み立てる
      (BE-12 の「テストが合成 JSON を渡していると契約違反が隠れる」への対応)
   4. **§3.8.4 の 3 者一致検査の対象が戻り値スキーマにも及ぶこと** (現状は引数のみ)。
-     `templates/backend-repo/.github/workflows/ci.yml` の D-6 ステップの説明が追随していること
+     `templates/app-monorepo/.github/workflows/ci.yml` の D-6 ステップの説明が追随していること
 
   **根拠となる PoC の実例**: 読み手 `claude_managed_agents/cmd/devui/conversation_plan_grounding.go:100`〜`:102` が
   `finding` / `notes:string` を期待するのに対し、書き手 `conversation_tools_deepdive.go:168`〜`:176` に
@@ -357,8 +357,8 @@ domain-first (`<domain>/{controller,usecase,...}`) を却下する理由は「v2
   | `cyclop` | 複雑度 **15** | 長さではなく**分岐の多さ**を締める |
   | `funlen` (補助) | **150 行 / 80 ステートメント** | 明確な外れ値のみを止める |
 
-  **検証可能な形での要求**: `templates/backend-repo/.golangci.yml` に上記 3 linter が
-  **上表の値で有効化**され、`templates/backend-repo/.github/workflows/ci.yml:46-49` の golangci-lint ステップ (D-2①⑤)が
+  **検証可能な形での要求**: `templates/app-monorepo/backend/.golangci.yml` に上記 3 linter が
+  **上表の値で有効化**され、`templates/app-monorepo/.github/workflows/ci.yml` の「D-2①⑤ golangci-lint」ステップが
   その設定を使い、**違反で CI が失敗する**こと (対象パスは AC-6.19 の一覧に従う)。
 
   **`funlen` を 80 行にしない理由を実測値 (F15) で記載すること** (却下案の記録):

@@ -57,7 +57,7 @@
 | D-F | フロントエンド | **Next.js on Vercel** (ユーザー指定) + OpenAPI からの型生成。PoC の UI は設計入力として扱い再実装する | (a) PoC の Vite SPA をそのまま持ち込む: 認証・ルーティング・型生成が二重化する。(b) v2 frontend への相乗り: ホスティングが Vercel 指定のため別デプロイ単位になる |
 | D-G | インフラ管理 | **全て IaC**。役割分担確定 (ユーザー決定 2026-07-29。Q-7=B): **Terraform = 基盤 (VPC / ALB / RDS / IAM / Secrets / ECS クラスタ)、ecspresso = ECS サービス定義 + タスク定義 + リリース** (tfstate 連携で Terraform リソースを参照)。v2 の「イメージタグを自リポへ commit」する運用は廃止し CI 内でレンダリングする。v2 稼働中インフラの import はしない (新規構築)。AWS ECS + PostgreSQL (RDS) | (a) v2 と同じ ecspresso + タスク定義 JSON のみ: サービス定義以外 (VPC・RDS・IAM・Secrets) がコード化されず、環境の再現性が上がらない。(b) Terraform で全て (リリース含む): リリースごとに plan/apply が走り、tfstate ロックでインフラ変更とアプリリリースが互いをブロックする。(c) GitHub Actions 公式 ECS アクション: ツールは減るが、サービス定義の管理が宙に浮き (Terraform 側で `ignore_changes` 等の工夫が要る)、明示的ロールバック手段も自作になる |
 | D-H | 開発手法 | **TDD (UT 必須) + CI で UT / lint を機械強制 + GitHub issue 駆動** (ユーザー指定) | (a) 実装後テスト: PoC で移植する振る舞いは受入基準が既にあるため、テスト先行の障壁が低い |
-| D-I | リポジトリ構成 | **backend / frontend / infra の 3 分割** (ユーザー決定) | (a) モノレポ: CI の条件分岐と Vercel のビルド対象指定が増える。(b) backend + infra 同居: デプロイ順序は連動するが、権限 (AWS 変更権限) を分けにくい |
+| D-I | リポジトリ構成 | **app モノレポ (`backend/` + `frontend/` + `api/`) + infra リポの 2 分割** (ユーザー決定 2026-08-03。**3 分割から方針転換**)。**`api/openapi.yaml` が BE→FE 契約の SSOT**。構成と「サブツリー自己完結」原則は §3.11、モノレポ化で新規に要る 6 機構は §3.11.2 | (a) **backend / frontend / infra の 3 分割 (旧採用案)**: BE→FE の契約 (OpenAPI) がリポを跨ぐため、**出力先と受け渡し方法を新規に設計する必要があり、その設計コストがモノレポ化のコストを上回らない** (旧状態の実測: 出力先が未確定でディレクトリすら作られていなかった)。加えて 1 機能の変更で PR が 3 本になり、順序の担保が人手に残る。(b) **backend / frontend / infra を全部 1 リポ**: 却下理由は 2 点。①**ライフサイクルの非対称性** — infra は **「PR マージ ≠ 反映」** (`apply` が人手ゲートで、`apply` 済みが app の着手条件。[infrastructure.md](infrastructure.md) §6.3 / §4.4) である一方、app は PR マージで dev へ自動デプロイされる。同居させると、**「マージしたが未 apply の infra 変更」と「マージ = 反映済みの app 変更」が同一の `main` と同一の `gate` に混ざり**、§6.3 の着手条件を PR 単位で表現できない。②**AWS の変更権限を分けたい** — `terraform apply` / tfstate 操作の権限を持つ主体と app の開発主体を分離したいが、**モノレポでは書き込み権限をサブツリー単位で分けられない** (MR-4 で確定した事実と同型。CODEOWNERS はレビュー要求であって write の制限ではない)。**⚠️ 却下理由に「app と infra の間にコード上の契約が無い」を使わない** — **契約は実在する** ([infrastructure.md](infrastructure.md) §4.2: ecspresso が tfstate からクラスタ名・subnet ID・SG ID・ターゲットグループ ARN・シークレット ARN を解決する)。2026-08-05 の design-reviewer が「引用先と矛盾する」と指摘し訂正した。**「契約が無い」と書かれた契約には誰も検査を設計しない**ため、この誤りは §3.11.4 の残課題として起こし直した。(c) **backend + infra を 1 リポ、frontend を別リポ**: BE→FE の契約がリポを跨いだままで、モノレポ化の主目的 (契約ドリフトの機械検出) を満たさない |
 | D-J | リリース方式 | **最終的に v3 が v2 を全面置き換える** (ユーザー決定)。**進め方の確定 (2026-07-29。Q-3=b)**: v3 第 1 リリース = PoC 由来機能セット (テーマ・アセット・会話型アイデア創出)。**リリース後は v2 との併用期間を設け、v2 既存機能を順次 v3 へ移植してから v2 を廃止する** (ストラングラー型)。v3 の資源 (インフラ・DB・スキーマ) は全て新規で v2 と共有しない (Q-1=C 方向) | (a) 全機能同等まで作ってから一斉切替: リリースが最も遅く、全機能を同時に本番品質へ引き上げるリスクが最大。(b) 恒久的な併存: 二重運用が続く — 併用はあくまで移行期間に限る |
 
 > **未確定**: Q-1 の残り (データ引き継ぎの要否と範囲 — 事業判断待ち)・フラグ方式 (Q-8)。§4 §6 はこれらの回答後に確定する。
@@ -101,7 +101,7 @@ flowchart TB
     E["entity/<br/>副作用のない計算・変換・バリデーション"]
     R["repository/{domain}/<br/>sqlc クエリの実行 (IF の実装)"]
     G["gateway/{外部システム}/<br/>SDK / HTTP 呼び出し (IF の実装)<br/>LLM 呼び出しの計測点"]
-    DI["di/<br/>provider.go / wire.go (手編集)<br/>wire_gen.go (生成物・手編集禁止)<br/><b>全層の具体パッケージを import する唯一の場所</b>"]
+    DI["common/di/<br/>provider.go / wire.go (手編集)<br/>wire_gen.go (生成物・手編集禁止)<br/><b>全層の具体パッケージを import する唯一の場所</b>"]
     DB[("PostgreSQL (RDS)")]
     EXT["Anthropic Managed Agents<br/>Exa / ストレージ / 他の外部 API"]
 
@@ -136,8 +136,8 @@ flowchart TB
 4. **`usecase` / `service` は `repository` / `gateway` の具体パッケージを一切 import しない**。
    現行の直列図 (Controller → UseCase → Service → Repository) は「UseCase が Repository の実装に依存する」と
    誤読されるため差し替えた。**機械強制は 2 方向**: (a) `repository/*` と `gateway/*` が上位層を import しないこと
-   (b) **`usecase/**` / `service/**` が `repository` / `gateway` を import しないこと** — `di/**` は検査対象に
-   含めないため誤検知は起きない (L-4 / L-5。§3.5.1)。
+   (b) **`usecase/**` / `service/**` が `repository` / `gateway` を import しないこと** — `common/di/**` は
+   検査対象に含めないため誤検知は起きない (L-4 / L-5。§3.5.1)。
    **v2 は既にこの形で動いている** (実測 2026-07-30): `usecase/` から
    `hassan-v2-backend/repository` を import しているファイルは **0 件**、`controller/` からも **0 件**で、
    具体パッケージを import するのは `hassan-v2-backend/di/wire.go` だけである
@@ -156,13 +156,69 @@ flowchart TB
 | **entity** | `entity/` | **副作用のない計算・変換・バリデーション**・ドメイン型の定義 (`ContractID` / `AccountID` の専用型を含む) | SQL 実行、外部 API 呼び出し、他層 (`usecase` / `service` / `repository` / `gateway`) への依存 |
 | Repository | `repository/<domain>/` (v3 新規) / `repository/` (v2 移植分。§3.5.2) | SQL 実行 (sqlc 生成クエリ)・entity 変換・**採番と一意制約をメソッド内に閉じる** (BE-11) | ビジネスロジック、複数 Repository の協調、上位層 (`usecase` / `service`) への依存 |
 | **gateway** | `gateway/<外部システム>/` | 外部 SDK / HTTP の呼び出し・レスポンスの正規化・**LLM 呼び出し 1 回ごとの計測値 (usage 4 カウンタ / `stop_reason` / provider / model / duration) の生成** (O-2) | ビジネスロジック (停止条件・安全弁)、DB アクセス、**明細の永続化** (L-4 により repository を呼べない。永続化は呼び出し元が行う。§3.8.3)、上位層への依存 |
-| **di** | `di/` (`provider.go` / `wire.go` / `wire_gen.go`) | **全層の具体パッケージを import して依存グラフを組み立てる唯一の場所**。IF (利用側で定義) に実装 (`repository/*` / `gateway/*`) を代入する。v2 の構成を踏襲 (`hassan-v2-backend/di/` の 3 ファイル。`make wire` で生成 — `hassan-v2-backend/CLAUDE.md:14`) | **ビジネスロジック**、**条件分岐による実装の切り替え** (環境ごとの差し替えは `config` の設定値で行い、配線そのものを分岐させない — 分岐すると「本番でどの実装が動いているか」がコードから読めなくなる)、**`wire_gen.go` の手編集** (`hassan-v2-backend/di/wire_gen.go:1` が `// Code generated by Wire. DO NOT EDIT.`。生成物の再生成漏れは CI が検出する。§5 の D-2) |
+| **di** | `common/di/` (`provider.go` / `wire.go` / `wire_gen.go`。物理配置は §3.5.1 の `common/` の決定) | **全層の具体パッケージを import して依存グラフを組み立てる唯一の場所**。IF (利用側で定義) に実装 (`repository/*` / `gateway/*`) を代入する。v2 の構成を踏襲 (`hassan-v2-backend/di/` の 3 ファイル。`make wire` で生成 — `hassan-v2-backend/CLAUDE.md:14`) | **ビジネスロジック**、**条件分岐による実装の切り替え** (環境ごとの差し替えは `config` の設定値で行い、配線そのものを分岐させない — 分岐すると「本番でどの実装が動いているか」がコードから読めなくなる)、**`wire_gen.go` の手編集** (`hassan-v2-backend/di/wire_gen.go:1` が `// Code generated by Wire. DO NOT EDIT.`。生成物の再生成漏れは CI が検出する。§5 の D-2) |
 
 **型名の規約 (D-A')**: Service の型名は `XxxService` を避け、**振る舞いで命名する**。
 確定している 3 例: **`conversation.Runner`** (Agent のターン実行) / **`asset.Extractor`** (アセット抽出) /
 **`plan.Composer`** (企画書の組み立て)。`XxxService` を許すと名前が責務を語らないため、
 「とりあえず Service」の受け皿になり、1 ドメインに閉じるという定義が崩れる。
 **ディレクトリ名は `service/` のままでよい** (層としての位置を示すため)。
+
+**入出力構造体 (DTO) の定義場所**: HTTP のリクエスト/レスポンス構造体は **`controller/dto/` に集約**する
+(v2 踏襲。`hassan-v2-backend/controller/dto/` はドメイン別ファイル・1 パッケージ)。
+**UseCase / Service が使う入出力構造体は DTO ではなく、その UseCase / Service 自身が定義する** —
+**「1 エンドポイント = 1 ファイル」の原則 (§3.4) に沿ってファイル内に `XxxInput` / `XxxOutput` として置く**
+(v2 の `theme` ドメインがこの形: `hassan-v2-backend/usecase/theme/create_theme.go:18` の `CreateThemeInput`)。
+Controller のハンドラは `c.BindJSON` で DTO を受け取った後、この入力型に変換して UseCase を呼ぶ
+(`hassan-v2-backend/controller/theme.go:137`〜)。**理由**: UseCase / Service は HTTP の形に
+依存しない (本節の禁止事項)。DTO を UseCase まで持ち込むと、HTTP のバリデーションタグ
+(`binding:"required"` 等) がビジネスロジックの型に混入し、Controller 以外の呼び出し元
+(テスト・将来の別プロトコル) が DTO の制約を引き継いでしまう。**swag アノテーション (D-API-13) は
+ハンドラに書き、`dto.XxxReq` / `dto.XxxRes` を参照する形を v2 から踏襲する**。
+
+**この規約は v2 踏襲ではなく v2 からの明示的な逸脱である** (2026-08-03 訂正。本節は以前
+「`usecase/` から `controller/dto` を import しているファイルは v2 で 0 件」と書いていたが**事実誤り**だった)。
+実測は逆で、**v2 は複数ドメインの `usecase/` が DTO を直接 import している**。
+再現コマンド (件数は書かない。DR-9):
+
+```bash
+cd /Users/yuyamorishita/aillio/hassan/hassan-v2-backend
+grep -rl "controller/dto" usecase/ | grep -v _test
+#   → account / asset / business_plan / idea / research / research_sheet の 6 ドメインが出る
+```
+
+| 案 | 内容 | 判定 |
+|---|---|---|
+| **採用** | v3 は**全ドメイン**で DTO を Controller 層に閉じる。移植時も Input 型へ書き換える | 「UseCase / Service は HTTP の形に依存しない」(本節の禁止事項) を**機械強制できる唯一の案** |
+| 却下 (a) | v2 の現状を踏襲し、移植分では DTO の直接 import を許す | **v2 と v3 でディレクトリ名が衝突する** — v2 にも `usecase/asset` `usecase/idea` `usecase/theme` がある (再現: `ls hassan-v2-backend/usecase/`)。depguard の `files:` は**パスでしか規則を切り替えられない**ため、移植分を除外すると v3 新規ドメインの `usecase/asset` `usecase/idea` も同時に無検査になり、L-1 に穴が開く |
+| 却下 (b) | v3 新規ドメインにだけ適用し、移植分は将来判断 | 同じパス衝突により機械強制が書けない (却下 (a) と同根)。§3.5.2 の運用ルールが「後で足す」を禁じている |
+
+**移植タスクの受入条件 (工数の所在)**: `templates/app-monorepo/backend/.golangci.yml` の
+`L1-usecase-no-controller` は `files: "**/usecase/**"` (= 移植分も含む) に対して `<module-path>/controller` を
+deny し、**depguard の `pkg` は前方一致なので `controller/dto` も deny 対象になる**。したがって上記 6 ドメインの
+移植には **DTO → Input 型への書き換えが必ず含まれる** (対象ファイルは上の再現コマンドの出力そのもの)。
+**この工数を移植タスクの見積りに含める**
+([plan.md](../../aidlc-docs/inception/productionization/plan.md) の移植タスク。§8 の残課題)。
+
+**バリデーションの責務分離 (DTO と entity で同じ制約を二重に持たない)**: DTO と entity は
+**検証する対象のレイヤーが違う**ため、両方にバリデーションが存在してよいが、**同じ制約を両方に
+書かない**。
+
+| 層 | 検証すること | 表現手段 | v2 の実例 |
+|---|---|---|---|
+| `controller/dto/` | **HTTP リクエストとして受理可能か** (必須項目・型・大まかな長さ・形式) | gin の `binding` タグ | `hassan-v2-backend/controller/dto/account.go:25` の `binding:"required,min=8,max=255"` |
+| `entity/` | **ドメインとして意味を持つ値か** (許可された enum 値・複合的な整合性ルール) | **コンストラクタ関数が唯一の関所** — `func NewXxx(...) (Xxx, error)` の形で、不正な値からはインスタンスを作れない | `hassan-v2-backend/entity/account.go:44` の `NewAccount` は `AuthRoleID` が許可された enum 値かだけを検証し、**パスワードの長さは検証しない** (それは DTO の責務) |
+
+- **v2 は既にこの分離ができている** (上表の実例のとおり、`NewAccount` は DTO の `binding` タグと
+  重複する制約を持たない)。**v3 もこの分離をそのまま踏襲する**
+- **同じ制約を両方に書いた場合の実害**: 片方だけ変更されて食い違うと、①DTO だけ緩い場合は
+  「HTTP は通るが entity のコンストラクタで拒否される」形でユーザーにエラーが露出し、
+  ②entity だけ緩い場合は「ドメインとしては通るが、実際には HTTP 経由でしか作られないので気づかれない」
+  形になり、BE-2 (hard cap の 3 層散在) と同型の SSOT 崩れになる
+- **判断に迷ったら「DTO 単体を消して、entity のコンストラクタとテストだけで同じ不正値を拒否できるか」
+  で確認する** — できないなら、その制約はドメインルールなので entity 側に書く。**HTTP を経由しない
+  呼び出し元 (custom tool ハンドラ・バッチ・将来の gRPC 等) がある処理ほど、DTO 側だけに書いた制約は
+  抜け道になる**
 
 ### 3.4 層配置の判断基準 (D-A' の確定)
 
@@ -193,6 +249,24 @@ flowchart TB
   「読み取りだけかどうか」を静的に判定できないため機械強制がメソッド命名規約に頼ることになる
 - **`service` → `usecase` は禁止**。トランザクションは UseCase が張ったものを `tx` 引数で引き継ぐ (§3.7)
 
+**集約ルート (DDD) を置くときの判断**: 「集約ルート」という言葉自体は当てはまる層を示さない —
+**その振る舞いが副作用を持つかどうかで上表がそのまま振り分ける**。
+
+- **不変条件の検証・状態遷移のルール・自分の内部状態だけを見る判定** (副作用なし) は **entity** に置く。
+  v2 の実例がそのまま該当する: `hassan-v2-backend/entity/idea_board.go:113`〜`:118` の
+  `IdeaBoard.CanEdit(accountID)` / `HasAccess(accountID)` は、集約ルート (`IdeaBoard`) が
+  自分のメンバー一覧だけを見て判定する純粋なメソッドであり、**この形を entity に増やすことが望ましい** —
+  ロジックを持たせないと判断が UseCase / Service に漏れ出し、entity が空のデータ構造体になる (DR-4 と同型)
+- **永続化 (Repository 呼び出し)・ドメインイベントの発行・他集約への参照**を集約ルート自身のメソッドに
+  持たせる Active Record 的な設計は**採らない** — L-1 (entity は他層への依存を禁止) に違反する。
+  この振る舞いは **Service** に置く (「自ドメインのデータ読み書きを伴う業務判断」の行がそのまま該当)
+- **v3 は伝統的な DDD (Application Service が Repository から集約をロードし、集約のメソッドを呼び、
+  Repository が保存する) とは分業が異なる** — Service 自身が Repository を呼びながら手続き的に
+  業務ロジックを実行する設計 (§3.8 の `conversation.Runner` 等) を採るため、「集約ルートオブジェクトに
+  ドメインロジックを集める」古典的パターンよりも **「entity = 純粋な判定・計算」「service = 自ドメインの
+  手続き」という役割分担**に寄る。集約という単位そのものの置き場 (複数 entity をまとめる構造体を
+  どのファイル / パッケージに置くか) は本節の対象外で、上の 2 点 (副作用の有無) だけが層を決める
+
 ### 3.5 依存規則 L-1〜L-6 と適用範囲
 
 > 本節が回答する ID: **D-2** (+ **O-2** の適用範囲) / 対応 AC: **AC-6.3, AC-6.14, AC-6.19, AC-6.22**
@@ -205,12 +279,27 @@ flowchart TB
 移植コードとの二重構造になる。v2 は層違反ゼロ (F1) で既存構造が機能しており、
 実装者・レビュアーの学習コストと既存資産の再利用が勝る。
 
+**技術基盤 6 パッケージは `common/` 配下に置く** (**決定**。2026-08-03 追加):
+`common/router/` `common/auth/` `common/logger/` `common/constants/` `common/config/` `common/di/`。
+**layer-first の決定 (上記) は変えていない** — この 6 つは 4 層 + entity + gateway のどの層にも属さず、
+L-1〜L-6 の依存規則の対象にもならない技術基盤であり、層のディレクトリと同列にルート直下へ並べると
+「どれが層でどれが基盤か」がリポジトリ直下から読めなくなる。
+**却下案**: (a) ルート直下に 6 個並べる (v2 と同形) — v2 は Service 層・gateway 層を持たないため 6 個でも
+見通せたが、v3 は最上位が 6 層 + 6 基盤になる (b) `internal/` に入れる — Go の可視性の仕組みであって
+責務の分類ではなく、`entity/` 等も内部パッケージなので分類基準にならない。
+
+- **Go のパッケージ名は変えない** (`common/config` の package 名は `config`)。**本書で `config` / `di` /
+  `logger` と表記しているのはパッケージ名**であり、物理パスは `common/<名前>/` である。
+  **depguard の `files:` / CI 検査の対象パス・除外パスに現れる箇所は `common/` 付きで書く**
+  (§3.5.2 の区分表・§3.9④の対象パス)
+- 実装リポ側の索引は `templates/app-monorepo/backend/STRUCTURE.md` §1.1 (本決定の写し。決定の正は本節)
+
 | ID | 規則 | 由来 | CI 強制の形 (depguard) |
 |---|---|---|---|
 | L-1 | 依存方向は `controller` → `usecase` → {`service`, `repository` の IF, `gateway` の IF} → `entity`。**逆流禁止** | §3.1 / v2 の禁止依存 (F1) | 各層パッケージの deny list (`entity/*` は他層すべてを deny) |
-| L-2 | **`service/A` → `service/B` の import 禁止** | D-A' | `service/*` から `service/*` を deny (自パッケージのみ許可) |
+| L-2 | **`service/A` → `service/B` の import 禁止**。**`entity/A` → `entity/B` も同様に禁止する** (2026-08-05 追加。実装リポのアーキテクチャレビューで、entity/ だけドメイン別サブパッケージに分割されておらず、他層で機械強制しているドメイン境界が entity 層だけ素通りになっていることが判明した。同じ原則を entity にも適用する) | D-A' | `service/*` から `service/*` を deny (自パッケージのみ許可)。`entity/<domain>` から他ドメインの `entity/<domain>` を deny。**全ドメイン共通型 (`Scope` / `Pagination` / `SortOrder` 等) は `entity/` 直下に残し、共通層として全ドメインから import 可**(下記「entity のドメイン分割」参照) |
 | L-3 | **`service/<domain>` が扱えるデータは自ドメインのみ**。他ドメインのデータは UseCase が取得して引数で渡す。**加えて sqlc 生成パッケージを import できるのは `repository/**` だけ** (下の「sqlc 生成パッケージの扱い」) | D-A' | **depguard では表現できない** (下の「L-3 の担保 (3 段)」)。**sqlc 生成パッケージの deny だけは depguard で行う** (`usecase/**` / `service/**` / `controller/**` / `entity/**` から deny) |
-| L-4 | **`service` / `usecase` → `gateway` は可**。ただし**依存するのは利用側が定義した IF であり、`gateway/<外部システム>` の具体パッケージを import しない** (§3.2 の図の読み方 3・4 / §3.6)。**具体パッケージを import するのは `di/` だけ**。**`gateway` → `service` / `usecase` / `repository` は禁止** | D-A''' | **両方向を depguard で deny する**: (a) `gateway/*` から上位層と `repository/*` を deny (b) **`usecase/**` / `service/**` から `<module-path>/repository` と `<module-path>/gateway` を全面 deny** (`L4-L5-no-concrete-adapters`)。**`di/**` は `files` に含めないため誤検知は起きない** — 具体パッケージの import は `di/` に集約されるからである (§3.3 の `di` 行。v2 の実測: `usecase/` からの `repository` import は 0 件) |
+| L-4 | **`service` / `usecase` → `gateway` は可**。ただし**依存するのは利用側が定義した IF であり、`gateway/<外部システム>` の具体パッケージを import しない** (§3.2 の図の読み方 3・4 / §3.6)。**具体パッケージを import するのは `di/` だけ**。**`gateway` → `service` / `usecase` / `repository` は禁止** | D-A''' | **両方向を depguard で deny する**: (a) `gateway/*` から上位層と `repository/*` を deny (b) **`usecase/**` / `service/**` から `<module-path>/repository` と `<module-path>/gateway` を全面 deny** (`L4-L5-no-concrete-adapters`)。**`common/di/**` は `files` に含めないため誤検知は起きない** — 具体パッケージの import は `di/` に集約されるからである (§3.3 の `di` 行。v2 の実測: `usecase/` からの `repository` import は 0 件) |
 | L-5 | **外部 SDK・gateway 実装の型を `usecase` / `service` の公開 IF に露出させない** (F6 の型エイリアス方式の禁止) | D-A''' | `usecase/*` / `service/*` から SDK パッケージを deny (IF は利用側で定義するので import 不要) + **L-4 の (b) と同一規則**で gateway 実装パッケージを deny |
 | L-6 | **`tx` は UseCase が張り、引数で渡す**。Service / ツールハンドラには **`Begin` / `Commit` / `Rollback` を持たない narrow IF** として渡す (§3.7 の 2)。**`pgx.Tx` をそのまま渡さない** | §3.7 (D-A'') | **① 型で担保**: 利用側が定義する 3 メソッドの narrow IF (`Exec` / `Query` / `QueryRow` 相当) のみを引数型にする。**`pgx.Tx` (実型) は `Begin(ctx) (Tx, error)` / `Commit(ctx) error` / `Rollback(ctx) error` を公開している** (`hassan-v2-backend/vendor/github.com/jackc/pgx/v5/tx.go:122`・`:124`・`:130`・`:137`) ため、`pgx.Tx` を渡すと「呼べない」が成立しない。**② depguard**: `service/**` から接続プール (`github.com/jackc/pgx/v5/pgxpool`。v2 の実例: `hassan-v2-backend/repository/asset_usage_history.go:7`) の import を deny (プールの入手経路を塞ぐ)。**③ 残余の検査**: narrow IF は SQL を実行できるため、「Service / UseCase が SQL を直接実行しない」(§3.3) は **D-2 の検査 ⑨** で見る。depguard は import パス単位で、型やメソッド呼び出しは deny できない |
 
@@ -234,12 +323,13 @@ flowchart TB
 **Q-L8=B (v3 新規ドメインのみドメイン別分割) の決定自体は維持する** — 変わるのは根拠だけである。
 
 **違反した PR はマージできない** (golangci-lint のジョブが必須チェック。§5 の D-2)。
-L-1〜L-6 を表現する depguard の規則は **`templates/backend-repo/.golangci.yml` の 18 規則**であり
-(L-ID と規則名は 1 対 1 ではない — 1 つの L-ID を複数規則で表現している箇所がある)、
-**全 18 規則それぞれについて、違反サンプルで CI が落ちることを実装リポで確認する**
+L-1〜L-6 を表現する depguard の規則は **`templates/app-monorepo/backend/.golangci.yml` の 24 規則**であり
+(2026-08-05: entity のドメイン分割で `L2-entity-no-cross-domain-<domain>` ×5 + `L2-entity-unregistered-domain`
+の 6 規則を追加。L-ID と規則名は 1 対 1 ではない — 1 つの L-ID を複数規則で表現している箇所がある)、
+**全 24 規則それぞれについて、違反サンプルで CI が落ちることを実装リポで確認する**
 ([plan-layering.md](../../aidlc-docs/inception/productionization/plan-layering.md) §3 の AC-6.14 行)。
 **規則を追加したら、この規則数と `.golangci.yml` 冒頭の逆流方向対応表を同じ PR で更新する**。
-違反サンプルには**次の 2 つを必ず含める** (どちらも実際に穴として指摘された経路である):
+違反サンプルには**次の 4 つを必ず含める** (いずれも実際に穴として指摘された経路である):
 
 1. **`service/theme` → `usecase/asset`** (L-2 を `usecase` 経由で迂回する経路。`L1-service-no-upper-layers` が塞ぐ)
 2. **`service/theme` → sqlc 生成パッケージ** (L-3 を生成クエリ経由で迂回する経路。
@@ -247,6 +337,43 @@ L-1〜L-6 を表現する depguard の規則は **`templates/backend-repo/.golan
 3. **`service/theme` → `repository/theme`** (自ドメインでも**具体パッケージへの直接依存は禁止** —
    IF は利用側で定義する。`L4-L5-no-concrete-adapters` が塞ぐ。**`di/` からの同じ import は落ちないこと**も
    併せて確認する = 誤検知が無いことの検証)
+4. **`entity/theme` → `entity/asset`** (L-2 拡張を entity 層で迂回する経路。
+   `L2-entity-no-cross-domain-theme` が塞ぐ。**`entity/theme` → `entity` 直下の共通型 (`Scope` 等) は
+   落ちないこと**も併せて確認する = 誤検知が無いことの検証。下の「entity のドメイン分割」)
+
+#### entity のドメイン分割 (L-2 の拡張。2026-08-05 追加)
+
+**背景**: `service/usecase/repository` はドメイン別サブパッケージ + depguard で越境を機械強制していたが、
+`entity/` だけがフラットな 1 パッケージだった (テーマ実装 1 件のみの段階でアーキテクチャレビューにより
+指摘された)。あるドメインの entity 型が別ドメインの entity 型を自由に参照できる抜け穴になっており、
+放置すると asset / conversation / idea / plan が増えるほど「他層は機械強制、entity だけ素通り」という
+非対称が固定化する。
+
+**決定**: `entity/` をドメイン別サブパッケージ (`entity/theme/` `entity/asset/` ...) に分割し、
+`entity/A` → `entity/B` の import を `service/A` → `service/B` (L-2) と同じ原則で禁止する。
+**全ドメイン共通型** (`Scope` / `Pagination` / `SortOrder` / `ListScope` など、所有者スコープや
+ページネーションのように全ドメインが使う型) は `entity/` 直下に残し、共通層として扱う
+(§3.5.2 の区分表を参照)。`entity/toolresult/` (ツール結果の型置き場) もドメインではなく共通層。
+
+**depguard 実装上の注意 (実機検証で判明。2026-08-05)**: 当初は service と同じ
+「`allow: [自ドメイン]` + `deny: [pkg: 親パッケージ全体]`」の形で書いたが、これは **entity では
+機能しない**。service には「`service/` 直下のファイルから共通型を import する」という必要が無かった
+(service 直下にファイルは無い) ため、この形で問題が露呈しなかっただけである。entity は
+`entity/theme` が `entity/` 直下の `Scope` / `Pagination` を import する必要があり、
+depguard (golangci-lint 同梱・v2.12.2 で検証) の `allow` は**同一規則内の `deny` を上書きしない** ——
+`deny: [pkg: ".../entity"]` と `allow: [".../entity"]` を同時に書いても `deny` が勝ち、
+`entity/theme` が共通型を import できずに CI が落ちる。**対処**: 各ドメインの規則は
+「兄弟ドメインだけを明示的に列挙する `deny`」のみで書く (`allow` を使わない)。`entity/` 直下の
+共通型・自ドメインは `deny` に現れないため、`list-mode: lax` の既定 (=許可) のまま通る。
+実装は `templates/app-monorepo/backend/.golangci.yml` の `L2-entity-no-cross-domain-<domain>`
+(5 ドメイン分。列挙する deny リストは他ドメインの `entity/<domain>` すべて) と、
+未登録ドメインを検出する番犬 `L2-entity-unregistered-domain`
+(`L2-service-unregistered-domain` と対称。`entity/` 直下の共通ファイルと `entity/toolresult/` は対象外)。
+
+**CI 検査 (D-2⑦) への影響**: `scripts/check-layer-scopes.sh` の実ディレクトリ集合 (下記③) の
+走査対象に `entity/` を追加し、`entity/toolresult` を `common_layers` に追加した。
+`.golangci.yml` の登録漏れ検査は **service 系ルールと entity 系ルールを層ごとに独立して判定する**
+(どちらか一方だけドメイン規則を追加し忘れても検出できるようにするため。詳細は §3.5.2)。
 
 #### sqlc 生成パッケージの扱い (L-3 / L-5 の適用)
 
@@ -285,9 +412,9 @@ depguard は**パス単位で規則を切り替えられる**ため機械強制�
 
 | 区分 | 対象パス | 適用する規約 |
 |---|---|---|
-| **v3 新規ドメイン** (第 1 リリースの機能セット = D-J: テーマ / アセット / 会話型アイデア創出とその生成物) | `usecase/{theme,asset,conversation,idea,plan}/**`<br>`service/**`<br>`repository/{theme,asset,conversation,idea,plan}/**` | **4 層 + entity + gateway**。L-1〜L-6 を depguard で強制 |
-| **共通層** (ドメイン区分を持たない) | `entity/**` / `gateway/**` / `controller/**` / **`config/**`** (設定値の SSOT。§3.9②) | L-1 / L-4 / L-5 を全体に適用 (`entity` は他層と外部パッケージを import しない・`gateway` は上位層を import しない)。**ドメイン集合の突き合わせ (下の D-2⑦) の対象から除外する** |
-| **v2 移植分** | `usecase/` の上記以外のドメイン (認証・アカウント等) と `repository/*.go` (フラット構成のまま) | **v2 の 3 層規約** (`hassan-v2-backend/CLAUDE.md:26`〜`:34`)。`service/` パッケージを作らない。**L-2 / L-3 / L-5 と肥大化 lint (§3.9④) の強制対象外**。**sqlc 生成パッケージの import 制約も対象外** (v2 は 44 ファイルが import している) |
+| **v3 新規ドメイン** (第 1 リリースの機能セット = D-J: テーマ / アセット / 会話型アイデア創出とその生成物) | `usecase/{theme,asset,conversation,idea,plan}/**`<br>`service/**`<br>`repository/{theme,asset,conversation,idea,plan}/**`<br>`entity/{theme,asset,conversation,idea,plan}/**` (2026-08-05 追加。上記「entity のドメイン分割」参照) | **4 層 + entity + gateway**。L-1〜L-6 を depguard で強制 (entity は L-1 / L-2 拡張 / L-5) |
+| **共通層** (ドメイン区分を持たない) | `entity/` 直下の共通ファイル (`Scope` / `Pagination` / `SortOrder` 等) / `entity/toolresult/**` / `gateway/**` / `controller/**` / **`common/config/**`** (設定値の SSOT。§3.9②。物理配置は §3.5.1 の `common/` の決定) | L-1 / L-4 / L-5 を全体に適用 (`entity` は他層と外部パッケージを import しない・`gateway` は上位層を import しない)。**ドメイン集合の突き合わせ (下の D-2⑦) の対象から除外する** |
+| **v2 移植分** | `usecase/` の上記以外のドメイン (認証・アカウント等) と `repository/*.go` (フラット構成のまま)。**`entity/<domain>` も作らない** (sqlc 生成型を直接参照する現状維持) | **v2 の 3 層規約** (`hassan-v2-backend/CLAUDE.md:26`〜`:34`)。`service/` パッケージを作らない。**L-2 / L-3 / L-5 と肥大化 lint (§3.9④) の強制対象外**。**sqlc 生成パッケージの import 制約も対象外** (v2 は 44 ファイルが import している) |
 
 **運用ルール (一覧を腐らせないため)**:
 
@@ -298,13 +425,15 @@ depguard は**パス単位で規則を切り替えられる**ため機械強制�
   | 場所 | 役割 |
   |---|---|
   | 本書 §3.5.2 の表 | **決定の正** (どのドメインがどちらの規約か) |
-  | `templates/backend-repo/layering-scopes.yml` (実装リポにコピーして使う) | **CI 検査の入力**。`v3_domains` / `ported_domains` の 2 リストのみを持つ |
-  | `templates/backend-repo/.golangci.yml` | depguard 規則・lint 対象パスの実体 |
+  | `templates/app-monorepo/backend/layering-scopes.yml` (実装リポにコピーして使う) | **CI 検査の入力**。`v3_domains` / `ported_domains` の 2 リストのみを持つ |
+  | `templates/app-monorepo/backend/.golangci.yml` | depguard 規則・lint 対象パスの実体 |
 
   **D-2 の検査 ⑦** (`scripts/check-layer-scopes.sh`) は 3 つの集合を扱う:
-  ①`service/` `usecase/` `repository/` 配下の**実ディレクトリ集合** (`common_layers` を除く)
+  ①`service/` `usecase/` `repository/` **`entity/`** (2026-08-05 追加) 配下の**実ディレクトリ集合**
+  (`common_layers` を除く。`entity/toolresult/` は共通層としてここに追加した)
   ②`layering-scopes.yml` の `v3_domains` / `ported_domains`
-  ③`.golangci.yml` の `L2-service-no-cross-domain-<domain>` 規則名・`L5-no-external-sdk` の対象パス・
+  ③`.golangci.yml` の `L2-service-no-cross-domain-<domain>` **および `L2-entity-no-cross-domain-<domain>`**
+  (2026-08-05 追加) の規則名・`L5-no-external-sdk` の対象パス・
   `exclusions` のパス正規表現・`L3-no-sqlc-outside-repository` の対象に現れるドメイン名。
 
   **比較は非対称にする** (対称に突き合わせると、**移植分は ③ に載せてはいけない**ため
@@ -313,10 +442,11 @@ depguard は**パス単位で規則を切り替えられる**ため機械強制�
   | # | 条件 | 検出できる事故 |
   |---|---|---|
   | 1 | ① == (`v3_domains` ∪ `ported_domains`) | ドメインを新設して `layering-scopes.yml` に登録し忘れた |
-  | 2 | ③ == `v3_domains` | v3 新規ドメインを `.golangci.yml` に登録し忘れた / 逆に余分な登録が残っている |
-  | 3 | `ported_domains` のどのドメイン名も ③ に**現れない** | 移植分を誤って強制対象に入れた (Q-L3=A に反する) |
+  | 2 | ③ == `v3_domains` (**service 系・entity 系それぞれ独立に判定する**。2026-08-05 追加 — どちらか一方だけ登録し忘れても検出できるようにするため) | v3 新規ドメインを `.golangci.yml` (service または entity のどちらか) に登録し忘れた / 逆に余分な登録が残っている |
+  | 3 | `ported_domains` のどのドメイン名も ③ に**現れない** (service 系・entity 系それぞれ) | 移植分を誤って強制対象に入れた (Q-L3=A に反する) |
 
-  加えて `service/<未登録ドメイン>` は depguard の `L2-service-unregistered-domain` でも落ちる (二重の網)。
+  加えて `service/<未登録ドメイン>` は depguard の `L2-service-unregistered-domain` で、
+  `entity/<未登録ドメイン>` は `L2-entity-unregistered-domain` でも落ちる (二重の網)。
   **本書の表と `layering-scopes.yml` の同期は、雛形が本リポジトリ内にあるため機械照合できる**
   (照合の実装は §8 の残課題)。**機械化できないのは実装リポへ切り出した後の写しだけ**で、
   そちらは D-2⑦ が実ディレクトリとの一致を見る
@@ -431,8 +561,11 @@ usecase/conversation/            ← ドメインを知っている層
     ⑤ Commit / Rollback + gateway が返した計測値の記録
   tool_registry.go
     ToolHandlers(scope Scope, deps Deps) map[string]conversation.ToolHandler
-      - 9 tools の名前 → ハンドラの対応表を組み立てる
-        (PoC の tool 名は `claude_managed_agents/cmd/devui/conversation.go:774`〜`:790` の 9 分岐)
+      - tool 名 → ハンドラの対応表を組み立てる
+        (**v3 の tool 集合と契約の SSOT は [API/conversation.md](API/conversation.md) §4.1**。
+         本数を本書に転記しない = DR-9。2026-08-02 に `set_theme_name` の廃止で
+         PoC の 9 本から減ったため、旧記述「9 tools」を落とした。
+         PoC 側の 9 分岐は `claude_managed_agents/cmd/devui/conversation.go:774`〜`:790`)
       - scope は **クロージャに束縛** して閉じ込める (引数にしない)   …… A-6 の束縛点
       - 他ドメイン (asset / idea / plan) のデータは、この層で定義した
         repository IF 経由で読む → L-2 / L-3 に触れない
@@ -613,7 +746,7 @@ gateway/anthropic/               ← 外部システムのアダプタ層
 | LLM 呼び出しパラメータ | `MaxTokens` (BE-6 の切り詰め対策として出力規模に余裕を持たせる) | 変わらない |
 | **安全弁のしきい値 (O-3)** | ツール呼び出し回数 / 累積出力トークン / 1 ターンの実行時間 (初期値は [observability.md](observability.md) §4.4) | 変わらない (**再デプロイなしで変更できる形にする**) |
 | 生成数の既定値と上限 | アイデア生成件数など (BE-2) | 変わらない |
-| 外部サービスのエンドポイント / ログレベル | API のベース URL、zap のレベル | **変わる** (env var / Secrets Manager から読む。D-1 / D-5) |
+| 外部サービスのエンドポイント / ログレベル | API のベース URL、zap のレベル | **変わる** (非秘密は `env/<env>.env`、秘密は Secrets Manager から読む。D-1 / D-5 / [operations.md](operations.md) §3.3 の②) |
 | 単価テーブルの版 | [observability.md](observability.md) の O-H | 変わらない |
 
 - **同じ値を Go / FE / `prompts/` の 3 箇所に持たない** (BE-2)。
@@ -669,10 +802,10 @@ gateway/anthropic/               ← 外部システムのアダプタ層
 ファイルは 676 行 / 427 行)。**ファイル行数は制限しない** —
 別ファイルへ移すだけで回避でき、抑止力にならない。
 
-設定ファイルは `templates/backend-repo/.golangci.yml` に置き、CI から参照する (§5 の D-2)。
+設定ファイルは `templates/app-monorepo/backend/.golangci.yml` に置き、CI から参照する (§5 の D-2)。
 
 **対象パスは「v3 で新規に書くコード全体」とする** — §3.5.2 の「v3 新規ドメイン」区分に加え、
-**共通層 (`controller/**` / `gateway/**` / `entity/**` / `config/**`) も対象に含める**。
+**共通層 (`controller/**` / `gateway/**` / `entity/**` / `common/config/**`) も対象に含める**。
 除外するのは **v2 移植分だけ** (`usecase/<移植ドメイン>` と `repository/*.go` のフラット構成)。
 **共通層を除外しない理由は、重複の実害が観測されたのがまさにその 2 箇所だから**である:
 
@@ -751,12 +884,175 @@ L-2 / L-3 により UseCase が太る。**逃げ場を先に固定する**:
    **エラーイベントを SSE で送って正常終了させる** (HTTP ステータスでの表現は不可)。
    UseCase は「失敗した」を `CodedError` で返し、Controller がイベント化する
 
+### 3.11 リポジトリ構成 (D-I。app モノレポ + infra リポ)
+
+> 本節が回答する ID: **D-2** (CI ゲートの適用単位) / **D-3** (FE・BE のリリース順序の担保)。
+> 決定と却下案は §2 の D-I、決定の経緯は
+> [../../aidlc-docs/inception/productionization/questions.md](../../aidlc-docs/inception/productionization/questions.md) Q-2 の [Answer 2]。
+> **CI ワークフローと Vercel 設定の実体は [operations.md](operations.md) §5.1.1 が SSOT** (本節は構造と原則のみ)。
+
+**2 リポジトリ構成**:
+
+| リポジトリ | 中身 | デプロイ先 | 反映の契機 |
+|---|---|---|---|
+| **app モノレポ** | `backend/` (Go) + `frontend/` (Next.js) + `api/` (OpenAPI) | ECS (ecspresso) / Vercel | PR マージ (+ 本番は H-4) |
+| **infra リポ** | Terraform (VPC / ALB / RDS / IAM / Secrets / ECS クラスタ) | AWS | **人手 `apply`** (マージでは反映されない) |
+
+```
+hassan-v3/                       ← app モノレポ
+├── CLAUDE.md                    共通規約 + サブツリーへの索引
+├── .claude/rules/               2 リポ共通 (01〜04 + feedback_review_patterns.md。shared/ から合流)
+├── .claude/skills/              2 リポ共通 (implementing-robustly / test-driven-development)
+├── .github/
+│   ├── workflows/               ci.yml (path filter + gate) / deploy-backend.yml /
+│   │                            rollback-backend.yml / e2e.yml
+│   ├── CODEOWNERS               backend/ と frontend/ でオーナーを分ける
+│   ├── ISSUE_TEMPLATE/task.yml  1 セット (「対象サブツリー」欄を持つ)
+│   └── pull_request_template.md
+├── api/openapi.yaml             **BE→FE 契約の SSOT。生成物・手編集禁止**
+├── backend/                     Go。構成は STRUCTURE.md (§3.1〜§3.10 がそのまま適用される)
+│   ├── CLAUDE.md  .claude/      backend 固有 (05-architecture-coding-rules.md / go-developer)
+│   ├── go.mod  Makefile  .golangci.yml  layering-scopes.yml  sqlc.yaml
+│   └── main.go common/ controller/ usecase/ service/ repository/ gateway/ entity/ db/ prompts/ env/
+├── frontend/                    Next.js。構成は frontend.md §3.1 がそのまま適用される
+│   ├── CLAUDE.md  .claude/      frontend 固有 (react-developer)
+│   ├── package.json  .eslintrc.json  tsconfig.json
+│   └── src/{app,features,components,lib,generated,providers,styles,utils}
+└── scripts/hooks/pre-commit     staged パスでサブツリーに振り分ける
+```
+
+#### 3.11.1 サブツリー自己完結 (既存の層設計を無変更で保つための原則)
+
+**設定ファイルは各サブツリーのルートに置き、CI ジョブは `working-directory:` を切って実行する**。
+これを守ると、モノレポ化しても次がすべて**パス表記を変えずに有効**になる:
+
+| 資産 | なぜ無変更で済むか |
+|---|---|
+| `.golangci.yml` の depguard (L-1〜L-6) | 規則は `<module-path>/service` 等の**モジュールパス基準**。`files:` の相対パターンも `working-directory: backend` なら不変 |
+| CI 検査 `D-2①`〜`D-2⑨` の `targets` | 同上 (`backend/` を作業ディレクトリにする) |
+| §3.5.2 の層規約の対象パス表 / `layering-scopes.yml` | `usecase/` `service/` `repository/` の**トップレベル相対**で書かれている |
+| [frontend.md](frontend.md) §3.3 の `import/no-restricted-paths` zone | `frontend/.eslintrc.json` に置けば zone の相対パスが不変 |
+| `STRUCTURE.md` のツリーとパス表 | backend サブツリーのルートから見た表記のまま |
+
+**Go module はルートに置かず `backend/go.mod` とする** — ルートに置くと `go build ./...` / `go vet ./...` が
+`frontend/` (と `node_modules`) を走査対象に含める。
+**turborepo / nx / Go workspace は導入しない** — JS パッケージ 1 個・Go モジュール 1 個に対して
+ビルドオーケストレータを足しても、管理対象のツールが増えるだけで得るものがない。
+
+#### 3.11.2 モノレポ化で新規に必要になる 6 機構
+
+**3 分割では「リポジトリ境界」が無償で担保していたものが、モノレポでは機構になる**。
+6 件すべてを立ち上げ時に用意する (D-I の却下案 (a) が挙げた「CI の条件分岐と Vercel のビルド対象指定が増える」は
+事実として残るため、省略ではなく明示設計で受ける)。
+
+| # | 機構 | 内容 | 欠けると起きること |
+|---|---|---|---|
+| **MR-1** | **path filter + gate ジョブ** | `backend` / `frontend` / `api` の変更フラグでジョブを出し分ける。**`api/**` の変更は両サブツリーをトリガーする**。`if: always()` で全ジョブの結果を集約する **gate ジョブ 1 本だけを必須チェックに指定する** | **skip されたジョブは status を返さない**ため、ブランチ保護の必須チェックが**永久に pending** になり PR がマージ不能になる (H-1 が必須ステータスチェックを前提にしている) |
+| **MR-2** | **Vercel の Root Directory + Ignored Build Step** | Root Directory = `frontend`。**`frontend/` と `api/` に差分が無ければビルドしない**判定を Ignored Build Step に置く | backend だけの PR でも毎回 Preview ビルドが走る |
+| **MR-3** | **OpenAPI 契約の再生成漏れ検査** | `make -C backend docs` → **`scripts/check-regen.sh api/openapi.yaml`** → FE の型生成 → **`scripts/check-regen.sh frontend/src/generated`**。**必須チェックに入れる**。⚠️ **裸の `git diff --exit-code` を使わない** — **未追跡ファイルを見ない**ため、`api/openapi.yaml` の初回生成・orval / sqlc の**新規出力**が素通りし、**「エンドポイント追加」という最頻の変更で検査が空振りする** (2026-08-04 の design-reviewer 指摘 重大 1)。`check-regen.sh` が `git status --porcelain --untracked-files=all` で **追加 (`??`) / 変更 (` M`) / 削除 (` D`) の 3 種すべて**を見る (**インデックスを触らない**)。⚠️ **`git add --intent-to-add` + `git diff` は採らない** — `git add` が**削除をインデックスにステージしてしまう**ため `git diff` が差分ゼロになり **削除を検出できず、さらにローカル実行で意図しない削除が次の commit に混入する** (2026-08-05 に実測で確認。design-reviewer 2 巡目の重大 R2-1) | **モノレポ化の見返り本体が失われる** (BE の IF 変更が FE の型に反映されないまま気付かれない) |
+| **MR-4** | **CODEOWNERS** | `.github/CODEOWNERS` + ブランチ保護の "Require review from Code Owners"。`backend/` と `frontend/` でレビュー担当を分ける。**`api/` は BE / FE 双方のレビュアーを含む専用チーム 1 行**にする | リポ境界で担保されていた**レビュー**担当の分離が消える。**「双方の承認」は機構化できない** — CODEOWNERS は 1 行複数オーナーなら「誰か 1 人」で充足し、同じパスを 2 行書くと**最後に一致した行だけが適用される** (2026-08-05 に確定。2 巡目の重大 R2-3)。したがって `api/` は**専用チーム 1 行**で「どちらかが見る」ことだけを担保し、**「双方が見る」は PR テンプレート §5 の宣言 + H-1 の確認観点 ⑧ (人間)** に置く (`04-human-checkpoints.md` §2.6 の「回避可」に MR-4 として登録)。**さらに CODEOWNERS では代替できない担保がある**: 3 リポ構成は「FE 開発者に BE リポの **write 権限**を渡さない」を**リポジトリ単位のアクセス権限**で担保できたが、**モノレポでは書き込み権限をサブツリー単位で分けられない** (CODEOWNERS はレビュー要求であって write の制限ではない)。**この担保は失われる — 受容する代償として明示する** (DR-10 の 3 例目。2026-08-04 の design-reviewer 指摘 中 10)。**CODEOWNERS で置き換えられていないものは 3 つある** (DR-10 が「同じ行に列挙する」ことを要求している。2026-08-05 に 2 つ追記 = 3 巡目の 中 8): ①**write 権限**の分離 (上記) ②**Dependabot の単位** — 3 リポでは「リポ 1 つ = 更新 PR の単位」だったが、モノレポでは `dependabot.yml` に `directory: /backend` (gomod) と `/frontend` (npm) を**明示的に宣言しないと version updates の PR が出なくなる** (security alerts は残るが更新は止まる)。雛形は [templates/app-monorepo/.github/dependabot.yml](../../templates/app-monorepo/.github/dependabot.yml) で受ける ③**`git blame` / 履歴の分離** — `git log` の既定がリポジトリ全体になるため、サブツリーの履歴を読むには `git log -- backend/` のようにパスを付ける必要がある (雛形の `CLAUDE.md.tmpl` に 1 行書く) |
+| **MR-5** | **タグ / リリースの名前空間** | `backend-v*` / `frontend-v*` に分ける。**機構**: `.claude/settings.json` が `git tag` を deny しており (04 §3.2)、**タグ作成は人間の操作に限られる**。加えて**立ち上げチェックリスト (04 §4.1) に「タグ保護ルール (`backend-v*` / `frontend-v*` 以外の作成を禁止) の設定」を含める** — これが無い場合 MR-5 は**宣言だけ**になる (2026-08-04 の design-reviewer 指摘 中 13) | 単一の `v*` が両サブツリーで衝突し、どちらのリリースか判別できない |
+| **MR-6** | **「破壊的 API 変更は PR を分ける」規約** | 破壊的変更の 3 段階 (BE で新旧併存 → FE 切替 → 旧削除。D-3) を**別 PR に分けることを明文化**し、PR テンプレートで宣言させる | **1 PR で FE/BE を同時マージできてしまう** — 3 分割ではリポ境界が自動的に守っていた順序が失われる。**モノレポ化で新規に生じる落とし穴** |
+
+**MR-6 が最も見落としやすい**。モノレポ化は「順序の担保が人手から CI に移る」利得と引き換えに、
+**「順序を守らずに済む経路」を新設する**。得た利得 (FE/BE 跨ぎの PR が 1 本になる) と、
+守らなければならない制約 (互換性のない変更は分ける) を混同しないこと。
+
+**MR-1 の代償 (2026-08-05 追加。design-reviewer 3 巡目の 中 11 = DR-10 の 9 例目)**:
+**必須チェックを `gate` 1 本に集約したことで、「Require branches to be up to date before merging」
+(`04-human-checkpoints.md` §4.1) との組み合わせが、サブツリー間のマージ独立性を消す**。
+3 リポ構成では BE のマージが FE の PR を out of date にしなかった (別リポ = 別ブランチ保護 =
+別の up-to-date 判定) が、**モノレポでは `main` が 1 本なので、BE のマージが `frontend/` しか
+触っていない PR まで out of date にし、`gate` の再実行を要求する**。
+path filter は「どのジョブを走らせるか」を絞るだけで **`changes` と `gate` の 2 ジョブは必ず再実行される**。
+**規約も CI も何も壊れず、PR 同時数が増えたときに「マージが直列化する」形で初めて現れる**。
+対処は運用開始後の観測次第で ①up-to-date 要求を外す ②merge queue を導入する のどちらか
+(**第 1 リリースでは判断しない** — PR 同時数が読めないため。§3.11.2 の要確認 #7 に登録)。
+
+**MR-1〜MR-6 の整合は機械強制する** — `make check-monorepo-ci` (設計リポ `scripts/check-monorepo-ci.sh`) が
+①`ci.yml` の job 集合 == `gate` の `needs` == `gate` 内の判定名 ②issue テンプレート 3 本 × 必須 5 欄
+③MR-x の実測本数 ↔ 各文書の自称値 ④雛形と設計文書に裸の `git diff --exit-code` が無いこと
+⑤`deploy-backend.yml` の `paths` ⊆ `ci.yml` の path filter ⑥`D-2⑨` の `targets` ↔ `.golangci.yml` の L3 の `files`
+⑦PR テンプレートの V-x の網羅 ⑧`e2e.yml` の `workflows:` ↔ `deploy-backend.yml` の `name:`
+⑨`MR-x` への改名漏れ (走査対象に `scripts/` を含む = 自己適用)
+⑩`changes` の `outputs:` == `filters:` のキー == 各ジョブの `if:` が参照するキー
+⑪⑤の逆方向 (`ci.yml` の `backend` を起動するパターン ⊆ `deploy` の `paths`)
+⑫`ci.yml` / `deploy-backend.yml` の実測ジョブ数 ↔ `operations.md` の自称値
+⑬`CODEOWNERS` の `/api/` が 1 行かつオーナー 1 件
+⑭`04-human-checkpoints.md` §2.6 の「回避可」行数 ↔ ガード段落の自称値・ID 列挙 を照合する
+(**検査の本数と照合件数はここに書かない** — `make check-monorepo-ci` の出力が正。DR-9)。
+**新設の経緯**: 2026-08-04 の design-reviewer レビューで、**モノレポ機構への故障注入 3 種が
+3/3 とも `make check` で非検出**だった (= `make check` の緑がモノレポ機構を何も見ていなかった)。
+**⑩〜⑭ は 2026-08-05 に追加** — ⑩〜⑬ は **2 巡目のレビューが「非検出」と実証した 4 種**が
+3 巡目でも 4/4 とも非検出のまま放置されていたため (3 巡目の重大 2)、⑭ は
+**「回避可を増やさない」というガード自身が、増えたことを隠していた**ため (同 重大 5)。
+**追加した検査は必ず同じ故障注入で殴って検出を確認する** (`.claude/rules/05-harness.md`)。
+
+> **要確認 (GitHub / ツールの実挙動を未検証。実装リポの立ち上げ時に 1 回確かめる)**
+> — 推測を事実として設計に書かないため明示する (2026-08-04 の design-reviewer の「要確認」を引き継ぐ):
+>
+> | # | 未検証の前提 | 外れた場合の影響 |
+> |---|---|---|
+> | 1 | `golangci-lint-action@v6` が `.golangci.yml` の `version: "2"` スキーマを扱えるか | backend の lint ジョブが起動時に失敗する。`version:` 入力の固定値を調整する |
+> | 2 | `push` と `pull_request` の両方が走ったとき、**同名のチェックランが 2 つ**あるときブランチ保護がどう判定するか (`on` を `push: [main]` に絞ったのはこれを避けるため) | `gate` が緑でもマージできない / 逆に片方だけで通る |
+> | 3 | ~~CODEOWNERS で同じパスを 2 行書いたとき両方のオーナーの承認が必要になるか~~ → **2026-08-05 に「ならない」と確定** (GitHub は**最後に一致したパターンだけを適用**する)。**要確認から確定した制約へ移した** — MR-4 の本文を参照 |
+> | 4 | `vitest related --run --passWithNoTests` が 0 件マッチで正常終了するか | pre-commit が回避不能に詰まる (`--no-verify` は禁止のため) |
+> | 5 | `workflow_run.event` による dev / prod の判別が将来のイベント追加で崩れないか | prod デプロイでも E2E が dev に対して走る |
+
+#### 3.11.3 app と infra の間の依存
+
+**依存順序は `infra → app` の 2 段**になる (旧: `infra → backend → frontend` の 3 段)。
+BE→FE の順序は**リポ内の `api/openapi.yaml` を介した MR-3 の検査**に置き換わる。
+
+- **infra の PR はマージだけでは効かない。`apply` 済みであることが app の着手条件**
+  ([infrastructure.md](infrastructure.md) §6.3)
+- 「3 リポ跨ぎ」を条件にしていた**着手前の人間承認 (H-5) は「infra 跨ぎ」に読み替える**
+  ([../../templates/shared/.claude/rules/04-human-checkpoints.md](../../templates/shared/.claude/rules/04-human-checkpoints.md) /
+  [../../templates/shared/.claude/rules/02-issue-granularity.md](../../templates/shared/.claude/rules/02-issue-granularity.md) §2.2)。
+  FE/BE 跨ぎは 1 PR に収まるため条件から外れる
+- **`templates/shared/` の仕組みは残る** — コピー先が 3 → 2 リポに減るだけで、
+  app と infra で共通 rules を共有する必要は変わらない (construction-workflow の AC-5.1 / DF-3 は
+  対象を 2 リポとして生きたまま)
+
+#### 3.11.4 app ↔ infra の契約は実在し、**どちらの CI も静的に検査できない** (残課題)
+
+**2 リポ構成でも app と infra の間には契約がある** ([infrastructure.md](infrastructure.md) §4.2):
+ecspresso が **tfstate から クラスタ名 / subnet ID / SG ID / ターゲットグループ ARN / シークレット ARN**
+を解決する。**この契約は 2 リポに跨るため、どちらのリポの CI も静的には照合できない**
+(app 側は tfstate を持たず、infra 側は ecspresso の定義を持たない)。
+
+**MR-3 が `api/openapi.yaml` で解決したのと同じ問題が、app ↔ infra には残っている**。
+モノレポ化はこの契約を 1 mm も改善していない — **却下案 (b) を採っても改善しない**
+(ecspresso は実行時に AWS / S3 を読んで解決するため、同居しても静的照合にはならない)。
+これが (a) の OpenAPI と非対称な点である。
+
+**採る対処 (第 1 リリース)**: **`ecspresso verify` を `release` ジョブの前に必須で走らせる** —
+定義が参照する ARN / ID が実在するかを AWS 側に問い合わせて検証する。
+静的検査の代わりに**デプロイ直前の実行時検証**で受ける。
+`apply` 漏れ・ターゲットグループの作り直しによる ARN 変更は、
+「`ecspresso deploy` が古い ID で成功してしまう」形ではなく **`verify` の失敗**として出る。
+
+**却下案**: ①infra の出力値を app のファイルへ書き写して CI で照合する — §4.2 が却下済み
+(手写しは infra 側の変更が反映されず乖離する)。②app の CI が tfstate を読んで照合する —
+app の CI に tfstate の読み取り権限を与えることになり、`plan` 権限の分離 (INF-I) が崩れる。
+
+**実施済み (2026-08-05)**: 雛形の
+[../../templates/app-monorepo/.github/workflows/deploy-backend.yml](../../templates/app-monorepo/.github/workflows/deploy-backend.yml) の
+`release` ジョブに **「契約の実行時検証 (ecspresso verify)」ステップ**を `deploy` の直前に置いた。
+失敗時は**疑う順序 4 点** (①infra の apply 漏れ ②ARN の作り直し ③tfstate の参照先変更
+④tfstate 読み取り権限の欠落) を出力する — **app 側のコードを見ても原因が分からない**種類の失敗だからである。
+
+> **要確認**: `ecspresso verify` が上記 4 種のうちどれをどこまで検出するかは**未検証**
+> (少なくとも「参照先が実在しない」は検出する想定)。立ち上げ時に**故障注入で確かめる** —
+> 具体的には dev のターゲットグループを作り直して ARN を変え、`verify` が落ちることを確認する。
+> **検出しない種類があれば、その分は §6.3 の「apply 済みが着手条件」という人手の担保に残る**。
+
 ## 4. データモデル (**確定 — SSOT は [data-model.md](data-model.md)**)
 
 [gap-analysis.md](../analysis/gap-analysis.md) の G-4 のとおり、PoC と v2 で
 themes / assets / ideas / 企画書 の概念が重複していた。**Q-1 の方向確定 (v3 は全て新規・v2 の DB に
 相乗りしない) を受けて、2026-07-30 に [data-model.md](data-model.md) を起草し本節の項目を確定した**
-(テーブル 40 + 例外 12 / 設計判断 DM-1〜DM-20 / 採番と冪等性 / 台帳 / 派生物の無効化 /
+(テーブル 42 + 例外 12 / 設計判断 DM-1〜DM-20 / 採番と冪等性 / 台帳 / 派生物の無効化 /
 マイグレーション方式と投入順序)。**本節は索引であり、定義は同書が持つ**。
 
 **同書で確定した項目** (以下は「決めるべきこと」の一覧として残す — 各項目の答えは同書にある):
@@ -797,11 +1093,11 @@ themes / assets / ideas / 企画書 の概念が重複していた。**Q-1 の�
 | O-6 監査ログ | **回答** | **§3.9③** — 別トランザクションの best-effort + **失敗時の WARN ログ + メトリクスを必須**とし、`_ =` による無言破棄を禁止する (v2 は 6 ファイル 17 箇所。F11)。例外 (認証・権限操作だけ本処理も失敗させる) は本増分では設けない。記録対象と項目は [observability.md](observability.md) §4.5 が SSOT |
 | O-7 アラート | **参照 (本書は SSOT ではない)** | 通知先を含む設計は [observability.md](observability.md) §4.6 (AL-1〜AL-7)。**通知の形と環境差は [operations.md](operations.md) §7.5 が SSOT** (prod = 2 トピック / critical は Slack + メール、dev = 1 トピック)。**宛先の具体値のみ未確定** (同節の `[Answer]`) |
 | D-1 環境 | 部分 | local / dev / prod の 3 環境 (ユーザー指定)。**環境間の変更の切り分け** (dev の未リリース変更を prod に出さない) は運用設計で確定。環境で変わる設定値の持ち方は §3.9② |
-| D-2 CI ゲート | **回答** | build / vet / **UT** / 型チェック / **lint** / **生成物 (sqlc・wire) の再生成漏れ** / **OpenAPI 定義の再生成漏れ** / **A-1 認証適用・A-4 所有者スコープ・D-6 3 者一致・`math/rand` 禁止 の検査** (ユーザー指定: CI で UT と lint を機械強制)。**本増分で追加する検査**: ①**depguard による L-1〜L-6** (§3.5.1。規則ごとに違反サンプルで落ちることを確認) ②**層境界の公開関数の戻り値が `CodedError` であることの検査** (§3.9①。`fmt.Errorf` は内部のみ許可) ③**外部パッケージ型の型エイリアス検出** (L-5。F6 の再発防止。**module 内パッケージへのエイリアスは対象外** — L-5 が禁じるのは外部 SDK・gateway 実装・sqlc 生成物の型のみ) ④**`errors.As` 以外の `CodedError` 型アサーションの禁止** (変換関数 `controller/errresp.go` 以外。F5) ⑤**`dupl` (150) / `cyclop` (15) / `funlen` (150 行 80 文)** (§3.9④) ⑥**`config` 以外での `os.Getenv` 禁止** (§3.9②) ⑦**層規約の対象パスの登録漏れ検査** (§3.5.2。実ディレクトリ集合 = 登録済みドメイン集合 を突き合わせる) ⑧**監査ログ戻り値の `_ =` 破棄の検出** (§3.9③) ⑨**Repository 以外での SQL 到達経路の検出** — (a) `repository/**` 以外の全対象 (`service/**`・`usecase/<v3 新規ドメイン>/**`・`controller/**`・`entity/**`・**`gateway/**`**) からの `Exec` / `Query` / `QueryRow` 呼び出し (§3.7 の 3。narrow IF で防げない残余。**対象は `.golangci.yml` の `L3-no-sqlc-outside-repository` の `files` と一致させる** — `ci.yml` の `targets` が SSOT の実体) (b) **sqlc 生成パッケージの import** (§3.5.1 の「sqlc 生成パッケージの扱い」の規則 3。depguard を回避された場合の backstop) (c) **`.(pgx.Tx)` / `.(*sql.Tx)` の型アサーション** (narrow IF から実型へ戻す抜け道。§3.7 の 2)。**①〜⑨ と `math/rand` 禁止検査は `templates/backend-repo/.github/workflows/ci.yml` のステップと 1 対 1 で対応させ、ステップ名に検査 ID (`D-2①` 〜 `D-2⑨`) を書く** (宣言と実物のずれを grep で照合できるようにするため)。**違反した PR はマージできない**。雛形: `templates/backend-repo/.github/workflows/ci.yml` と `templates/backend-repo/.golangci.yml` ほか 3 リポ分。**単純なパターン照合で足りる検査 (③④⑥⑧⑨) は雛形の CI に実装済み**、**構文解析が必要な検査 (②⑦) はスクリプト本体を実装リポで用意する** (雛形は未実装なら落ちるステップを配置し、無言のスキップにしない)。`math/rand` 禁止検査の定義は [auth.md](auth.md) §6.10-3 が SSOT |
+| D-2 CI ゲート | **回答** | build / vet / **UT** / 型チェック / **lint** / **生成物 (sqlc・wire) の再生成漏れ** / **OpenAPI 定義の再生成漏れ** / **A-1 認証適用・A-4 所有者スコープ・D-6 3 者一致・`math/rand` 禁止 の検査** (ユーザー指定: CI で UT と lint を機械強制)。**本増分で追加する検査**: ①**depguard による L-1〜L-6** (§3.5.1。規則ごとに違反サンプルで落ちることを確認) ②**層境界の公開関数の戻り値が `CodedError` であることの検査** (§3.9①。`fmt.Errorf` は内部のみ許可) ③**外部パッケージ型の型エイリアス検出** (L-5。F6 の再発防止。**module 内パッケージへのエイリアスは対象外** — L-5 が禁じるのは外部 SDK・gateway 実装・sqlc 生成物の型のみ) ④**`errors.As` 以外の `CodedError` 型アサーションの禁止** (変換関数 `controller/errresp.go` 以外。F5) ⑤**`dupl` (150) / `cyclop` (15) / `funlen` (150 行 80 文)** (§3.9④) ⑥**`config` 以外での `os.Getenv` 禁止** (§3.9②) ⑦**層規約の対象パスの登録漏れ検査** (§3.5.2。実ディレクトリ集合 = 登録済みドメイン集合 を突き合わせる) ⑧**監査ログ戻り値の `_ =` 破棄の検出** (§3.9③) ⑨**Repository 以外での SQL 到達経路の検出** — (a) `repository/**` 以外の全対象 (`service/**`・`usecase/<v3 新規ドメイン>/**`・`controller/**`・`entity/**`・**`gateway/**`**) からの `Exec` / `Query` / `QueryRow` 呼び出し (§3.7 の 3。narrow IF で防げない残余。**対象は `.golangci.yml` の `L3-no-sqlc-outside-repository` の `files` と一致させる** — `ci.yml` の `targets` が SSOT の実体) (b) **sqlc 生成パッケージの import** (§3.5.1 の「sqlc 生成パッケージの扱い」の規則 3。depguard を回避された場合の backstop) (c) **`.(pgx.Tx)` / `.(*sql.Tx)` の型アサーション** (narrow IF から実型へ戻す抜け道。§3.7 の 2)。**①〜⑨ と `math/rand` 禁止検査は `templates/app-monorepo/.github/workflows/ci.yml` のステップと 1 対 1 で対応させ、ステップ名に検査 ID (`D-2①` 〜 `D-2⑨`) を書く** (宣言と実物のずれを grep で照合できるようにするため)。**違反した PR はマージできない**。雛形: `templates/app-monorepo/.github/workflows/ci.yml` と `templates/app-monorepo/backend/.golangci.yml` ほか 2 リポ分。**単純なパターン照合で足りる検査 (③④⑥⑧⑨) は雛形の CI に実装済み**、**構文解析が必要な検査 (②⑦) はスクリプト本体を実装リポで用意する** (雛形は未実装なら落ちるステップを配置し、無言のスキップにしない)。`math/rand` 禁止検査の定義は [auth.md](auth.md) §6.10-3 が SSOT |
 | D-3 デプロイ手順 | 部分 | BE: GitHub Actions → ecspresso → ECS (Terraform との役割分担は D-G で確定 2026-07-29)。FE: Vercel。**手動ロールバックは `ecspresso rollback` を CI から実行する形で標準化する** (v2 に無かった明示的手段 — [v2-deploy-observability.md](../analysis/v2-deploy-observability.md)。手順の詳細は運用設計で確定) |
 | D-4 マイグレーション | **未回答** | psqldef 推奨 (v2 準拠)。**DB 更新の自動化要望あり** ([design_memo.md](design_memo.md)) — 適用を CI/デプロイに組み込むか、承認付き手動かを Q-8 / Q-1 と同時に確定 |
 | D-5 シークレット | 回答 | `.env` 自動書き換え方式は不採用。**Secrets Manager / SSM から ECS task 定義の `secrets` で注入する**。**v2 からは継承できない** — v2 は `secrets` 未使用で `.env` を Docker イメージに焼き込み、dev/prod で同一イメージを共有している (実測: [v2-deploy-observability.md](../analysis/v2-deploy-observability.md))。**JWT 署名鍵については [auth.md](auth.md) §6.8 が SSOT** — v2 の `env/*.env` は git 追跡下にあるため**値を移設せず新規発行**し、**検証時に複数鍵を許容してローテーション可能にする** |
-| D-6 Agent ライフサイクル | **回答** | プロンプト・tool schema をリポジトリの正とし、**Agent の発行/更新をデプロイ手順の一部にする** (アプリのリリースより前に実行。雛形: `templates/backend-repo/.github/workflows/deploy.yml`)。テンプレートは `prompts/<domain>/` に集約 (D-E) し、**schema ↔ handler ↔ prompt の 3 者一致検査**と**起動時のハンドラ対応漏れ検査**を置く (**§3.8.4**)。**検査スクリプト本体は実装リポで用意する** (`scripts/check-tool-contract.sh`。未実装なら CI が落ちる = 無言のスキップにしない) |
+| D-6 Agent ライフサイクル | **回答** | プロンプト・tool schema をリポジトリの正とし、**Agent の発行/更新をデプロイ手順の一部にする** (アプリのリリースより前に実行。雛形: `templates/app-monorepo/.github/workflows/deploy-backend.yml`)。テンプレートは `prompts/<domain>/` に集約 (D-E) し、**schema ↔ handler ↔ prompt の 3 者一致検査**と**起動時のハンドラ対応漏れ検査**を置く (**§3.8.4**)。**検査スクリプト本体は実装リポで用意する** (`scripts/check-tool-contract.sh`。未実装なら CI が落ちる = 無言のスキップにしない) |
 | D-7 段階リリース | **回答** | 進め方 (ユーザー決定 2026-07-29。同日更新): **①インフラ (dev) を先行構築 → ②アプリ開発と並行して dev へ継続デプロイし検証 → ③PoC 由来機能セットの完成後に v3 を本番リリース → ④v2 との併用期間中に v2 既存機能を順次移植し、完了後に v2 を廃止** (D-J)。本番向けフィーチャーフラグは初回リリースまで不要だが、**dev へ継続デプロイする間「未完成機能を dev で隠す」用途のフラグは要る** (Q-8 待ち)。④では機能単位の本番リリースが発生し、**移植ドメインを §3.5.2 の表へ追記していく**。**④の併用期間はセキュリティ上の残存リスク期間でもある** — v2 の既知欠陥 (IDOR・リセットトークンの乱数・ロック解除の越境) は**v2 側を改修しない方針** (ユーザー決定 2026-07-29) のため、**v2 廃止の完了をもって消える**。**併用期間中に v2 と v3 が資格情報を共有・同期する場合は v2 側の侵害が v3 に及ぶ** — 共有・同期の有無は [auth.md](auth.md) §10.2 **R-1** で決める (認証系を v3 が持つため `accounts` は同一ではなく二重化される。詳細と出典: 同 §9.3 Q-A3) |
 | D-8 IaC の管理範囲 | **回答** | Q-7=B 確定 (D-G)。**Terraform = 基盤** (VPC / ALB / RDS / IAM / Secrets / ECS クラスタ) / **ecspresso = ECS サービス定義・タスク定義・リリース**。tfstate 連携で Terraform 側のリソース ID を参照。apply の実行主体・tfstate の保管場所は [infrastructure.md](infrastructure.md) で確定 |
 
@@ -824,7 +1120,13 @@ themes / assets / ideas / 企画書 の概念が重複していた。**Q-1 の�
 
 ## 7. 実装リポへの引き渡し
 
-- ハーネス雛形: `templates/` (backend / frontend / infra の 3 セット) (CLAUDE.md 雛形・実装/レビューエージェント・pre-commit・CI)
+- ハーネス雛形: `templates/` (**app モノレポ / infra リポの 2 セット** + shared) (CLAUDE.md 雛形・実装/レビューエージェント・pre-commit・CI)
+- **モノレポ機構の自己検査スクリプト 2 本** (`templates/app-monorepo/scripts/`) —
+  **設計リポの `make check-monorepo-ci` に依存させない**。`05-harness.md` のとおり
+  「切り出し後は実装リポ側が正」なので、**担保を実装リポ側に持たせる** (2026-08-05 の D-2):
+  - `check-regen.sh` — MR-3 の実体 (生成物の追加 / 変更 / 削除の検出)。`meta` ジョブが自己テストする
+  - `check-ci-gate.sh` — MR-1 の実体 (`job 集合 == gate の needs == 判定名` + `if: always()`)。
+    `meta` ジョブから呼ぶ
 - **影響レイヤーと依存順序** (本増分の層構成を実装リポへ落とすとき):
   1. `entity/` (ドメイン型 `ContractID` / `AccountID`・純粋計算) → 2. `gateway/` の IF と実装 (計測値の戻り型を先に固める。後付け不可) →
   3. `repository/<domain>/` (sqlc 出力の分割) → 4. `service/<domain>/` (`conversation.Runner` を含む) →
@@ -862,7 +1164,7 @@ themes / assets / ideas / 企画書 の概念が重複していた。**Q-1 の�
 - **§3.5.2 の表と `layering-scopes.yml` の照合が未実装** — 対象パス表の機械可読な写しを雛形に置いた
   (§3.5.2。CI は設計リポを読めないため写しが必要)。**雛形は本リポジトリ内にあるので設計リポ側の
   同期は機械照合できる** — `make check` (doc-lint の拡張か新しい make ターゲット) に
-  「§3.5.2 の表のドメイン集合 == `templates/backend-repo/layering-scopes.yml` のドメイン集合」の
+  「§3.5.2 の表のドメイン集合 == `templates/app-monorepo/backend/layering-scopes.yml` のドメイン集合」の
   照合を追加する。**本増分では未実装** (`scripts/` は本タスクの編集対象外)。
   切り出し後の実装リポ側の写しは D-2⑦ が実ディレクトリとの一致を見る
 - ~~**ツールハンドラ戻り値の型をどうするか**~~ → **解決 (2026-07-30)**: 戻り値は `any` のまま

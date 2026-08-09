@@ -9,32 +9,33 @@
 
 [plan.md](../../../aidlc-docs/inception/productionization/plan.md) の **Task-3b** に相当する。
 `docs/design/api.md` 単一ファイルの代わりに、**ドメインごとにファイルを分割**した
-(理由: 6 ドメイン × 各 5〜21 エンドポイントを 1 ファイルに置くと、増分ごとの更新で
+(理由: 9 ドメイン × 各 5〜22 エンドポイントを 1 ファイルに置くと、増分ごとの更新で
 コンフリクト範囲が全ドメインに広がる。SSOT は「1 ドメイン 1 ファイル」で保つ)。
 
 ### 対象と対象外
 
+**2026-08-02 追記**: 会話型アイデア創出 (アイデア発散) は当初「本ディレクトリの対象外」としていたが、
+[conversation.md](conversation.md) / [ideas.md](ideas.md) / [plans.md](plans.md) の 3 ファイルが確定したため、
+**本ディレクトリの対象に含める**。これにより「6 ドメイン」は**9 ドメイン**になる。
+
 | 区分 | 内容 | 所在 |
 |---|---|---|
-| **対象** | テーマ管理 / アセット管理 / ナレッジ (RAG チャット) / アイデアボード / お知らせ / 設定 | 本ディレクトリの 6 ファイル |
-| **対象** | アイデア (生成物) の**参照・管理系** API | [idea-boards.md](idea-boards.md) §7 (配置理由も同節) |
-| **対象外** | **会話型アイデア創出 (アイデア発散)** の API — 会話セッション・SSE 4 ターン・9 custom tools・企画書生成 | 別途「会話型アイデア創出の API 設計」として起草する。本ディレクトリには置かない |
+| **対象** | **§3 の総覧に載る全ドメイン** (テーマ管理 / アセット管理 / ナレッジ (RAG チャット) / アイデアボード / お知らせ / 設定 / 会話 / アイデア / 企画書) | 本ディレクトリの各ドメインファイル。**ドメイン数と本数は §3 の総覧が正** — ここに件数を書かない (DR-9。`make check-endpoint-mapping` が §3 を機械照合する) |
+| **対象** | 会話型アイデア創出 (会話セッション・同期 SSE ターン・custom tool・台帳・`stage`) | [conversation.md](conversation.md) (**2026-08-02 追加**) |
+| **対象** | アイデア (参照・人手編集・版・タグ・評価。生成物の受け先) API。**`ideas` テーブルを主対象とする API の SSOT** | [ideas.md](ideas.md) (**2026-08-02 追加**。旧版が [idea-boards.md](idea-boards.md) §7 に暫定配置していた参照系 3 本 + CSV 1 本を移設して統合した) |
+| **対象** | 企画書 (8 タブ・生成/再生成・版・お気に入り・チャット・詳細版・サムネイル) API | [plans.md](plans.md) (**2026-08-02 追加**) |
 | **対象** | 認証・アカウント基盤の API (サインイン・サインアップ・パスワードリセット・MFA・メンバー管理・会社情報 + **アカウント手動ロック / 解除** + 社内管理者経路) | [auth-accounts.md](auth-accounts.md) (**2026-07-31 追加**。ユーザー決定 2026-07-30 = [settings.md](settings.md) §4 の **D-ST-1'** により v3 で実装する)。移植対象の一覧は [settings.md](settings.md) §5、認証・認可の規約は [../auth.md](../auth.md) |
 
-> **§1・§2 の共通規約は上表の 6 ドメインを対象に書かれている** (本数は §3 の総覧が正 — DR-9)。
+> **§1・§2 の共通規約は上表の 9 ドメインを対象に書かれている** (本数は §3 の総覧が正 — DR-9)。
 > [auth-accounts.md](auth-accounts.md) は同じ規約に載るが、**認証系であるがゆえの差分 3 点**を持つ:
 > ①**公開エンドポイント 6 本がある** (§2.1 の「本ディレクトリに公開エンドポイントは無い」の例外)
 > ②**資格情報エラーの 401 に `CodedError` 本文を持つ** (§2.5 の「401 は本文なし」の例外)
 > ③**429 を返す 11 本がある** (§2.5 の 429 行が「本ディレクトリの対象外」としている範囲の例外。
 > 未認証で叩ける 6 本 + MFA 検証 2 本 + **認証済みで資格情報を提示する 3 本** = メール変更 / パスワード変更 / MFA 再登録)。
 > 加えて **403 の第 3 系統 (契約の不変条件ガード)** を持つため、§2.2 / §2.5 の「403 は R-1 / R-2 の
-> 2 系統・合計 11 本」は**6 ドメインについての数**である。差分の根拠は
+> 2 系統・合計 16 本」は**9 ドメインについての数**である。差分の根拠は
 > [auth-accounts.md](auth-accounts.md) §3.1 (AA-D-9 / AA-D-12 / AA-D-17) / §3.1.1 (コードの値域) / §3.7、
 > SSOT 側への是正要求は同 §5 **R-AA-2a** ([../auth.md](../auth.md) §6.6 宛て) / **R-AA-2b**。
-
-**対象外の理由**: 会話型アイデア創出は PoC の `/api/conversation` (9 tools + 台帳 + SSE) の移植であり、
-入出力仕様の確定に PoC の会話フロー詳細調査 (plan.md の **Task-2a**) が前提になる。
-本ディレクトリのドメインはその調査結果に依存しないため、先に確定させる。
 
 ### プロトタイプの扱い (DR-7)
 
@@ -50,7 +51,7 @@
 
 ### データモデル未確定の扱い
 
-`docs/design/data-model.md` は未着手 (Q-1 未回答)。本ディレクトリは
+`docs/design/data-model.md` は**確定済み** (2026-08-02 時点。当初この行は「未着手 (Q-1 未回答)」だった)。本ディレクトリは
 **Q-1 の回答に依存しない範囲**(パス・メソッド・スコープ・ステータスコード・SSE/LLM の有無) を確定させ、
 **リクエスト/レスポンスのフィールドはプロトタイプ由来の暫定**として書く。
 データモデル確定後に、各ドメインファイルの「主なリクエスト/レスポンス項目」列を更新する。
@@ -115,7 +116,7 @@ v3 が `scope=contract` を無条件に許すと、**切替と同時に非共有
 | D-API-6 | エラーレスポンス | **`CodedError` 1 系統**に統一し、**Controller 層に「CodedError → HTTP ステータス」の単一マッピングテーブル**を置く。本文は `{"code":"<文字列コード>","message":"<表示文言>","request_id":"<リクエスト ID>"}`。**404 / 403 も本文を返す** ([../auth.md](../auth.md) §6.6 の表と整合) | (a) v2 の 2 系統維持 (F-7): 変換が controller ごとの手書きになり、v2 では既に 2 方式が併存している (F-8)。(b) `apperror` 側に寄せる: UseCase 層が controller パッケージに依存し、層の依存方向 ([../architecture.md](../architecture.md) §3 責務表) に違反する。(c) 404/403 をボディ無しにする (F-9): FE がエラー種別を判別できず、v2 では「どのリソースが無いのか」がログにしか出ない |
 | D-API-7 | ページネーション | **`limit` / `offset`** (v2 準拠)。**既定 `limit=50` / 最大 `limit=200`**。`limit=0` は「全件」として扱わず 400。**既定値・上限値の SSOT は backend の定数 1 箇所**とし、OpenAPI の `default`/`maximum` に反映して orval 経由で FE に伝播させる (BE-2) | (a) v2 の `limit` 未指定 = 全件 (F-10): データ増加でレイテンシが静かに劣化し、既定が最悪ケースになる。(b) カーソルページネーション: 「◯件目まで」の表示 (プロトタイプの一覧に件数表示がある) と相性が悪く、v2 に前例が無い。(c) 既定値を FE と prompts にも書く: BE-2 (hard cap の 3 層散在) の再発 |
 | D-API-8 | 一覧の絞り込みパラメータ | **`account_id` パラメータを置かない**。代わりに **`scope=mine\|contract`** (列挙値・既定 `mine`) を使う。契約スコープでの作成者絞り込みが必要な場合のみ `created_by=<列挙されたメンバー ID>` を許すが、**サーバが必ず自契約メンバーであることを検証**する | (a) v2 の `account_id` クエリ踏襲 (F-15): テーマ側に契約一致検証が無く**他契約のデータが読める入力形**であり、同じ形を持ち込むと同じ検証漏れを招く。(b) `scope` を持たず常に個人スコープ: v2 の `idea_boards` は契約単位で共有されており ([../auth.md](../auth.md) §2.2)、既存データを表現できない |
-| D-API-8' | **`scope=contract` を許す条件** | **テーマ / アセット / アイデアの `scope=contract` は増分 2 でのみ有効化**する。増分 1 は `scope=mine` のみを受け付け、`contract` は **400** で拒否する。増分 2 で **per-resource の `visibility` (`private`\|`contract`。既定 `private`) を判定条件**とし、`scope=contract` は「`visibility=contract` のリソース + 自分のリソース」を返す。**アイデアボードは対象外** (v2 の既存メンバーシップで可視性が決まる — F-16 の 3 行目 / [idea-boards.md](idea-boards.md) D-IB-11) | (a) 増分 1 から `scope=contract` を無条件に許す (**当初案・却下**): 増分 1 には絞り込む属性 (`visibility`) が無いため、契約内の全テーマ・全アセットが露出する。v2 の既定が非共有 (F-16) なので**切替が一斉公開になる** (DR-3)。(b) v2 の `sharing_settings` (契約 × カテゴリの ON/OFF) を v3 に引き継ぐ: 粒度が「契約 × カテゴリ」しかなく、プロトタイプが要求する**テーマ 1 件ごとの可視性** ([themes.md](themes.md) D-TH-3) を表現できない。既存値の扱いは (c) で吸収する。(c) 移行方針: **v2 の `sharing_settings` が ON の契約は、移行時に既存テーマ・アセットの `visibility` を `contract` に、OFF の契約は `private` に設定する** — これにより切替前後で見える範囲が変わらない ([themes.md](themes.md) §3.2 / [assets.md](assets.md) §3.2) |
+| D-API-8' | **`scope=contract` を許す条件** | **テーマ / アセット / アイデアの `scope=contract` は増分 1 から有効化**する (**2026-08-02 改訂。旧「増分 2」を撤回**。[../auth.md](../auth.md) §6.12 (c) / [../data-model.md](../data-model.md) DM-9 が「per-resource `visibility` 列と、その書き込み API はどちらも増分 1」と改訂したことに追随する。理由 = C-16 — v2 の `POST /sharing-settings` でできていた「共有の切り替え」を増分で落とさない)。**per-resource の `visibility` (`private`\|`contract`。既定 `private`) を判定条件**とし、`scope=contract` は「`visibility=contract` のリソース + 自分のリソース」を返す。**増分 2 に残るのはテーマメンバー機能 (`GET`/`PUT /themes/{theme_id}/members`) のみ**。**アイデアボードは対象外** (v2 の既存メンバーシップで可視性が決まる — F-16 の 3 行目 / [idea-boards.md](idea-boards.md) D-IB-11) | (a) 増分 1 から `scope=contract` を無条件に許す (**当初案・却下**): 増分 1 に絞り込む属性 (`visibility`) が無いままだと契約内の全テーマ・全アセットが露出する。v2 の既定が非共有 (F-16) なので**切替が一斉公開になる** (DR-3)。**列と書き込み API をどちらも増分 1 に含めることでこの懸念を解消した** (既定値 `private` により露出しない)。(b) v2 の `sharing_settings` (契約 × カテゴリの ON/OFF) を v3 に引き継ぐ: 粒度が「契約 × カテゴリ」しかなく、プロトタイプが要求する**テーマ 1 件ごとの可視性** ([themes.md](themes.md) D-TH-3) を表現できない。既存値の扱いは (c) で吸収する。(c) 移行方針: **v2 の `sharing_settings` が ON の契約は、移行時に既存テーマ・アセットの `visibility` を `contract` に、OFF の契約は `private` に設定する** — これにより切替前後で見える範囲が変わらない ([themes.md](themes.md) §3.2 / [assets.md](assets.md) §3.2)。(d) 列は増分 1・書き込み API は増分 2 (**旧案・撤回**): 増分 1 で作られたリソースの既定値決定が増分 2 まで宙に浮き、二重管理になる |
 | D-API-9 | ソート | **`sort=<フィールド>:<asc\|desc>`**。許可値はエンドポイントごとのホワイトリストで、範囲外は 400 | (a) v2 準拠でソート無し (F-10): プロトタイプに並べ替え UI がある (**2026-07-30 更新版ではアセット一覧のソート UI は消えたが、ナレッジのファイル一覧 `:14059-14063` とボード詳細 `:12261` に並び順 select が現存**) ため、FE 側の全件取得ソートになり D-API-7 と矛盾する。(b) 任意フィールドを許可: インデックスの無い列でのソートが本番の遅延要因になる |
 | D-API-10 | 検索 | **`keyword`** (v2 準拠 F-10)。**部分一致の対象フィールドをエンドポイントごとに明記**する | (a) `q` にする: v2 との差分に意味が無い。(b) 検索対象を書かない: 「テーマ名・ミッション・主要アセット名・メンバー名」を検索するプロトタイプ挙動 (`hassan_agent_prototype_v2.html:10816-10821`) が実装者判断になる (DR-5) |
 | D-API-11 | 作成・更新・削除の応答 | **作成 201 + 本文にリソース / 更新 200 + 本文にリソース / 削除 204 本文なし** | (a) v2 の `success(c)` (200 ボディ無し) 踏襲: 作成後に FE が採番された ID を得るため追加の GET が必要になる |
@@ -147,6 +148,33 @@ v3 が `scope=contract` を無条件に許すと、**切替と同時に非共有
 **API の契約 (`status` の値域・`failure.code` の存在・再実行の経路) は本節で確定**しており、
 実行基盤の選択で変わらない。
 
+#### 1.3.1 会話ターンと企画書の生成系は J-1〜J-7 の適用外 (2026-08-01 追加 / 2026-08-02 に企画書 3 本を追加)
+
+**J-1〜J-7 は「投げっぱなしの非同期ジョブ」の規約**であり、`asset-extractions` と `knowledge-files` の
+2 系統を対象にしている (D-API-15)。**会話ターン (`POST /conversations/{session_id}/messages`) はこれに含まれない**。
+
+| 項目 | 会話ターンの扱い |
+|---|---|
+| 形式 | **同期 SSE**。1 リクエスト = 1 ターンで、**実行がユーザーの待機と一致する** (投げっぱなしにしない) |
+| **J-6 (SSE ハンドラが DB をポーリング)** | **対象外**。**SSE を返すリクエスト自身がターンを実行する**ため、「ジョブが走っていないタスクに SSE 接続が振られる」という J-6 が防いでいる事象が起こり得ない |
+| **J-7 (結果の受け取り口を SSE 以外にも持つ)** | **満たす**。切断時は `GET /conversations/{session_id}` (台帳) と `GET /conversations/{session_id}/messages?after_seq=` (履歴) から回復する |
+| 同時実行 | ジョブの再実行ではなく、**同一セッションへの並行ターンを 409 で拒否**する (`data-model.md` の DM-13) |
+
+**企画書ドメインの SSE 3 本も同じ扱い** (2026-08-02 追加。[plans.md](plans.md) §12 の R-PL-9):
+`POST /plans/{plan_id}/generate` / `POST /plans/{plan_id}/tabs/{tab_id}/regenerate` /
+`POST /plans/{plan_id}/chat/messages` は**いずれも同期 SSE** であり、**J-6 の対象外・J-7 は満たす**。
+
+| 項目 | 企画書 3 本の扱い |
+|---|---|
+| **J-6** | **対象外** (会話ターンと同じ理由 — SSE を返すリクエスト自身が生成を実行する) |
+| **J-7** | **満たす**。切断時は `GET /plans/{plan_id}` (8 タブの最新版) と `GET /plans/{plan_id}/chat/messages?after_seq=` から回復する |
+| 同時実行 | **企画書あたり 1 本**に制限し、競合は 409 ([plans.md](plans.md) §13 の PL-R7) |
+| 保存の粒度 | **タブ 1 件の保存 = 1 トランザクション** ([../data-model.md](../data-model.md) §4.11.1 の規約 5。2026-08-02 改訂) — 打ち切り時にそこまでのタブが残る |
+
+**この節がある理由**: 規約からの逸脱を無言で行わないため
+([conversation.md](conversation.md) §7 の D-CV-2 / 同 §8 の R-CVA-6)。
+**新しい SSE 経路を足すときは、J-1〜J-7 に載せるか本節の例外に該当するかを設計時に明示する**。
+
 ### 1.4 機械強制 (規約を「気をつける」に落とさないための CI 検査)
 
 D-API-3 / D-API-5 / D-API-6 / D-API-7 / D-API-8 は宣言だけでは守られない。
@@ -162,7 +190,7 @@ D-API-13 で `swagger.json` をコミットするため、**下表の多くは�
 | **`account_id` クエリの禁止** | `swagger.json` の全 query パラメータに `account_id` が現れないこと。**許可リストは `GET /activity-logs` の 1 本のみ** (契約内管理者限定 + 自契約検証あり)。**最も事故が大きい規約なので機械検査を必須にする** (F-15 の再発防止) | **D-API-8** |
 | **一覧レスポンス形の統一** | `swagger.json` の 200 レスポンススキーマのうち配列を返すものが `{items, total_count}` の形であること (裸配列・リソース名キーを弾く) | D-API-5 |
 | **パスパラメータの命名** | ルート定義のパスパラメータが `{<単数リソース名>_id}` に一致すること (`{id}` を弾く正規表現検査) | D-API-2 |
-| **`scope` の値域** | `scope` パラメータの enum が `mine` / `contract` のみであること。**増分 1 では `contract` を受け付けない**ことを UT で担保する | D-API-8' |
+| **`scope` の値域** | `scope` パラメータの enum が `mine` / `contract` のみであること。**テーマ / アセット / アイデアは増分 1 から `contract` を受け付ける** (2026-08-02 改訂)。**増分 2 に残るのはテーマメンバー機能 (`GET`/`PUT /themes/{theme_id}/members`) のみ**であり、増分 1 ではこの 2 本自体を実装・登録しないことを UT で担保する | D-API-8' |
 | swagger 再生成差分 | `swag init` の結果が commit 済み JSON と一致すること | D-API-13 |
 
 ---
@@ -189,7 +217,7 @@ D-API-13 で `swagger.json` をコミットするため、**下表の多くは�
 | # | 系統 | 判定の根拠 | 該当 | v2 の前例 |
 |---|---|---|---|---|
 | R-1 | **契約内の管理者/メンバー区別** (`accounts.auth_role_id`) | `authAccount.AuthRoleID.IsAdmin()` | [settings.md](settings.md) §3.1 の **3 本** (`PUT /settings/workspace` / `GET /usage-summary` / `GET /activity-logs`) | `hassan-v2-backend/controller/event_logs.go:47-50` が同じ判定で `forbidden(ctx, apperror.RequestUserNotAdmin())` を返す。ロール定義は `hassan-v2-backend/entity/auth_role.go:7-10` (1 = 管理者 / 2 = メンバー) |
-| R-2 | **リソース単位のロール / 投稿者** | ボード内ロール (`admin` / `editor` / `viewer`) とコメント投稿者 | [idea-boards.md](idea-boards.md) §3.1 の権限表 (**8 本** = admin 限定 3 + 投稿者限定 1 + viewer の編集操作 4) | `hassan-v2-backend/entity/idea_board.go:14-16` (3 ロール)、`同:118-121` (`CanEdit` = admin か editor)、`同:124-126` (`IsAdmin`)。違反時は `IdeaBoardForbidden` (`hassan-v2-backend/usecase/idea_board/update_board_idea.go:47`) |
+| R-2 | **リソース単位のロール / 投稿者 / 所有者** | ボード内ロール (`admin` / `editor` / `viewer`) とコメント投稿者 / **アイデアの所有者かどうか** | [idea-boards.md](idea-boards.md) §3.1 の権限表 (**8 本** = admin 限定 3 + 投稿者限定 1 + viewer の編集操作 4) + [ideas.md](ideas.md) §1.3 の**5 本** (共有ボード経由や `visibility=contract` で見えるだけの相手による書き込みを拒否。所有者のみ可) = **合計 13 本** | `hassan-v2-backend/entity/idea_board.go:14-16` (3 ロール)、`同:118-121` (`CanEdit` = admin か editor)、`同:124-126` (`IsAdmin`)。違反時は `IdeaBoardForbidden` (`hassan-v2-backend/usecase/idea_board/update_board_idea.go:47`) |
 
 **R-1 は [../auth.md](../auth.md) §9 の Q-A2 (契約内管理者/メンバー区別を v3 で使うか) への回答**であり、
 **「使う。ただし用途は R-1 の 3 本に限る」**を提案する (詳細は [settings.md](settings.md) §3.1)。
@@ -203,9 +231,9 @@ A-2 の方針と矛盾しない (認証は全員 `AuthRoleUser`、その上で�
 - **UseCase がスコープを確定**し、Repository のクエリ条件に必ず渡す ([../auth.md](../auth.md) §6.4)
 - 一覧 API のスコープ指定は **`scope=mine|contract` の列挙値のみ** (D-API-8)。
   **クライアントが任意の `account_id` を渡せる入力形を作らない**
-- **`scope=contract` は増分 2 で有効化する** (D-API-8')。増分 1 は `mine` のみを受け付け、
-  `contract` は 400 で拒否する。理由: 増分 1 には可視性を表す属性が無く、
-  v2 の既定が非共有 (F-16) のため無条件許可が一斉公開になる
+- **`scope=contract` はテーマ / アセット / アイデアで増分 1 から有効化する** (D-API-8'。2026-08-02 改訂)。
+  `visibility` (既定 `private`) が契約内露出を防ぐため、無条件許可による一斉公開 (DR-3) は起きない。
+  **増分 2 に残るのはテーマメンバー機能のみ**
 
 各エンドポイント表の「スコープ」列の意味:
 
@@ -213,7 +241,7 @@ A-2 の方針と矛盾しない (認証は全員 `AuthRoleUser`、その上で�
 |---|---|
 | **個人** | `WHERE account_id = <認証ユーザー>` のみ。他人のデータは 404 |
 | **契約** | `WHERE contract_id = <認証ユーザーの契約>`。契約内の他メンバーのデータを含む。**アイデアボードはさらにメンバーシップで絞る** ([idea-boards.md](idea-boards.md) D-IB-11) |
-| **個人 / 契約 (増分 2)** | `scope` パラメータで切り替わる。既定は **個人**。**`contract` の受け付けは増分 2 から** (D-API-8') |
+| **個人 / 契約 (増分 2)** | `scope` パラメータで切り替わる。既定は **個人**。**テーマ / アセット / アイデアは増分 1 から `contract` を受け付ける** (D-API-8')。この表記のまま残る増分 2 の対象はテーマメンバー機能のみ |
 
 ### 2.4 LLM 経路のスコープ (A-6 / AC-1.3)
 
@@ -244,9 +272,10 @@ RAG 検索のスコープ強制は [knowledge.md](knowledge.md) §4 が詳細を
 | **見える** (取得できる) | 有り | 200 系 | — |
 | **見える** (取得できる) | **無い** | **403** | 「あるのは知っているが操作できない」— 隠す意味が無く、403 の方がユーザーに正確 |
 
-**403 は「見えるリソースへの権限不足」の 2 系統のみ** (§2.2 の R-1 / R-2) — **これは 6 ドメイン
-(themes / assets / knowledge / idea-boards / news / settings) についての規則である**。
-**合計 11 本** = [settings.md](settings.md) の 3 本 (R-1) + [idea-boards.md](idea-boards.md) の 8 本 (R-2)。
+**403 は「見えるリソースへの権限不足」の 2 系統のみ** (§2.2 の R-1 / R-2) — **これは 9 ドメイン
+(themes / assets / knowledge / idea-boards / news / settings / conversation / ideas / plans) についての規則である**。
+**合計 16 本** = [settings.md](settings.md) の 3 本 (R-1) + [idea-boards.md](idea-boards.md) の 8 本 + [ideas.md](ideas.md) の 5 本 (R-2、計 13 本)。
+**conversation.md / plans.md に 403 を返すエンドポイントは無い** (会話ターンは個人スコープのみ、企画書は個人スコープのみで見える他人が存在しない)。
 **認証・アカウント基盤 ([auth-accounts.md](auth-accounts.md)) は第 3 系統 (R-3 = 不変条件ガード。
 「最後の契約内管理者をロック / 降格 / 削除できない」「自分自身をロック / 削除できない」) を持ち、
 同書の 403 は 10 本ある** — 系統と本数の SSOT は同書 §3.1。
@@ -259,7 +288,7 @@ RAG 検索のスコープ強制は [knowledge.md](knowledge.md) §4 が詳細を
 
 | 状況 | コード | 本文 | 適用範囲 |
 |---|---|---|---|
-| `X-Token` 欠落・不正・期限切れ / アカウント不存在・ロック / MFA 未検証 | **401** | なし | **6 ドメイン (themes / assets / knowledge / idea-boards / news / settings) の全エンドポイント**。**[auth-accounts.md](auth-accounts.md) は例外** — **トークンの発行・昇格を目的とする経路** (サインイン 2 本 / MFA 検証 2 本) の資格情報不一致を 401 + `CodedError` 本文で返す。**FE の「401 → 強制サインアウト」の分岐は本文のコード接頭辞で切り分ける** (`AU-T-` = 破棄 / `AU-C-` = フォーム内)。規則と値域は同書 §3.1 / §3.1.1 が持つ。**認証済みの状態変更に添える本人確認の不一致 (現在パスワード・MFA 再登録のコード) は 401 ではなく 400** — 下の 400 行に含まれる (同書 AA-D-17) |
+| `X-Token` 欠落・不正・期限切れ / アカウント不存在・ロック / MFA 未検証 | **401** | なし | **9 ドメイン (themes / assets / knowledge / idea-boards / news / settings / conversation / ideas / plans) の全エンドポイント**。**[auth-accounts.md](auth-accounts.md) は例外** — **トークンの発行・昇格を目的とする経路** (サインイン 2 本 / MFA 検証 2 本) の資格情報不一致を 401 + `CodedError` 本文で返す。**FE の「401 → 強制サインアウト」の分岐は本文のコード接頭辞で切り分ける** (`AU-T-` = 破棄 / `AU-C-` = フォーム内)。規則と値域は同書 §3.1 / §3.1.1 が持つ。**認証済みの状態変更に添える本人確認の不一致 (現在パスワード・MFA 再登録のコード) は 401 ではなく 400** — 下の 400 行に含まれる (同書 AA-D-17) |
 | リクエストボディ・クエリのバリデーション違反 (必須欠落・型不一致・`limit` 範囲外・`sort` 許可外・`scope=contract` を増分 1 で指定) | **400** | `CodedError` | 全エンドポイント (D-API-6 / D-API-7 / D-API-8' / D-API-9) |
 | **認証済みの状態変更に添える本人確認の不一致** (現在パスワード / MFA 再登録の TOTP コード) | **400** | `CodedError` (`AU-C-00004` / `AU-C-00005`) | **[auth-accounts.md](auth-accounts.md) のみ** (同書 AA-D-17)。**`old_password` / `password` / `totp_code` という送信フィールドに紐づくエラー**なので、401 ではなくフィールドエラーとして扱う |
 | パスパラメータが数値/UUID として解釈できない | **400** | `CodedError` | パスパラメータを持つ全エンドポイント |
@@ -267,14 +296,14 @@ RAG 検索のスコープ強制は [knowledge.md](knowledge.md) §4 が詳細を
 | 自契約だが**個人スコープの他人のリソース**を指定 (取得・更新・削除のいずれも) | **404** | `CodedError` | 個人スコープのドメイン ([themes.md](themes.md) / [assets.md](assets.md) / [knowledge.md](knowledge.md))。**そもそも読めないリソースなので 403 にしない** |
 | リソースが実在しない | **404** | `CodedError` | 上 2 行と区別できないのが正しい状態 |
 | **契約内管理者限定の操作を一般メンバーが叩いた** (R-1) | **403** | `CodedError` | [settings.md](settings.md) §3.1 の **3 本** |
-| **契約スコープで読めるリソースへの、ロール / 投稿者による権限不足** (R-2) | **403** | `CodedError` | [idea-boards.md](idea-boards.md) §3.1 の **8 本** (ボード更新・削除・メンバー変更 = board admin のみ / コメント削除 = 投稿者または board admin / アイテム追加・更新・削除とコメント投稿 = viewer 不可) |
+| **契約スコープで読めるリソースへの、ロール / 投稿者 / 所有者による権限不足** (R-2) | **403** | `CodedError` | [idea-boards.md](idea-boards.md) §3.1 の **8 本** (ボード更新・削除・メンバー変更 = board admin のみ / コメント削除 = 投稿者または board admin / アイテム追加・更新・削除とコメント投稿 = viewer 不可) + [ideas.md](ideas.md) §1.3 の **5 本** (本文・タグ更新・削除・スター更新・版の復元・評価の生成 = 所有者のみ。ボード経由や `visibility=contract` で見えるだけの相手は 403) = **合計 13 本** |
 | 一意制約との衝突 (同一アイデアのナレッジスレッド二重作成・テーマ名重複・フェーズ名重複・同一アイデアの二重追加) | **409** | `CodedError` | [knowledge.md](knowledge.md) `POST /knowledge-threads`、[themes.md](themes.md) `POST /themes` / `PUT /themes/{theme_id}`、[idea-boards.md](idea-boards.md) `POST /idea-board-phases` / `PUT /idea-board-phases/{phase_id}` / `POST /idea-boards/{board_id}/items` |
 | 削除対象が使用中 (フォルダに配下がある・フェーズが使用中) | **409** | `CodedError` | [assets.md](assets.md) `DELETE /asset-folders/{folder_id}`、[idea-boards.md](idea-boards.md) `DELETE /idea-board-phases/{phase_id}` |
 | アップロードの拡張子・サイズ違反 | **400** | `CodedError` | `multipart` を受ける全エンドポイント (D-API-14) |
 | 非同期ジョブが未完了の状態で結果を要求 | **200** (状態 `processing` / `running` を本文で返す) | — | [assets.md](assets.md) `GET /asset-extractions/{extraction_id}`、[knowledge.md](knowledge.md) `GET /knowledge-files/{file_id}` (D-API-15) |
 | 下流 LLM / 外部サービスの失敗 (**ストリーム開始前**) | **502** | `CodedError` | LLM 列が ✓ のエンドポイントと [news.md](news.md) の CMS 経路。**500 と区別**して外部起因を識別可能にする (O-4) |
 | 下流 LLM / 外部サービスの失敗 (**ストリーム開始後**) | **HTTP では表現しない** | SSE の `error` イベント | SSE 列が ✓ のエンドポイント (D-API-12 / [../architecture.md](../architecture.md) §3) |
-| **レート制限の超過** | **429** | `CodedError` (`Retry-After` 付き) | **6 ドメインは対象外** (全て認証必須 = §2.1。認証済み経路の暴走抑止は O-3 の安全弁が担う — [../observability.md](../observability.md) §4.4)。**[auth-accounts.md](auth-accounts.md) は 429 を返す (11 本)** — 同書 §3.7 が対象エンドポイントを列挙する (未認証で叩ける 6 本 + MFA 検証 2 本 + 認証済みで資格情報を提示する 3 本)。値と方式の SSOT は [../auth.md](../auth.md) §6.11-3。**403 で返さない** |
+| **レート制限の超過** | **429** | `CodedError` (`Retry-After` 付き) | **9 ドメインは対象外** (全て認証必須 = §2.1。認証済み経路の暴走抑止は O-3 の安全弁が担う — [../observability.md](../observability.md) §4.4)。**[auth-accounts.md](auth-accounts.md) は 429 を返す (11 本)** — 同書 §3.7 が対象エンドポイントを列挙する (未認証で叩ける 6 本 + MFA 検証 2 本 + 認証済みで資格情報を提示する 3 本)。値と方式の SSOT は [../auth.md](../auth.md) §6.11-3。**403 で返さない** |
 | 上記以外のサーバ内部エラー | **500** | `CodedError` | 全エンドポイント |
 
 ### 2.6 代表的なリクエスト / レスポンス例
@@ -323,10 +352,10 @@ X-Token: <JWT>
 
 ## 3. エンドポイント総覧
 
-**合計 116 エンドポイント** = 下表の 6 ドメイン **79 本** + 認証・アカウント基盤
+**合計 149 エンドポイント** = 下表の 9 ドメイン **112 本** + 認証・アカウント基盤
 [auth-accounts.md](auth-accounts.md) の **37 本** (同書 §2)。
 
-> **§1・§2 の共通規約が対象にするのは 6 ドメインの 79 本**である (§0 の注)。
+> **§1・§2 の共通規約が対象にするのは 9 ドメインの 112 本**である (§0 の注)。
 > 認証・アカウント基盤は D-ST-1' (2026-07-30) により v3 が実装し、
 > **入出力仕様は [auth-accounts.md](auth-accounts.md) で確定した** (2026-07-31。plan.md の **Task-3i**)。
 > 工数・依存の見積りでは 37 本を必ず加算すること。
@@ -336,61 +365,67 @@ X-Token: <JWT>
 | テーマ管理 | [themes.md](themes.md) | 9 | 0 | 0 | 0 |
 | アセット管理 | [assets.md](assets.md) | **22** | 1 | 1 | 0 |
 | ナレッジ (RAG チャット) | [knowledge.md](knowledge.md) | 15 | **2** | 1 | 0 |
-| アイデアボード + アイデア参照 | [idea-boards.md](idea-boards.md) | **22** | 0 | 0 | **8** |
+| アイデアボード | [idea-boards.md](idea-boards.md) | **18** | 0 | 0 | **8** |
 | お知らせ | [news.md](news.md) | 5 | 0 | 0 | 0 |
 | 設定 | [settings.md](settings.md) | 6 | 0 | 0 | **3** |
-| **小計 (6 ドメイン)** | — | **79** | **3** | **2** | **11** |
+| 会話型アイデア創出 | [conversation.md](conversation.md) | **7** | **1** | **1** | 0 |
+| アイデア (参照・人手編集・版・タグ・評価) | [ideas.md](ideas.md) | **13** | **1** | 0 | **5** |
+| 企画書 | [plans.md](plans.md) | **17** | **4** | **3** | 0 |
+| **小計 (9 ドメイン)** | — | **112** | **9** | **6** | **16** |
 | 認証・アカウント基盤 | [auth-accounts.md](auth-accounts.md) | **37** | 0 | 0 | **10** |
-| **合計** | — | **116** | **3** | **2** | **21** |
+| **合計** | — | **149** | **9** | **6** | **26** |
 
-LLM 3 本 = `POST /asset-extractions` / `POST /knowledge-threads/{thread_id}/messages` /
-`POST /knowledge-files` (埋め込み生成)。**O-2 の計測対象はこの 3 本** (§4 の O-2 行)。
+LLM 9 本 = `POST /asset-extractions` / `POST /knowledge-threads/{thread_id}/messages` /
+`POST /knowledge-files` (埋め込み生成) / `POST /conversations/{session_id}/messages` (会話ターン) /
+`POST /idea-evaluations` / `POST /plans/{plan_id}/generate` / `POST /plans/{plan_id}/tabs/{tab_id}/regenerate` /
+`POST /plans/{plan_id}/chat/messages` / `POST /plans/{plan_id}/thumbnail`。
+**O-2 の計測対象はこの 9 本** (§4 の O-2 行)。
 **認証・アカウント基盤に LLM / SSE 経路は無い** ([auth-accounts.md](auth-accounts.md) §4 の A-6 / O-2 / O-5)。
-403 の 11 本 = §2.2 の R-1 (3 本) + R-2 (8 本)。**認証・アカウント基盤の 10 本は別勘定** =
-契約内管理者限定 9 本 + SuperAdmin 限定 1 本 (同書 §2.3 / §2.4)。
-**§3.1〜§3.6 は 6 ドメインの内訳**であり、認証・アカウント基盤の一覧は
+403 の 16 本 = §2.2 の R-1 (3 本) + R-2 (idea-boards 8 本 + ideas 5 本 = 13 本)。
+**認証・アカウント基盤の 10 本は別勘定** = 契約内管理者限定 9 本 + SuperAdmin 限定 1 本 (同書 §2.3 / §2.4)。
+**§3.1〜§3.9 は 9 ドメインの内訳**であり、認証・アカウント基盤の一覧は
 [auth-accounts.md](auth-accounts.md) §2 が持つ (系統別に 4 節)。
 
 ### 3.1 テーマ管理 → [themes.md](themes.md)
 
 | メソッド | パス | 概要 | スコープ | 増分 |
 |---|---|---|---|---|
-| GET | `/themes` | 一覧 (検索・ステータス絞り込み・ソート) | 個人 / 契約 (増分 2) | 1 |
-| GET | `/themes/stats` | 集計サマリ (テーマ / アイデア / 企画書 / ナレッジ件数 — TH-Q6) | 個人 / 契約 (増分 2) | 1 |
+| GET | `/themes` | 一覧 (検索・ステータス絞り込み・ソート) | 個人 / 契約 (増分 1) | 1 |
+| GET | `/themes/stats` | 集計サマリ (テーマ / アイデア / 企画書 / ナレッジ件数 — TH-Q6) | 個人 / 契約 (増分 1) | 1 |
 | POST | `/themes` | 作成 | 個人 | 1 |
-| GET | `/themes/{theme_id}` | 取得 | 個人 / 契約 (増分 2) | 1 |
+| GET | `/themes/{theme_id}` | 取得 | 個人 / 契約 (増分 1) | 1 |
 | PUT | `/themes/{theme_id}` | 更新 | 個人 | 1 |
 | DELETE | `/themes/{theme_id}` | 削除 | 個人 | 1 |
 | GET | `/themes/{theme_id}/members` | メンバー一覧 | 契約 | 2 |
 | PUT | `/themes/{theme_id}/members` | メンバー置換 | 契約 | 2 |
-| PUT | `/themes/{theme_id}/visibility` | 可視性変更 | 個人 | 2 |
+| PUT | `/themes/{theme_id}/visibility` | 可視性変更 | 個人 | 1 |
 
 ### 3.2 アセット管理 → [assets.md](assets.md)
 
 | メソッド | パス | 概要 | スコープ | 増分 |
 |---|---|---|---|---|
-| GET | `/asset-folders` | フォルダツリー取得 | 個人 / 契約 (増分 2) | 1 |
+| GET | `/asset-folders` | フォルダツリー取得 | 個人 / 契約 (増分 1) | 1 |
 | POST | `/asset-folders` | フォルダ作成 | 個人 | 1 |
 | PUT | `/asset-folders/{folder_id}` | フォルダ更新 (改名・移動) | 個人 | 1 |
 | DELETE | `/asset-folders/{folder_id}` | フォルダ削除 | 個人 | 1 |
-| GET | `/assets` | 一覧 (フォルダ・状態・制作者・検索・ソート) | 個人 / 契約 (増分 2) | 1 |
+| GET | `/assets` | 一覧 (フォルダ・状態・制作者・検索・ソート) | 個人 / 契約 (増分 1) | 1 |
 | POST | `/assets` | 作成 (抽出結果のレビュー確定を含む) | 個人 | 1 |
-| GET | `/assets/{asset_id}` | 取得 | 個人 / 契約 (増分 2) | 1 |
+| GET | `/assets/{asset_id}` | 取得 | 個人 / 契約 (増分 1) | 1 |
 | PUT | `/assets/{asset_id}` | 更新 | 個人 | 1 |
 | DELETE | `/assets/{asset_id}` | 削除 (論理削除) | 個人 | 1 |
-| GET | `/assets/{asset_id}/function-tree` | 機能分解ツリー取得 | 個人 / 契約 (増分 2) | 1 |
+| GET | `/assets/{asset_id}/function-tree` | 機能分解ツリー取得 | 個人 / 契約 (増分 1) | 1 |
 | PUT | `/assets/{asset_id}/function-tree` | 機能分解ツリー全体置換 | 個人 | 1 |
 | POST | `/asset-extractions` | AI 抽出ジョブ開始 (**LLM**) | 個人 | 1 |
 | GET | `/asset-extractions/{extraction_id}` | 抽出ジョブの状態・結果取得 | 個人 | 1 |
 | GET | `/asset-extractions/{extraction_id}/stream` | 抽出進捗のストリーム (**SSE**) | 個人 | 1 |
-| GET | `/assets/{asset_id}/documents` | 添付資料一覧 | 個人 / 契約 (増分 2) | 1 |
+| GET | `/assets/{asset_id}/documents` | 添付資料一覧 | 個人 / 契約 (増分 1) | 1 |
 | POST | `/assets/{asset_id}/documents` | 添付資料追加 (multipart) | 個人 | 1 |
 | DELETE | `/assets/{asset_id}/documents/{document_id}` | 添付資料削除 | 個人 | 1 |
 | POST | `/assets/bulk` | 複数アセットの一括作成 (C-16) | 個人 | 1 |
 | DELETE | `/assets/bulk` | 一括削除 (論理削除。C-16) | 個人 | 1 |
 | POST | `/asset-imports` | CSV 一括取り込み (v2 の `POST /assets/upload` の後継。C-16) | 個人 | 1 |
 | GET | `/asset-imports/{import_id}` | 取り込みの状態・結果取得 | 個人 | 1 |
-| GET | `/assets/recent` | 最近使ったアセット (C-16) | 個人 / 契約 (増分 2) | 1 |
+| GET | `/assets/recent` | 最近使ったアセット (C-16) | 個人 / 契約 (増分 1) | 1 |
 
 ### 3.3 ナレッジ → [knowledge.md](knowledge.md)
 
@@ -412,7 +447,7 @@ LLM 3 本 = `POST /asset-extractions` / `POST /knowledge-threads/{thread_id}/mes
 | DELETE | `/knowledge-files/{file_id}` | ファイル削除 | 個人 | 1 |
 | POST | `/knowledge-files/bulk-delete` | ファイル一括削除 | 個人 | 1 |
 
-### 3.4 アイデアボード + アイデア参照 → [idea-boards.md](idea-boards.md)
+### 3.4 アイデアボード → [idea-boards.md](idea-boards.md)
 
 | メソッド | パス | 概要 | スコープ | 増分 |
 |---|---|---|---|---|
@@ -434,10 +469,6 @@ LLM 3 本 = `POST /asset-extractions` / `POST /knowledge-threads/{thread_id}/mes
 | POST | `/idea-board-phases` | フェーズ作成 | 契約 | 1 |
 | PUT | `/idea-board-phases/{phase_id}` | フェーズ更新 | 契約 | 1 |
 | DELETE | `/idea-board-phases/{phase_id}` | フェーズ削除 | 契約 | 1 |
-| GET | `/ideas` | アイデア一覧 (参照専用) | 個人 / 契約 (増分 2) | 1 |
-| GET | `/ideas/{idea_id}` | アイデア取得 (参照専用) | 個人 / 契約 (増分 2) | 1 |
-| PUT | `/ideas/{idea_id}/star` | スター評価更新 | 個人 | 1 |
-| GET | `/ideas/csv` | アイデア一覧の CSV エクスポート (C-16。絞り込みは `GET /ideas` と同一 — [idea-boards.md](idea-boards.md) §2.4) | 個人 / 契約 (増分 2) | 1 |
 
 ### 3.5 お知らせ → [news.md](news.md)
 
@@ -460,6 +491,58 @@ LLM 3 本 = `POST /asset-extractions` / `POST /knowledge-threads/{thread_id}/mes
 | GET | `/usage-summary` | 契約の利用量集計 (月 × メンバー × 活動種別のクロス集計 — ST-Q9。**契約内管理者のみ / 403**) | 契約 | 1 |
 | GET | `/activity-logs` | 契約の活動ログ一覧 (**契約内管理者のみ / 403**) | 契約 | 1 |
 
+### 3.7 会話型アイデア創出 → [conversation.md](conversation.md)
+
+| メソッド | パス | 概要 | スコープ | 増分 |
+|---|---|---|---|---|
+| POST | `/conversations` | 会話セッション作成 | 個人 | 1 |
+| GET | `/conversations` | 一覧 | 個人 | 1 |
+| GET | `/conversations/{session_id}` | 取得 (台帳 + `stage` を同梱。切断時の回復経路①) | 個人 | 1 |
+| PUT | `/conversations/{session_id}` | タイトル更新 | 個人 | 1 |
+| DELETE | `/conversations/{session_id}` | 削除 (論理削除) | 個人 | 1 |
+| POST | `/conversations/{session_id}/messages` | 会話ターンの実行 (**同期 SSE** / **LLM**。**409**: 同一セッションの並行ターン) | 個人 | 1 |
+| GET | `/conversations/{session_id}/messages` | 発話履歴 (切断時の回復経路②) | 個人 | 1 |
+
+### 3.8 アイデア (参照・人手編集・版・タグ・評価) → [ideas.md](ideas.md)
+
+| メソッド | パス | 概要 | スコープ | 増分 |
+|---|---|---|---|---|
+| GET | `/ideas` | アイデア一覧 | 個人 / 契約 (増分 1) | 1 |
+| GET | `/ideas/csv` | CSV エクスポート (v2 踏襲。C-16) | 個人 / 契約 (増分 1) | 1 |
+| POST | `/ideas` | アイデアの手動登録 (v2 のマイアイデアの受け先) | 個人 | 1 |
+| GET | `/ideas/{idea_id}` | アイデア取得 | 個人 / 契約 (増分 1) / ボード経由 | 1 |
+| PUT | `/ideas/{idea_id}` | 本文・タグの更新 (**403**: 所有者以外。版を切る) | 個人 (所有者のみ) | 1 |
+| DELETE | `/ideas/{idea_id}` | 削除 (論理削除。**403**: 所有者以外) | 個人 (所有者のみ) | 1 |
+| PUT | `/ideas/{idea_id}/star` | スター評価更新 (**403**: 所有者以外) | 個人 (所有者のみ) | 1 |
+| GET | `/ideas/{idea_id}/versions` | 版一覧 (本文を含まない) | 取得と同じ | 1 |
+| GET | `/ideas/{idea_id}/versions/{version_id}` | 版 1 件の取得 (本文を含む) | 取得と同じ | 1 |
+| POST | `/ideas/{idea_id}/versions/{version_id}/restore` | 復元 (**403**: 所有者以外) | 個人 (所有者のみ) | 1 |
+| GET | `/ideas/{idea_id}/evaluation` | リッチ評価の取得 (stale 判定つき) | 取得と同じ | 1 |
+| POST | `/idea-evaluations` | リッチ評価の生成 (**非同期ジョブ** / **LLM**。**403**: 所有者以外) | 個人 (所有者のみ) | 1 |
+| GET | `/idea-evaluations` | 評価ジョブの状態一括取得 | 個人 | 1 |
+
+### 3.9 企画書 → [plans.md](plans.md)
+
+| メソッド | パス | 概要 | スコープ | 増分 |
+|---|---|---|---|---|
+| GET | `/plans` | 一覧 | 個人 | 1 |
+| POST | `/plans` | 作成 (アイデアに対する企画書の器を作る。**409**: 既に企画書がある) | 個人 | 1 |
+| GET | `/plans/{plan_id}` | 取得 (8 タブの最新版を同梱) | 個人 | 1 |
+| PUT | `/plans/{plan_id}` | メタ更新 (`visibility`) | 個人 | 1 |
+| DELETE | `/plans/{plan_id}` | 削除 (論理削除) | 個人 | 1 |
+| POST | `/plans/{plan_id}/generate` | 8 タブの一括生成 (**SSE** / **LLM**。**409**: 生成中) | 個人 | 1 |
+| POST | `/plans/{plan_id}/tabs/{tab_id}/regenerate` | タブの再生成 (**SSE** / **LLM**。**409**: 生成中) | 個人 | 1 |
+| PUT | `/plans/{plan_id}/tabs/{tab_id}` | タブ本文の手動更新 (新版を作る。**409**: 生成中) | 個人 | 1 |
+| GET | `/plans/{plan_id}/tabs/{tab_id}/versions` | 版一覧 (メタのみ) | 個人 | 1 |
+| GET | `/plans/{plan_id}/tabs/{tab_id}/versions/{ver_no}` | 版 1 件の取得 (本文を含む) | 個人 | 1 |
+| POST | `/plans/{plan_id}/tabs/{tab_id}/versions/{ver_no}/restore` | 復元 (**409**: 生成中) | 個人 | 1 |
+| PUT | `/plans/{plan_id}/tabs/{tab_id}/versions/{ver_no}/instruction` | 版に紐づく生成指示の編集 | 個人 | 1 |
+| POST | `/plans/{plan_id}/favorite` | お気に入り登録 (冪等) | 個人 | 1 |
+| DELETE | `/plans/{plan_id}/favorite` | お気に入り解除 (冪等) | 個人 | 1 |
+| GET | `/plans/{plan_id}/chat/messages` | 企画書チャットの履歴 | 個人 | 1 |
+| POST | `/plans/{plan_id}/chat/messages` | 企画書チャット (**SSE** / **LLM**。**409**: 実行中) | 個人 | 1 |
+| POST | `/plans/{plan_id}/thumbnail` | サムネイル生成 (**LLM**。画像生成) | 個人 | 1 |
+
 ---
 
 ## 4. 本番観点への回答
@@ -467,19 +550,19 @@ LLM 3 本 = `POST /asset-extractions` / `POST /knowledge-threads/{thread_id}/mes
 | ID | 状態 | 回答 / 先送り先 |
 |---|---|---|
 | A-1 認証方式 | **回答** | §2.1。全エンドポイント認証必須・グループ既定 (D-API-3)。方式の SSOT は [../auth.md](../auth.md) §6.1 |
-| A-2 ロールと適用範囲 | **回答** | §2.2。認証ロールは `AuthRoleUser` のみ。その上で **R-1 契約内管理者限定 3 本** ([settings.md](settings.md) §3.1) と **R-2 リソース単位ロール 8 本** ([idea-boards.md](idea-boards.md) §3.1) が 403 を返す |
-| A-3 テナント境界 (所有者カラム) | **参照** | [../auth.md](../auth.md) §6.3 が SSOT。テーブル定義は `docs/design/data-model.md` (未着手) が担う |
+| A-2 ロールと適用範囲 | **回答** | §2.2。認証ロールは `AuthRoleUser` のみ。その上で **R-1 契約内管理者限定 3 本** ([settings.md](settings.md) §3.1) と **R-2 リソース単位ロール / 所有者 13 本** ([idea-boards.md](idea-boards.md) §3.1 の 8 本 + [ideas.md](ideas.md) §1.3 の 5 本) が 403 を返す |
+| A-3 テナント境界 (所有者カラム) | **参照** | [../auth.md](../auth.md) §6.3 が SSOT。テーブル定義は [../data-model.md](../data-model.md) が担う (**確定済み**) |
 | A-4 絞り込みの層 | **回答** | §2.3 + D-API-8。UseCase が確定し Repository のクエリ条件で強制 |
-| A-5 ステータスコード | **回答** | §2.5 (= **AC-1.4**)。判定基準は「**見えるリソースへの権限不足 = 403 / 見えないリソース = 404**」。403 は合計 **11 本** (R-1 3 + R-2 8)。SSE 開始後の失敗は HTTP で表現しない (D-API-12) |
+| A-5 ステータスコード | **回答** | §2.5 (= **AC-1.4**)。判定基準は「**見えるリソースへの権限不足 = 403 / 見えないリソース = 404**」。403 は合計 **16 本** (R-1 3 + R-2 13)。SSE 開始後の失敗は HTTP で表現しない (D-API-12) |
 | A-6 LLM への越境 | **参照 + 回答** | [../architecture.md](../architecture.md) §3 が SSOT。本ディレクトリは LLM 経路を表で明示 (§3)、RAG のスコープは [knowledge.md](knowledge.md) §4 |
-| A-7 共有・公開 | **部分回答** | ボードは v2 の既存契約共有 (メンバーシップ + 3 段ロール) を**そのまま引き継ぐ** ([idea-boards.md](idea-boards.md) §3.1)。テーマ・アセットの `visibility` と `scope=contract` は**増分 2** (D-API-8')。**増分 1 は個人スコープのみ**なので、切替時点で共有範囲が広がらない。**[../auth.md](../auth.md) §7 の「本増分では共有機能を持たない」と食い違うため §5 API-Q3 に残課題として記載** |
+| A-7 共有・公開 | **部分回答** | ボードは v2 の既存契約共有 (メンバーシップ + 3 段ロール) を**そのまま引き継ぐ** ([idea-boards.md](idea-boards.md) §3.1)。テーマ・アセット・アイデアの `visibility` と `scope=contract` は**増分 1** (D-API-8'。2026-08-02 改訂 — C-16 により v2 でできていた共有の切り替えを落とせない。SSOT は [../auth.md](../auth.md) §6.12 (c) / [../data-model.md](../data-model.md) DM-9)。**増分 2 に残るのはテーマメンバー機能のみ**。**[../auth.md](../auth.md) §7 の「本増分では共有機能を持たない」と食い違うため §5 API-Q3 に残課題として記載** |
 | O-1 構造化ログ | **参照** | エラー本文に `request_id` を含める (D-API-6)。ログフィールド定義は [observability.md](../observability.md) |
-| O-2 LLM 計測 | **参照 + 回答** | 計測値の生成は **`gateway/<プロバイダ>` の単一関門** 1 箇所 ([../architecture.md](../architecture.md) §3.8.3 / [../observability.md](../observability.md) の O-C)。**本ディレクトリの「計測対象 3 本」は Q-L11=A-1 により維持される** — ナレッジは v2 移植ドメイン (v2 の 3 層規約のまま) だが、**移植分も LLM 呼び出しだけは `gateway/` 経由を必須**とするユーザー決定 (2026-07-30。[../../../aidlc-docs/inception/productionization/questions-layering.md](../../../aidlc-docs/inception/productionization/questions-layering.md) Q-L11) があるため、埋め込み生成も計測対象として成立する。本ディレクトリは**計測対象となる LLM 経路を 3 本に特定**した: `POST /asset-extractions` / `POST /knowledge-threads/{thread_id}/messages` / **`POST /knowledge-files` (埋め込み生成)**。§3 の総覧表の LLM 列がこの 3 本の索引。**対象外の LLM 経路と理由**: ①会話型アイデア創出 (対象外ファイルが担う) ②v2 の `GET /companies/genai` (Dify 経路。v2 の管轄で `docs/design/llm-migration.md` が扱う — [settings.md](settings.md) §5 の注) |
+| O-2 LLM 計測 | **参照 + 回答** | 計測値の生成は **`gateway/<プロバイダ>` の単一関門** 1 箇所 ([../architecture.md](../architecture.md) §3.8.3 / [../observability.md](../observability.md) の O-C)。**本ディレクトリの「計測対象 9 本」は Q-L11=A-1 により維持される** — ナレッジは v2 移植ドメイン (v2 の 3 層規約のまま) だが、**移植分も LLM 呼び出しだけは `gateway/` 経由を必須**とするユーザー決定 (2026-07-30。[../../../aidlc-docs/inception/productionization/questions-layering.md](../../../aidlc-docs/inception/productionization/questions-layering.md) Q-L11) があるため、埋め込み生成も計測対象として成立する。本ディレクトリは**計測対象となる LLM 経路を 9 本に特定**した: `POST /asset-extractions` / `POST /knowledge-threads/{thread_id}/messages` / `POST /knowledge-files` (埋め込み生成) / `POST /conversations/{session_id}/messages` (会話ターン。詳細は [conversation.md](conversation.md) §3.3) / `POST /idea-evaluations` (詳細は [ideas.md](ideas.md) §6.6) / `POST /plans/{plan_id}/generate` / `POST /plans/{plan_id}/tabs/{tab_id}/regenerate` / `POST /plans/{plan_id}/chat/messages` / `POST /plans/{plan_id}/thumbnail` (詳細は [plans.md](plans.md) §4.6)。§3 の総覧表の LLM 列がこの 9 本の索引。**対象外の LLM 経路**: v2 の `GET /companies/genai` (Dify 経路。v2 の管轄で `docs/design/llm-migration.md` が扱う — [settings.md](settings.md) §5 の注) |
 | O-3 コスト集計と上限 | **先送り** | C-12 (上限なし) により拒否は設けない。可視化は [../observability.md](../observability.md) §4.2 / §6.1 へ。`GET /usage-summary` は**利用件数**のサマリでありコスト表示は含めない ([settings.md](settings.md) §4) |
 | O-4 失敗の可観測性 | **部分回答** | 外部/LLM 起因を **502** で識別可能にする (§2.5)。非同期ジョブは `failure.code` で原因を区別し、**取り残されたジョブを `stale_aborted` として観測可能にする** (§1.3 J-3)。`max_tokens` 切り詰め・JSON パース失敗の値域は [../observability.md](../observability.md) §4.3 |
 | O-5 SSE / 長時間処理 | **回答 (一部先送り)** | SSE エンドポイントの特定と一覧化 (§3) + **ストリーム開始後のエラー表現** (D-API-12) + **非同期ジョブの実行主体・状態機械・取り残しの回収・再実行・進捗配信** (**§1.3 = D-API-15**)。イベント名・heartbeat 閾値の最終値・定期実行の仕組みは observability / operations 設計へ先送り (§1.3 末尾) |
 | O-6 監査ログ | **部分回答** | `GET /activity-logs` を新設 ([settings.md](settings.md) §3)。**何を記録するか**の定義は [../observability.md](../observability.md) §4.5 |
-| O-7 アラート | **対象外** | API 設計の範囲外。運用設計 (`docs/design/operations.md`、未着手) |
+| O-7 アラート | **対象外** | API 設計の範囲外。運用設計 ([../operations.md](../operations.md) §7 のアラート表。**確定済み**) |
 | D-1〜D-8 | **対象外** | CI/CD・IaC は API 設計の範囲外。ただし **D-2 のマージ条件に §1.4 の 8 検査を要求**する。**D-3 (デプロイ) は §1.3 J-3 の前提** (ローリング更新でジョブが死ぬことを織り込む) |
 
 ---
@@ -490,7 +573,7 @@ LLM 3 本 = `POST /asset-extractions` / `POST /knowledge-threads/{thread_id}/mes
 |---|---|---|---|
 | **API-Q1** | v2 API と v3 API を**同一ドメインに相乗り**させるか。相乗りなら `/themes` 等が衝突し、v3 側にパスプレフィックスが必要になる | 別ドメイン (別 ALB / 別ホスト) を前提に**プレフィックス無し**で設計した (D-API-1) | [infrastructure.md](../infrastructure.md) |
 | ~~**API-Q2**~~ | ~~v2 の CORS 許可リストに Vercel のドメインを追加する作業が必要~~ | **不要になった (2026-07-30)**: D-ST-1' により**認証・アカウント API も v3 が提供する**ため、FE が v2 を叩く前提が消えた ([settings.md](settings.md) §4.1)。**併用期間中に未移植の v2 機能を FE から叩く場合は再浮上する**が、その範囲は `plan.md` Task-3i / R-1 の結論に依存する | — (v2 リポジトリへの変更は不要) |
-| **API-Q3** | **共有機能のスコープ** — [../auth.md](../auth.md) §7 は A-7 を「本増分では共有機能を持たない」としているが、プロトタイプはテーマのメンバー・可視性、ボードの共有メンバーを持ち、v2 の `idea_boards` は既に **3 段ロール (admin/editor/viewer) 付きの契約共有**である (`hassan-v2-backend/entity/idea_board.go:14-16`) | ボードは v2 の共有とロールを**そのまま引き継ぐ** (増分 1)、テーマ・アセットの `visibility` と `scope=contract` は増分 2 (D-API-8') とした | [../auth.md](../auth.md) の A-7 判断の更新 (要ユーザー確認) |
+| **API-Q3** | **共有機能のスコープ** — [../auth.md](../auth.md) §7 は A-7 を「本増分では共有機能を持たない」としているが、プロトタイプはテーマのメンバー・可視性、ボードの共有メンバーを持ち、v2 の `idea_boards` は既に **3 段ロール (admin/editor/viewer) 付きの契約共有**である (`hassan-v2-backend/entity/idea_board.go:14-16`) | **A-7 の判断部分はクローズ済み (2026-08-02)** — ボードは v2 の共有とロールを**そのまま引き継ぎ** (増分 1)、テーマ・アセット・アイデアの `visibility` と `scope=contract` も**増分 1** (D-API-8'。C-16 の適用で「増分 2」から改訂。SSOT は [../auth.md](../auth.md) §6.12)。**残る未確認はテーマメンバーの権限差のみ** ([themes.md](themes.md) TH-Q5) | **テーマメンバーの権限差 (TH-Q5) の要件確認のみ** |
 | **API-Q4** | **エラー本文の形式変更** (`{"code","msg"}` → `{"code","message","request_id"}`) により、FE は v2 API と v3 API で 2 形式を扱う | v3 FE は新規実装なので変換層を 1 箇所に置ける前提 (FE-2 と同じ「変換は API 境界のみ」) | 実装リポの FE 設計 |
 | **API-Q5** | Q-1 (データモデル統合方針) の既定が文書間で食い違う。[requirements.md](../../../aidlc-docs/inception/productionization/requirements.md) §6 は「Q-1=C を暫定既定」、[../architecture.md](../architecture.md) §2 の注記は「D-J (全面切替) により (a) 統合 か (c) 分離+移行 が候補」 | **本ディレクトリは Q-1 に依存しない範囲のみ確定**し、フィールドは暫定とした (§0) | `docs/design/data-model.md` (Q-1 回答後) |
 | **API-Q6** | **既存ボードの materialize 基準時点** — v2 のボード内容は `idea_boards.filter` (jsonb) の**評価結果**であり、切替時に静的アイテムへ凍結する ([idea-boards.md](idea-boards.md) §4)。凍結後は**条件に合致する新しいアイデアが自動で載らなくなる** | 切替時点の評価結果を凍結し、以後 `filter` は廃止する前提で設計した | ユーザー判断 ([idea-boards.md](idea-boards.md) IB-Q1) |
@@ -526,8 +609,10 @@ themes.md    assets.md     idea-boards.md  news.md    settings.md      ← 並�
   §1.4 の CI 検査が後回しになると、ドメインごとの手書き実装 (v2 の F-8) が再発する
 - `idea-boards.md` §7 の**アイデア参照 API** は、会話型アイデア創出 (対象外ファイル) と
   **同じ `ideas` テーブルを読む**。生成側の設計が確定するまで**読み取り専用**として実装する
-- **増分 2 の作業単位**: テーマ・アセットの `visibility` + `scope=contract` の有効化 +
-  [settings.md](settings.md) の `default_asset_visibility` + テーマメンバー 3 本。
+- **増分 2 の作業単位**: **テーマメンバー機能のみ** (`GET`/`PUT /themes/{theme_id}/members` + `PUT …/visibility` の
+  メンバー部分)。**2026-08-02 に縮小した** — `visibility` と `scope=contract` の有効化と
+  [settings.md](settings.md) の `default_asset_visibility` は **C-16 の適用で増分 1 へ前倒し**になった
+  (D-API-8' / [../auth.md](../auth.md) §6.12 (c))。
   **読む側と書く側を必ず同じ増分に入れる** (BE-10)
 
 ### 6.2 参照すべき v2 既存実装

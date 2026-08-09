@@ -20,7 +20,7 @@
 | **マイグレーション方式 (D-4)・適用単位・ロールバック** | **本書 §6.1〜§6.3** | 一次の決定 (**ツール選定のみ未確定**) |
 | **既存データ移行の対象・写像** | **本書 §6.4** | **未確定** (Q-1 のデータ引き継ぎ範囲待ち) |
 | 所有者列の規約・境界の宣言方法・クエリ側の強制 | [auth.md](auth.md) §6.3 / §6.4 | **参照する**。本書は各テーブルへの**適用**を書く |
-| エンドポイントと入出力項目 | [API/](API/README.md) 7 ファイル | **参照する**。本書はそれが要求するデータ構造を定義する |
+| エンドポイントと入出力項目 | [API/](API/README.md) の各ドメインファイル (一覧は同 §3 の総覧) | **参照する**。本書はそれが要求するデータ構造を定義する |
 | 移行の実行位置・承認・DB 適用の運用手順 | [operations.md](operations.md) §6.2 / §7.4 | **参照する**。本書は手順を再定義しない |
 | ログ・LLM 明細・監査記録の**項目要件** | [observability.md](observability.md) §4.1 / §4.2 / §4.5 | **参照する**。本書は**テーブルとして具体化**する |
 | 層構成・sqlc 生成物の扱い | [architecture.md](architecture.md) §3.5.1 / §3.6 | **参照する**。本書は §3.6 で出力先構成を決める (同 §4 が本書へ委ねた項目) |
@@ -191,8 +191,8 @@ flowchart TB
 | # | 検査 | 検出する事故 |
 |---|---|---|
 | ① | スキーマ定義中の全テーブルが `contract_id` を持つこと。**除外リストは §4.1.2 の (a) 表 7 件 + 同 (b) 表のうち `contract_id` を持たない 2 件 (`account_mfa_configs` / `reset_password_requests`) = 9 件に限る** (2026-07-31 の DM-A4=B で `signup_links` が除外から外れ、同日 `admin_mfa_configs` が (a) に加わった)。**`contract_id` を持つ `accounts` / `companies` / `signup_links` は除外しない** (除外すると将来 `contract_id` が落ちても検出できない)。**この件数は `make check-table-counts` が §4.1.2 の 2 表から実測して照合する** | 新規テーブルの所有者列の付け忘れ |
-| ②-1 | **§3.4.2 の分類① (移管対象。29 件) の集合 == 所有者移管 UseCase が `UPDATE` するテーブルの集合** (厳密な集合一致) | 非正規化した `account_id` の更新漏れ (孤立) |
-| ②-2 | `account_id` を持つテーブルの集合 == **分類① ∪ 分類② ∪ 分類③ (32 件)** で、**分類②③に属するのは §3.4.2 の有限列挙のテーブルだけ**であること | 「移管しない」を新規テーブルで無言に選ぶこと (②-1 の集合一致が骨抜きになる) |
+| ②-1 | **§3.4.2 の分類① (移管対象。31 件) の集合 == 所有者移管 UseCase が `UPDATE` するテーブルの集合** (厳密な集合一致) | 非正規化した `account_id` の更新漏れ (孤立) |
+| ②-2 | `account_id` を持つテーブルの集合 == **分類① ∪ 分類② ∪ 分類③ (34 件)** で、**分類②③に属するのは §3.4.2 の有限列挙のテーブルだけ**であること | 「移管しない」を新規テーブルで無言に選ぶこと (②-1 の集合一致が骨抜きになる) |
 | ③ | 読み取り系クエリ (`Get*` / `List*` / `Count*` / `Search*`) が所有者条件を持つこと | [auth.md](auth.md) §6.4 の既存検査 (本書は対象テーブルを与えるだけ) |
 
 > **②を 2 本に分けた理由**: 「`account_id` を持つ ⇔ 移管する」を 1 本の集合一致にすると、
@@ -211,13 +211,13 @@ flowchart TB
 | 2 | **所有者移管 (メンバー削除時) は専用の UseCase 1 本だけが行う**。対象は §3.4.2 の**分類①に限る**。**§3.3 の検査②-1 で機械照合する** |
 | 3 | メンバー削除の既定の挙動は **「分類①を契約内管理者へ移管 → 分類②を削除 → 分類③はそのまま残す → `accounts` の行を物理削除」** とする。**v2 は CASCADE で所有物ごと消えていた** (DM-6 の却下 b) ため**挙動が変わる** → 要確認 (§8 の DM-Q2)。**v2 の `accounts` に `deleted_at` が無く削除は物理削除である** (`hassan-v2-backend/db/schema.sql:30`〜`:47` に `deleted_at` 無し / `hassan-v2-backend/db/queries/account.sql:83`〜`:84` = `DELETE FROM accounts WHERE id = $1`) ため、§4.2 の「v2 の列を変えない」方針のもとでアカウントの論理削除は選べない |
 
-#### 3.4.2 `account_id` を持つ 32 テーブルの 3 分類 (メンバー削除時の扱い)
+#### 3.4.2 `account_id` を持つ 34 テーブルの 3 分類 (メンバー削除時の扱い)
 
 **分類はこの表が唯一の定義**。新規に `account_id` を持つテーブルを追加するときは**必ずどれかに入れる**
 (検査②-2 が未分類を落とす)。「行数オーダー」は §3.4.3 のバッチ設計の入力で、
 **1 アカウントあたりの増え方の型**を書く (実測値ではない — v2 の実データ量は `Task-2f` 待ち)。
 
-**分類① 移管する (契約の資産。29 件)** — `UPDATE ... SET account_id = <移管先>`。FK は `NO ACTION` (DM-6)。
+**分類① 移管する (契約の資産。31 件)** — `UPDATE ... SET account_id = <移管先>`。FK は `NO ACTION` (DM-6)。
 
 | 集約 | テーブル | 行数オーダー (1 アカウントあたり) |
 |---|---|---|
@@ -226,7 +226,8 @@ flowchart TB
 | アセット (進捗) | `asset_extraction_events` | **抽出ジョブ数 × イベント数 (伸びる)** |
 | 会話 | `conversation_sessions` / `conversation_ledger_archives` (2 件) | セッション数 |
 | 会話 (履歴) | `conversation_messages` / `conversation_tool_calls` (2 件) | **セッション数 × ターン数 (最も伸びる)** |
-| アイデア・企画書 | `ideas` / `idea_assets` / **`idea_tags`** / `idea_versions` / `idea_evaluations` / `plans` / `plan_tab_versions` (7 件) | アイデア数 × 版数 |
+| アイデア・企画書 | `ideas` / `idea_assets` / **`idea_tags`** / `idea_versions` / `idea_evaluations` / `plans` / `plan_tab_versions` / **`plan_favorites`** (8 件) | アイデア数 × 版数 |
+| 企画書 (チャット履歴) | `plan_chat_messages` (2026-08-02 追加) | **企画書数 × 発話数 (伸びる)** |
 | ナレッジ | `knowledge_threads` / `knowledge_messages` / `knowledge_message_citations` / `knowledge_files` / `knowledge_thread_files` (5 件) | スレッド数 × メッセージ数 |
 | ナレッジ (チャンク) | `knowledge_file_chunks` | **ファイル数 × チャンク数 (伸びる)** |
 
@@ -310,7 +311,7 @@ db/
 
 ### 4.1 テーブル一覧
 
-#### 4.1.1 機能テーブル (40 件。**所有者列は全件必須**)
+#### 4.1.1 機能テーブル (42 件。**所有者列は全件必須**)
 
 「境界」= 個人 (`account_id` + `contract_id` を持つ) / 契約 (`contract_id` のみ)。
 「増分」= 1 (第 1 リリース) / 2 ([API/README.md](API/README.md) D-API-8' の増分 2) / 併用 (v2 併用期間中の移送で使う)。
@@ -341,24 +342,26 @@ db/
 | 22 | `idea_evaluations` | 個人 | `contract_id` + `account_id` | 1 | §4.6 |
 | 23 | `plans` | 個人 | `contract_id` + `account_id` | 1 | §4.6 |
 | 24 | `plan_tab_versions` | 個人 | `contract_id` + `account_id` | 1 | §4.6 |
-| 25 | `knowledge_threads` | 個人 | `contract_id` + `account_id` | 1 | §4.7 |
-| 26 | `knowledge_messages` | 個人 | `contract_id` + `account_id` | 1 | §4.7 |
-| 27 | `knowledge_message_citations` | 個人 | `contract_id` + `account_id` | 1 | §4.7 |
-| 28 | `knowledge_files` | 個人 | `contract_id` + `account_id` | 1 | §4.7 |
-| 29 | `knowledge_file_chunks` | 個人 | `contract_id` + `account_id` | 1 | §4.7 |
-| 30 | `knowledge_thread_files` | 個人 | `contract_id` + `account_id` | 1 | §4.7 |
-| 31 | `idea_boards` | 契約 | `contract_id` | 1 | §4.8 |
-| 32 | `idea_board_members` | 契約 | `contract_id` | 1 | §4.8 |
-| 33 | `idea_board_phases` | 契約 | `contract_id` | 1 | §4.8 |
-| 34 | `idea_board_items` | 契約 | `contract_id` | 1 | §4.8 |
-| 35 | `idea_board_comments` | 契約 | `contract_id` | 1 | §4.8 |
-| 36 | `read_news_accounts` | 個人 | `contract_id` + `account_id` | 1 | §4.9 |
-| 37 | `account_notification_settings` | 個人 | `contract_id` + `account_id` | 1 | §4.9 |
-| 38 | `workspace_settings` | 契約 | `contract_id` | 1 | §4.9 |
-| 39 | `llm_call_records` | 個人 | `contract_id` + `account_id` | 1 | §4.10 |
-| 40 | `audit_logs` | 契約 | `contract_id` | 1 | §4.10 |
+| 25 | `plan_favorites` | 個人 | `contract_id` + `account_id` | 1 | §4.6 |
+| 26 | `plan_chat_messages` | 個人 | `contract_id` + `account_id` | 1 | §4.6 |
+| 27 | `knowledge_threads` | 個人 | `contract_id` + `account_id` | 1 | §4.7 |
+| 28 | `knowledge_messages` | 個人 | `contract_id` + `account_id` | 1 | §4.7 |
+| 29 | `knowledge_message_citations` | 個人 | `contract_id` + `account_id` | 1 | §4.7 |
+| 30 | `knowledge_files` | 個人 | `contract_id` + `account_id` | 1 | §4.7 |
+| 31 | `knowledge_file_chunks` | 個人 | `contract_id` + `account_id` | 1 | §4.7 |
+| 32 | `knowledge_thread_files` | 個人 | `contract_id` + `account_id` | 1 | §4.7 |
+| 33 | `idea_boards` | 契約 | `contract_id` | 1 | §4.8 |
+| 34 | `idea_board_members` | 契約 | `contract_id` | 1 | §4.8 |
+| 35 | `idea_board_phases` | 契約 | `contract_id` | 1 | §4.8 |
+| 36 | `idea_board_items` | 契約 | `contract_id` | 1 | §4.8 |
+| 37 | `idea_board_comments` | 契約 | `contract_id` | 1 | §4.8 |
+| 38 | `read_news_accounts` | 個人 | `contract_id` + `account_id` | 1 | §4.9 |
+| 39 | `account_notification_settings` | 個人 | `contract_id` + `account_id` | 1 | §4.9 |
+| 40 | `workspace_settings` | 契約 | `contract_id` | 1 | §4.9 |
+| 41 | `llm_call_records` | 個人 | `contract_id` + `account_id` | 1 | §4.10 |
+| 42 | `audit_logs` | 契約 | `contract_id` | 1 | §4.10 |
 
-> 行番号 1〜40 のうち欠番は無い (**40 行**)。§3.3 の検査①はこの表を入力にする。
+> 行番号 1〜42 のうち欠番は無い (**42 行**)。§3.3 の検査①はこの表を入力にする。
 
 #### 4.1.2 機能テーブル以外の 12 テーブル (2 種類の例外を分けて列挙する)
 
@@ -493,7 +496,9 @@ db/
   | `business_plan_count` | 同じく `plans` を数える |
 
 - **`visibility` は列も書き込み API も増分 1** (**2026-07-31 に C-16 で改訂**。DM-9 / [API/themes.md](API/themes.md) §3.2 TM-2 / [auth.md](auth.md) §6.12)。
-  増分 1 では常に `private` が入る
+  **既定値は `private`** で、契約設定 (`workspace_settings` の既定) と書き込み API で `contract` に変えられる
+  (**2026-08-02 に「増分 1 では常に `private` が入る」を撤回** — 書き込み API が増分 1 にある以上、
+  常に `private` という記述は成立しない)
 - **削除は論理削除** (DM-5)。[API/themes.md](API/themes.md) D-TH-7 は 2026-07-30 に本書へ揃った (§8 R-DM-1 の①解消)
 
 ### 4.4 アセット
@@ -538,13 +543,14 @@ db/
 
 ### 4.5 会話 (会話型アイデア創出)
 
-対応 API: **[API/](API/README.md) の対象外** (会話型 API 設計は別途起草。同 §0)。
+対応 API: **[API/conversation.md](API/conversation.md)** (会話セッション・ターン・SSE・custom tool)。
+アイデア・企画書の対応 API は §4.6 を参照。
 本節は**移植に必要なテーブル**を定義する。移植元の事実は [../analysis/poc-conversation-flow.md](../analysis/poc-conversation-flow.md)。
 **所有者列と FK の扱いは §4.3 の共通前置きのとおり**。
 
 | テーブル | 用途 | 主キー | 主要カラム | 参照 (FK) | 主なインデックス |
 |---|---|---|---|---|---|
-| `conversation_sessions` | 会話セッション + 台帳 | `id` | `theme_id` (NULL 可) / `managed_session_id text` / **`ledger jsonb NOT NULL DEFAULT '{}'`** / `ledger_schema_version smallint NOT NULL DEFAULT 1` / `ledger_bytes integer` / `last_turn_at` / `deleted_at` | `theme_id`→`themes` (SET NULL) | `(account_id, updated_at DESC) WHERE deleted_at IS NULL` / `(theme_id) WHERE theme_id IS NOT NULL` |
+| `conversation_sessions` | 会話セッション + 台帳 | `id` | **`theme_id` (NOT NULL)** / **`title text NULL`** / `managed_session_id text` / **`ledger jsonb NOT NULL DEFAULT '{}'`** / `ledger_schema_version smallint NOT NULL DEFAULT 1` / `ledger_bytes integer` / `last_turn_at` / `deleted_at` | `theme_id`→`themes` (**CASCADE**) | `(account_id, updated_at DESC) WHERE deleted_at IS NULL` / `(theme_id)` |
 | `conversation_messages` | 発話履歴 (DM-12) | `id` | `seq integer` / `role` (`user`\|`assistant`) / `body text` / `status` (`complete`\|`aborted`\|`failed`) / `created_at` | `session_id`→`conversation_sessions` (CASCADE) | **UNIQUE `(session_id, seq)`** |
 | `conversation_tool_calls` | ツール実行の履歴 | `id` | `turn_seq integer` / `tool_name` / `args jsonb` / `ok boolean` / `elapsed_ms integer` / `error_code` / `artifact_kind` / `created_at` | `session_id`→`conversation_sessions` (CASCADE) | `(session_id, turn_seq)` / `(account_id, created_at DESC)` |
 | `conversation_ledger_archives` | 台帳から退避したエントリ | `id` | `field_name text` / **`entry_id uuid NOT NULL`** (退避元エントリの安定 ID。§4.11.2) / `entry jsonb` / `archived_at` | `session_id`→`conversation_sessions` (CASCADE) | `(session_id, archived_at DESC)` / **UNIQUE `(session_id, field_name, entry_id)`** |
@@ -553,7 +559,23 @@ db/
 
 - **`managed_session_id` は DB のみで保持する**。PoC のプロセス内 `sync.Map` は持ち込まない
   ([design_memo.md](design_memo.md) の「セッション対応表と台帳は DB 所有にする — プロセス再起動・水平スケール耐性」)
+- **`theme_id` は NOT NULL** (CV-Q8=A のユーザー決定 2026-08-01。[API/conversation.md](API/conversation.md) §8 の R-CVA-13)。
+  会話の作成にテーマを必須にしたため、PoC の暗黙テーマ作成 (「対話生成: <本体>」) は移植しない。
+  **FK は `SET NULL` ではなく `CASCADE`**、インデックスも部分インデックスをやめて通常インデックスにする
+  (`theme_id IS NOT NULL` が常に真になるため条件が意味を失う)。
+  **この決定が閉じる穴**: `llm_call_records.theme_id` (§4.10) が会話の最初の LLM 呼び出しから埋まるため、
+  **O-3 のテーマ単位コスト集計に「テーマ確定前の明細」という穴が空かない** (§8.4 の仮定 6 はこれでクローズ)
+- **`title` はユーザーが明示的に設定した値だけを持つ** (`PUT /conversations/{id}` の受け先。R-CVA-1)。
+  v2 の `PUT /idea-hassans/:hassan_id` (リネーム) の移植先であり、無いと C-16 の例外承認が要る。
+  **導出結果 (`display_title`) は列に保存しない** — 導出順序は [API/conversation.md](API/conversation.md) §1.4 が SSOT
 - **`display_title` / `stage` は列に持たない** (PoC と同じ導出。G-13)。§4.3 の派生値表と同じ扱い
+- **`conversation_messages` への書き込みは、ターンの主トランザクションの外で行う** (R-CVA-4①)。
+  ターン全体は 1 トランザクション ([architecture.md](architecture.md) §3.10) だが、
+  **ユーザー発話と中断時の assistant 発話は別トランザクションで即コミットする** —
+  同じトランザクションに入れると、ターンが rollback したときに**ユーザーの質問自体が消える**。
+  詳細は [API/conversation.md](API/conversation.md) §2.4
+- **`conversation_tool_calls.turn_seq` は「そのターンのユーザー発話の `conversation_messages.seq`」** (R-CVA-3)。
+  独立採番を作らない (2 系統がズレる = BE-11)。[API/conversation.md](API/conversation.md) §7 の D-CV-8 が SSOT
 - **台帳の設計は §4.11.2** (BE-10 / BE-12 / DM-11 / DM-13)
 - **`conversation_tool_calls` と台帳の役割を分ける** — 台帳は「後段のツールと前提チェックが読む要約」、
   `conversation_tool_calls` は「実行の append-only な履歴」。**両者は同じ事実の二重管理ではない**
@@ -562,7 +584,9 @@ db/
 
 ### 4.6 アイデア・企画書
 
-対応 API: [API/idea-boards.md](API/idea-boards.md) §7 (参照系 3 本)。生成系は会話型 API 設計 (対象外)。
+対応 API: **[API/ideas.md](API/ideas.md)** (アイデアの参照・作成・更新・版・評価) /
+**[API/plans.md](API/plans.md)** (企画書の CRUD・タブ生成・版・チャット・サムネイル・お気に入り) /
+**[API/conversation.md](API/conversation.md)** (会話ターン経由の生成)。
 **所有者列と FK の扱いは §4.3 の共通前置きのとおり**。
 
 | テーブル | 用途 | 主キー | 主要カラム | 参照 (FK) | 主なインデックス |
@@ -571,9 +595,11 @@ db/
 | `idea_assets` | アイデアが使ったアセット | `(idea_id, asset_id)` | `sort_order` | `idea_id`→`ideas` (CASCADE) / `asset_id`→`assets` (NO ACTION) | `(asset_id)` |
 | `idea_tags` | アイデアのタグ (**2026-07-31 追加**。**v2 に対応するタグ列・タグテーブルが無いため移行対象外 = 初期は空** — [API/idea-boards.md](API/idea-boards.md) §8。DDL は非破壊 `CREATE TABLE` なので dev は自動適用 / prod は承認必須 = §7.4 の OP-J) | `id` | `tag` / `sort_order` | `idea_id`→`ideas` (CASCADE) | `(idea_id)` / **GIN trgm on `tag`** (`GET /ideas` の `keyword` がタグを対象にするため) |
 | `idea_versions` | ブラッシュアップ履歴 | `id` | `ver_no integer` / `label` / `snapshot jsonb` / `create_account_id` / `created_at` | `idea_id`→`ideas` (CASCADE) | **UNIQUE `(idea_id, ver_no)`** / `(idea_id, created_at DESC)` |
-| `idea_evaluations` | リッチ評価 (派生物) | `id` | `source_idea_version_id` / `source_hash text` / `evaluation jsonb` / `updated_at` | `idea_id`→`ideas` (CASCADE) / `source_idea_version_id`→`idea_versions` (NO ACTION) | **UNIQUE `(idea_id)`** |
-| `plans` | 企画書 (8 タブの親) | `id` | `theme_id` / `generated_at` / `deleted_at` | `idea_id`→`ideas` (CASCADE) / `theme_id`→`themes` (CASCADE) | **UNIQUE `(idea_id) WHERE deleted_at IS NULL`** / `(theme_id) WHERE deleted_at IS NULL` |
-| `plan_tab_versions` | タブ別の版 | `id` | `tab_id text` / `ver_no integer` / `label` / `content jsonb` / `source_idea_version_id` / `source_hash` / `create_account_id` / `created_at` | `plan_id`→`plans` (CASCADE) / `source_idea_version_id`→`idea_versions` (NO ACTION) | **UNIQUE `(plan_id, tab_id, ver_no)`** / `(plan_id, tab_id, created_at DESC)` |
+| `idea_evaluations` | リッチ評価 (派生物) | `id` | `source_idea_version_id` / `source_hash text` / `evaluation jsonb` / **`status`** (`queued`\|`running`\|`succeeded`\|`failed`) / **`failure_code` / `failure_message` / `heartbeat_at` / `idempotency_key`** (DM-16 の共通列名。2026-08-02 追加) / `updated_at` | `idea_id`→`ideas` (CASCADE) / `source_idea_version_id`→`idea_versions` (NO ACTION) | **UNIQUE `(idea_id)`** / `(status, heartbeat_at) WHERE status IN ('queued','running')` (J-3 の取り残し回収) / **部分 UNIQUE `(idea_id, idempotency_key) WHERE status IN ('queued','running')`** (J-5 の冪等キー。`asset_extractions` と同型だが**キーは `account_id` ではなく `idea_id`** — 再評価は「そのアイデアに対して 1 本」で排他するため) |
+| `plans` | 企画書 (8 タブの親) | `id` | `theme_id` / **`visibility`** (`private`\|`contract`。既定 `private`) / **`thumbnail_object_key text` / `thumbnail_generated_at`** / `generated_at` / `deleted_at` | `idea_id`→`ideas` (CASCADE) / `theme_id`→`themes` (CASCADE) | **UNIQUE `(idea_id) WHERE deleted_at IS NULL`** / `(theme_id) WHERE deleted_at IS NULL` |
+| `plan_tab_versions` | タブ別の版 | `id` | `tab_id text` / `ver_no integer` / `label` / **`instruction text NOT NULL DEFAULT ''`** (生成時の追加指示。v2 の `business_plan_histories.prompt` の後継) / `content jsonb` / `source_idea_version_id` / `source_hash` / `create_account_id` / `created_at` | `plan_id`→`plans` (CASCADE) / `source_idea_version_id`→`idea_versions` (NO ACTION) | **UNIQUE `(plan_id, tab_id, ver_no)`** / `(plan_id, tab_id, created_at DESC)` |
+| `plan_favorites` | 企画書のお気に入り (**2026-08-02 追加**。v2 の `business_plan_favorites` の後継 — `hassan-v2-backend/db/schema.sql:206`) | `(plan_id, account_id)` | `created_at` | `plan_id`→`plans` (CASCADE) / `account_id`→`accounts` (CASCADE) | `(account_id, created_at DESC)` |
+| `plan_chat_messages` | 企画書チャットの発話履歴 (**2026-08-02 追加**。v2 の `business_plan_chats` + `business_plan_chat_messages` の後継 — 同 `:216` / `:225`。**v2 の 2 テーブル構成は Dify の `conversation_id` 対応表であり、v3 は `plan_id` が同じ役割を果たすため 1 本に畳む**) | `id` | `seq integer` / `role` (`user`\|`assistant`) / `content text` / `status` (`complete`\|`aborted`\|`failed`) / `created_at` | `plan_id`→`plans` (CASCADE) | **UNIQUE `(plan_id, seq)`** |
 
 **判断の適用**:
 
@@ -699,7 +725,7 @@ db/
 
 | テーブル | 用途 | 主キー | 主要カラム | インデックス |
 |---|---|---|---|---|
-| `llm_call_records` | LLM / 外部検索の明細 (**append-only**) | `id` | `request_id` / `session_id bigint` (NULL 可) / **`theme_id bigint` (NULL 可)** / `feature text` / `route_kind` (`managed_agent`\|`direct_api`\|`external_search`) / `provider` / `model` / `input_tokens` / `output_tokens` / `cache_read_input_tokens` / `cache_creation_input_tokens` (**4 つとも `route_kind='external_search'` のときのみ NULL 可**) / `duration_ms` / `stop_reason` (同条件で NULL 可) / `tool_calls` / `estimated_cost numeric(14,6)` / `price_table_version` / `outcome` / `created_at` | `(contract_id, created_at DESC)` / `(account_id, created_at DESC)` / **`(theme_id, created_at DESC) WHERE theme_id IS NOT NULL`** / `(feature, model, created_at)` / `(request_id)` |
+| `llm_call_records` | LLM / 外部検索の明細 (**append-only**) | `id` | `request_id` / `session_id bigint` (NULL 可) / **`theme_id bigint` (NULL 可)** / `feature text` / `route_kind` (`managed_agent`\|`direct_api`\|`external_search`\|**`image_generation`**) / `provider` / `model` / `input_tokens` / `output_tokens` / `cache_read_input_tokens` / `cache_creation_input_tokens` (**4 つとも **`route_kind IN ('external_search','image_generation')` のときのみ NULL 可**。2026-08-02 に 2 値化) / `duration_ms` / `stop_reason` (同じ 2 値の条件で NULL 可) / `tool_calls` / `estimated_cost numeric(14,6)` / `price_table_version` / `outcome` / `created_at` | `(contract_id, created_at DESC)` / `(account_id, created_at DESC)` / **`(theme_id, created_at DESC) WHERE theme_id IS NOT NULL`** / `(feature, model, created_at)` / `(request_id)` |
 | `audit_logs` | 監査記録 (**append-only**) | `id` | `actor_type` (`account`\|`admin_account`\|**`unauthenticated`**) / **`actor_id uuid` (NULL 可 — 下記の条件付き)** / `action text` / `target_type text` / `target_id text` / `request_id` / `detail jsonb` / `occurred_at`。**`contract_id` も同条件で NULL 可** | `(contract_id, occurred_at DESC)` / `(actor_type, actor_id, occurred_at DESC)` / `(target_type, target_id)` / **`(action, occurred_at DESC) WHERE actor_type = 'unauthenticated'`** |
 
 **判断の適用**:
@@ -712,8 +738,10 @@ db/
   (所有権の判定に使う所有者列は `contract_id` である)
 - **`account_id` に FK を張らない** (却下案 3 つは §3.4.2 の分類③の注)。**`contract_id` の FK (CASCADE) は維持する**
 - **`theme_id bigint NULL` を持つ** (**O-3 の「アカウント / テーマ単位のコスト集計」への回答**)。
-  **`session_id` 経由で辿る形にしない** — `conversation_sessions.theme_id` は `SET NULL` (§4.5) かつ
-  `session_id` 自体が NULL 可であり、**テーマ単位の集計が構造的に保証されない**。本テーブルは
+  **`session_id` 経由で辿る形にしない** — `session_id` 自体が NULL 可 (会話を経由しない LLM 呼び出しがある) で、
+  かつ**会話セッションは論理削除される** (§4.5 の `deleted_at`) ため、**テーマ単位の集計が構造的に保証されない**。
+  **旧根拠の一部は失効した** — 「`conversation_sessions.theme_id` が `SET NULL`」は 2026-08-01 の CV-Q8=A で
+  NOT NULL + CASCADE になったため成立しないが、**残る 2 つの理由だけで結論 (列を持つ) は変わらない**。本テーブルは
   append-only で**後から列を足しても過去分は永久に集計不能**になる
   ([observability.md](observability.md) §4.2 の「取り損なった分は後から復元できない」) ため、**第 1 リリースから持つ**。
   **テーマに紐づかない呼び出し** (アセット抽出・ナレッジ検索・通常モードのナレッジ会話) では **NULL を入れる**
@@ -726,8 +754,12 @@ db/
 - **先例**: `audit_logs.actor_id` も FK を張らない (actor が `accounts` / `admin_accounts` の 2 種に
   またがり単一の FK にできないため)。**append-only の 2 テーブルで扱いが揃う**
 - **計測フィールド (トークン 4 カウンタ / `stop_reason` / `duration_ms` / `tool_calls` /
-  `estimated_cost`) のうち NULL を許すのは `route_kind='external_search'` の 4 カウンタと
-  `stop_reason` だけ**とし、**`CHECK` 制約でそれを表明する** — LLM 経路で NULL は計測漏れであり、
+  `estimated_cost`) のうち NULL を許すのは **`route_kind IN ('external_search','image_generation')`** の
+  4 カウンタと `stop_reason` だけ**とし、**`CHECK` 制約でそれを表明する**
+  (**`image_generation` は 2026-08-02 追加** — 企画書サムネイルは Gemini の画像生成であり
+  トークンも停止理由も持たない。[observability.md](observability.md) §4.2.2 が要件の SSOT。
+  **CHECK を `external_search` 限定のままにすると、設計どおり実装した明細が INSERT できず
+  画像生成のコストが総額から丸ごと落ちる**) — LLM 経路で NULL は計測漏れであり、
   区別できる形にする ([observability.md](observability.md) §4.2 の同趣旨の要求をスキーマで担保する)。
   **相関キー (`session_id` / `theme_id`) は計測フィールドではないため、この CHECK の対象外**である
   (呼び出しが会話・テーマに紐づかない経路が正当に存在する)
@@ -783,8 +815,17 @@ db/
 3. **UseCase は同一トランザクション内で 1 回だけ再試行する**。2 回目の失敗はユーザーに返す
 4. **バージョン番号を引数で受け取るメソッドを作らない** — 呼び出し側が版を決められる形にすると、
    PoC の「固定 ver での Insert」(BE-11) が別の場所で再発する
-5. **企画書 8 タブの保存は 1 トランザクション**にする。PoC は「1 タブ失敗しても残りを保存」だったが、
-   v3 は**全タブ成功か全タブ失敗**にする (ユーザーから見た「企画書ができた」が半分だけ真になる状態を作らない)
+5. **企画書は「タブ 1 件の保存 = 1 トランザクション」**にする (**2026-08-02 改訂**。
+   旧記述は「8 タブの保存は 1 トランザクション = 全タブ成功か全タブ失敗」だった)。
+   **改訂の理由** ([API/plans.md](API/plans.md) §11 の D-PL-16 が起票 = R-PL-3): ①**タブ単位の再生成**
+   (`POST /plans/{plan_id}/tabs/{tab_id}/regenerate`) では対象が 1 タブなので旧規約が適用できず、
+   **入口によってトランザクション粒度が変わる** ②安全弁の発火 ([observability.md](observability.md) §4.4) で
+   「それまでのタブを確定させる」ことができず、**実行時間上限まで走った分が全部捨てられる**
+   ③SSE の `artifact` は**保存後に送る**契約 ([API/conversation.md](API/conversation.md) §5) なので、
+   1 トランザクションだと全タブ完了までユーザーに何も出せない。
+   **旧規約が防ごうとしていたもの (半分だけできた企画書) の代替**: `plans.generated_at` を
+   **全タブが揃った時点で立てる**ことで「企画書ができた」の真偽を 1 箇所で表す
+   (途中状態は「タブが N 件ある企画書」として観測でき、再生成で埋められる)
 
 #### 4.11.2 台帳 (ledger) の設計 (BE-10 / BE-12 / DM-11)
 
@@ -814,6 +855,7 @@ PoC の 13 フィールド ([../analysis/poc-conversation-flow.md](../analysis/p
 | `generated_ideas` / `generated_plans` | 持つ (**参照のみ**) | ハンドラ (生成成功時。append) | 最新エントリの解決 / `stage` 導出。**本体は `ideas` / `plans` テーブル** (台帳には ID と件数だけを置く) |
 | `rejected_candidates` | 持つ | ハンドラ (`record_rejection`) | 再提案の抑制 (**読み手を必ず実装する**。PoC は台帳コピー以外の読み手が無かった) |
 | `matching` | 持つ | ハンドラ (`match_functions`。全置換) | `stage` 導出 / 発散入力 |
+| **`seed_idea`** (新規。v3 で追加) | 持つ | ハンドラ (`generate_ideas` の `seed_idea` 引数。全置換) | 発散入力 / [API/conversation.md](API/conversation.md) §2.2 の状態注入。**v2 のマイアイデア補完 (V-3) をこの引数で吸収したため、入力原文が台帳に残らないと再発散が別物になる (BE-1)**。**書き手・読み手を対で置く** (BE-10)。起票元: 同 §8 の R-CVA-2 |
 | **`entrypoint`** | **持たない** | — | — (PoC は**書き手も読み手も無い**フィールドだった。G-14) |
 | **`interests`** | **持たない** | — | PoC は**読み手が 2 箇所あるのに書き手が無く**、前提チェックの条件が実現不能だった (G-14)。**必要になった時点で tool schema の引数・書き手・読み手を同一 PR で追加する** |
 | **`rejected_candidates[].confidence`** | **持たない** | — | 同上 (書き手が無い。G-14) |
@@ -878,12 +920,12 @@ conversation_sessions.ledger.deep_dive_results ──> plan_tab_versions (ground
 
 | ID | 状態 | 対応 AC | 回答 |
 |---|---|---|---|
-| **A-3** テナント境界 | **回答** | **AC-1.2** | §3.3 / §4.1。**機能テーブル 40 件すべてが `contract_id NOT NULL` + FK を持ち、個人スコープの 32 件は `account_id` も持つ** (DM-2。契約スコープは 8 件。**2026-07-31 に `idea_tags` を追加** — [API/idea-boards.md](API/idea-boards.md) §8.2 / IB-Q14-1)。所有者への到達は 1 段 (§3.1)。例外は §4.1.2 の**有限の列挙**のみで、**2 種類 (所有者列を持たない / 所有者列を持つが認証系のクエリ経路を持つ) を分けて列挙**する (**件数は §4.1.2 の 2 表と `make check-table-counts` の出力が正**。本行に転記しない = DR-9)。**[auth.md](auth.md) §6.3 の列挙との差分は 2026-07-31 に解消した** — `auth_rate_limit_counters` / `account_mfa_configs` / `signup_links` / `admin_mfa_configs` の 4 件すべてが同節の例外表に反映され、**規約本体 (同 §6.3-1) への DM-2 の強化も反映済み** (R-DM-4 ①〜④はすべて実施済み。同節の状態列と auth.md §10.3 の受信欄を参照)。`company_id` は作らない |
+| **A-3** テナント境界 | **回答** | **AC-1.2** | §3.3 / §4.1。**機能テーブル 42 件すべてが `contract_id NOT NULL` + FK を持ち、個人スコープの 34 件は `account_id` も持つ** (DM-2。契約スコープは 8 件。**2026-07-31 に `idea_tags` を追加** — [API/idea-boards.md](API/idea-boards.md) §8.2 / IB-Q14-1)。所有者への到達は 1 段 (§3.1)。例外は §4.1.2 の**有限の列挙**のみで、**2 種類 (所有者列を持たない / 所有者列を持つが認証系のクエリ経路を持つ) を分けて列挙**する (**件数は §4.1.2 の 2 表と `make check-table-counts` の出力が正**。本行に転記しない = DR-9)。**[auth.md](auth.md) §6.3 の列挙との差分は 2026-07-31 に解消した** — `auth_rate_limit_counters` / `account_mfa_configs` / `signup_links` / `admin_mfa_configs` の 4 件すべてが同節の例外表に反映され、**規約本体 (同 §6.3-1) への DM-2 の強化も反映済み** (R-DM-4 ①〜④はすべて実施済み。同節の状態列と auth.md §10.3 の受信欄を参照)。`company_id` は作らない |
 | **A-4** 絞り込みの層 | **回答 (スキーマ側)** | **AC-1.2** | 層の規約は [auth.md](auth.md) §6.4 が SSOT。**本書が担保するのは「所有者条件を書ける形になっていること」**: ①所有者列が全テーブルにある ②一覧・検索用インデックスが所有者列を先頭に持つ (§3.5) ③ドメイン別 sqlc 出力で他ドメインのクエリへ到達できない (§3.6 / DM-18) ④引用・メンバー等の関連を FK にして「存在確認だけで通る」経路を消した (§4.7 / §4.8) |
 | **A-5** ステータスコード | **参照** | AC-1.4 | 判定規則は [auth.md](auth.md) §6.6。本書は 409 / 404 の**根拠となる制約**を定義する (部分 UNIQUE・FK・楽観ロック列) |
 | **A-6** LLM への越境 | **参照 + 部分回答** | AC-1.3 | 強制点は [architecture.md](architecture.md) §3.8.2。**本書の寄与は 2 点**: ①引用を子テーブル + FK にして LLM 出力の ID が保存され得ない形にした (§4.7) ②ベクトル検索の所有者フィルタを必須引数として設計に明記した (§4.7) |
 | **A-7** 共有・公開 | **回答 (スキーマ側)** | — | `visibility` 列と書き込みをどちらも増分 1 (DM-9。**2026-07-31 に C-16 で改訂**。判断の SSOT は [auth.md](auth.md) §6.12)。既存 `sharing_settings` の値は移行時の初期値に使う (§6.4)。**書き分け: 「どのテーブルが `visibility` 列を持つか」と「値域 (`private` / `contract`)」は本書 (DM-9 / §3.2 の列挙値規約。値の SSOT は `entity/`) / 「書き込み API を開ける時期と画面での意味」は [API/themes.md](API/themes.md) §3.2 / [API/assets.md](API/assets.md) §3.2** |
-| **O-2** LLM 計測 | **回答 (テーブル)** | AC-2.1 | §4.10 の `llm_call_records`。項目は [observability.md](observability.md) §4.2 の要件を満たし、**NULL 許容を `route_kind='external_search'` に限る CHECK** で計測漏れと区別する |
+| **O-2** LLM 計測 | **回答 (テーブル)** | AC-2.1 | §4.10 の `llm_call_records`。項目は [observability.md](observability.md) §4.2 の要件を満たし、**NULL 許容を `route_kind IN ('external_search','image_generation')` に限る CHECK** で計測漏れと区別する (2026-08-02 に 2 値化) |
 | **O-6** 監査ログ | **回答 (テーブル)** | AC-2.5 | §4.10 の `audit_logs`。**actor は種別 + ID** ([observability.md](observability.md) §4.5 / [auth.md](auth.md) §10.2 R-5' への対応)。`action` は `text` (DM-15) |
 | **O-4** 失敗の可観測性 | **部分回答** | AC-2.3 | ジョブの `failure_code` / `failure_message` を列として持つ (§4.4 / §4.7)。値域は [observability.md](observability.md) §4.3。採番・保存の失敗を握り潰さない規約は §4.11.1 の 2 |
 | **O-5** SSE / 長時間処理 | **部分回答** | — | 進捗を DB から配信するための `asset_extraction_events` (§4.4) と、**会話履歴を DB に持つ決定** (DM-12) が [API/README.md](API/README.md) §1.3 の J-6 / J-7 の前提を満たす。`heartbeat_at` は DM-17 |
@@ -926,7 +968,7 @@ conversation_sessions.ledger.deep_dive_results ──> plan_tab_versions (ground
 
 [Answer]: **psqldef を採用** (2026-07-31 ユーザー回答)。選定基準 1〜4 の評価どおり。
 ロールバックの弱点は §6.3 (「宣言を戻して再適用」を破壊的変更の機械判定 + H-2 承認で守る) で補う。
-`deploy.yml` の `plan_migration` / `apply_migration` のコマンド実体は psqldef
+`deploy-backend.yml` の `plan_migration` / `apply_migration` のコマンド実体は psqldef
 (`psqldef --dry-run` = plan / 適用 = apply) で確定 — 実装リポ立ち上げ時に雛形へ反映する。
 
 > **回答済みに伴う更新**: [operations.md](operations.md) §7.5 の同項目は本節への参照に置き換える
@@ -979,7 +1021,7 @@ conversation_sessions.ledger.deep_dive_results ──> plan_tab_versions (ground
 | 項目 | 決定 |
 |---|---|
 | **段** | **`RL-2` (prod 基盤の構築) の中で行う** ([operations.md](operations.md) §6.1)。**`RL-3` の手順② (v2 → v3 のデータ移送) がテーブルの存在を前提にする**ため、移送より前に終わっていなければならない |
-| **ジョブ** | **`apply_migration` を `release` を伴わずに 1 回単独で起動する** (`deploy.yml` の当該ジョブのみを手動起動する、または同等の `init_schema` 起動口を用意する)。**実行経路は通常の差分適用と同じ ECS RunTask** ([operations.md](operations.md) §5.1) — 経路を分けない (分けると初期投入だけが検証されていない経路を通る) |
+| **ジョブ** | **`apply_migration` を `release` を伴わずに 1 回単独で起動する** (`deploy-backend.yml` の当該ジョブのみを手動起動する、または同等の `init_schema` 起動口を用意する)。**実行経路は通常の差分適用と同じ ECS RunTask** ([operations.md](operations.md) §5.1) — 経路を分けない (分けると初期投入だけが検証されていない経路を通る) |
 | **実行主体** | **人間が prod で手動起動する** (dev の自動適用の対象外。§6.2 の 3) |
 | **承認** | **`prod-db` environment の承認** (= H-2)。差分適用と同じ承認者・同じ承認材料 (適用予定 DDL) を要求する |
 | **§6.2-1 との関係** | §6.2-1 の「リリースより前に適用」は**差分適用の規則**。初期投入は**その特例**であり、`release` (アプリの起動) はまだ存在しない。**「アプリのデプロイに伴って初めてスキーマが作られる」形にしない** — その形だと RL-3 手順②の移送が空の DB に対して走る |
@@ -1024,7 +1066,8 @@ conversation_sessions.ledger.deep_dive_results ──> plan_tab_versions (ground
 |---|---|---|
 | 1 | **対象テーブルの対応表** | v2 のテーブル → v3 のテーブル・列の 1:1 対応 (型変換を含む)。対象外にする v2 テーブルとその理由 |
 | 2 | **写像規則** | ①ID を維持するか再割り当てするか (DM-1 は維持できる形にしてある。**例外: `asset_documents` は v2 が `uuid` PK** (`hassan-v2-backend/db/schema.sql:510`〜`:515` の `id uuid NOT NULL` / F-5) で **v3 は `bigint`** (§4.4) なので、**このテーブルだけは ID を維持できず対応表が必要**になる。DM-1 の却下 (a) が「全テーブル分の対応表が必要になる」を理由に UUIDv7 統一を却下したのと同じ論法が 1 テーブルに残る。**F-1 の他の `uuid` 系 4 テーブル (`contracts` / `accounts` / `companies`) は §4.2 で `uuid` を維持するため影響なし**) ②`ideas` の 2 段チェーン (F-6) から `account_id` / `contract_id` を 1 段に落とす規則 ③配列カラム (F-7) から中間テーブルへの展開 ④`enum` から `text` への変換 ⑤`ideas.memo` / `phase` をボードアイテムへ移す規則 ([API/idea-boards.md](API/idea-boards.md) M-2 / M-3) ⑥**v2 に対応列が無い `NOT NULL` 列の既定値** (`themes.mission` / `icon` — v2 の `themes` は `id` / `account_id` / `name` / `hex` / `created_at` / `updated_at` の 6 列しかない (`hassan-v2-backend/db/schema.sql:94`〜`:102`)。**空文字を入れるのか NULL 可に変えるのかを移行前に決める**。旧記述の `subtitle`/`purpose`/`status` は 2026-07-30 の TH-Q6〜Q8 回答で列自体が無くなった) ⑦**列名が変わった列の対応** (2026-07-31 追加。フィールド単位の照合で判明): **v2 `ideas.concept`** (`hassan-v2-backend/db/schema.sql:155`) に対し **§4.6 の v3 `ideas` は `summary`** を持つ。本書に `concept` の言及が他に 1 件も無く、**リネームなのか意味を変えたのかが未記録**のため移行時にどちらへ入れるかが決まらない。**「事業コンセプト」を表示する画面が実在する**ため落とせない ([API/idea-boards.md](API/idea-boards.md) §8 の IB-Q14-4 / IB-Q11=a)。同節の照合表で `customer` / `issue` / `solution` / `market_size` / `cagr` は v2 と同名で一致することを確認済み — **対応が付かないのは `concept` → `summary` の 1 列のみ** |
-| 3 | **実行経路** | 上の確定事項 5 を使う。**移行スクリプトの置き場は backend リポの `cmd/migrate-from-v2`** とし、v2 の DB へは**読み取り専用の資格情報**で接続する |
+| **2a** | **確定済みの列写像 (アイデア・企画書。2026-08-02 追加)** | **v2 `ideas.concept` → v3 `ideas.summary`** (`hassan-v2-backend/db/schema.sql:155`。起票元: [API/ideas.md](API/ideas.md) §8 の R-IDA-4) / **v2 `ideas.score` (0〜40 の整数) → v3 `ideas.score`**。**v3 の `score` は `numeric(3,1)` (0.0〜10.0)** とし、**写像は [API/ideas.md](API/ideas.md) §3.3 の規則に従う** (`integer` で実装すると 0.0〜10.0 の小数が丸められる) / **v2 `business_plans.thumbnail_url` → v3 `plans.thumbnail_object_key`** (**URL ではなくオブジェクトキーを持つ** — v2 は public-read ACL で URL を直接保存していた (`hassan-v2-backend/aws/s3.go:46`) が、v3 は署名付き URL を都度発行するため保存する値の意味が変わる。**移行時に URL からキーを切り出す**) |
+| 3 | **実行経路** | 上の確定事項 5 を使う。**移行スクリプトの置き場は app モノレポの `backend/cmd/migrate-from-v2`** とし、v2 の DB へは**読み取り専用の資格情報**で接続する |
 | 4 | **冪等性** | 中断しても再実行できること (自然キーまたは `UNIQUE` による重複防止。[API/idea-boards.md](API/idea-boards.md) M-1 の形) |
 | 5 | **検証方法** | 件数の照合 + 組の完全一致が必要な項目の列挙 (ロール・可視性)。**0 件確認の対象** |
 | 6 | **ダウンタイム** | v2 を読み取り専用にするかどうか ([operations.md](operations.md) §6.3 のケース A の対策①と連動) |
@@ -1040,15 +1083,18 @@ v3 は v2 に無い一意制約を 3 つ新設している。**制約違反は�
 | v3 の新規制約 | v2 の状態 (実測) | 検出 SQL (v2 に対して実行) | 衝突時の規則 (**移行前に決める**) |
 |---|---|---|---|
 | `themes` の部分 UNIQUE `(account_id, name)` (§4.3) | **一意制約は存在しない** (`hassan-v2-backend/db/schema.sql:94`〜`:102` に UNIQUE が無く、`grep` でも 0 件)。**同一アカウント・同名テーマが存在し得る** | `SELECT account_id, name, count(*) FROM themes GROUP BY 1,2 HAVING count(*) > 1;` | **DM-A2 の回答後にこの表を埋める** (本表全体が同じ扱い)。候補は (a) 古い方に連番サフィックスを付けて改名する (b) `updated_at` が新しい方だけを移す。**(b) はデータを捨てるため項目 7 の告知対象になる** |
-| `plans` の部分 UNIQUE `(idea_id) WHERE deleted_at IS NULL` (§4.6) | **v2 の `business_plans` は `idea_id` に索引のみで UNIQUE が無い** (`hassan-v2-backend/db/schema.sql:204` = `CREATE INDEX idx_business_plans_idea_id`)。**1 アイデアに複数の企画書が存在し得る** | `SELECT idea_id, count(*) FROM business_plans GROUP BY 1 HAVING count(*) > 1;` | 同上。候補は (a) 最新 1 件のみを `plans` に写し、残りを `plan_tab_versions` の**過去版として写す** (b) 最新 1 件のみを移す (残りは告知対象) |
+| `plans` の部分 UNIQUE `(idea_id) WHERE deleted_at IS NULL` (§4.6) | **v2 の `business_plans` は `idea_id` に索引のみで UNIQUE が無い** (`hassan-v2-backend/db/schema.sql:204` = `CREATE INDEX idx_business_plans_idea_id`)。**1 アイデアに複数の企画書が存在し得る**。**実運用で複数行が実在するかは未調査** ([API/plans.md](API/plans.md) §13 の PL-R1) | `SELECT idea_id, count(*) FROM business_plans GROUP BY 1 HAVING count(*) > 1;` | **決定済み (2026-08-02。[API/plans.md](API/plans.md) §11 の D-PL-1 = 制約を維持する)**: `idea_id` ごとに `updated_at DESC` (同値なら `id DESC`) の **1 行を `plans` へ写し、残りは `plan_tab_versions` の版として古い順に取り込む** (**データを捨てない**ため項目 7 の告知対象にならない)。**複数行のあった `idea_id` を移行レポートに出力する** — 「最新以外が版になった」ことは利用者から見て並びが変わるため、件数を運用側が把握できる状態にする |
 | `knowledge_threads` の部分 UNIQUE `(account_id, idea_id)` (§4.7) | **v2 にナレッジ機能が無い** (§1.4 の対応表: 「v2 = 無し」)。**移送対象が存在しないため衝突しない** | — (対象なし) | — |
 
 **この 3 件以外の新規 UNIQUE** (`ideas(theme_id, seq_no)` / `idea_versions(idea_id, ver_no)` /
-`plan_tab_versions(plan_id, tab_id, ver_no)` / `idea_board_items(board_id, idea_id)` /
-`assets(extraction_id)` / ジョブの冪等キー) は**移行時に v3 側で採番・生成する値**を含むため、
+`plan_tab_versions(plan_id, tab_id, ver_no)` / **`plan_chat_messages(plan_id, seq)`** /
+`idea_board_items(board_id, idea_id)` / `assets(extraction_id)` / ジョブの冪等キー) は
+**移行時に v3 側で採番・生成する値**を含むため、
 **v2 データがそのまま違反する形にはならない** (採番は §4.11.1 の規則で移行スクリプトが行う)。
 ただし `idea_board_items(board_id, idea_id)` は [API/idea-boards.md](API/idea-boards.md) §4 の M-1 が
 **冪等性の根拠として使う**ため、materialize の重複は制約で弾かれる (設計どおり)。
+**`plan_favorites` の複合主キー `(plan_id, account_id)` も衝突しない** — v2 の `business_plan_favorites` が
+**同じ組の複合主キーを持つ** (`hassan-v2-backend/db/schema.sql:206`〜) ため、v2 側で既に一意である。
 
 ### 6.5 アカウント基盤の二重化 (**未確定 — [auth.md](auth.md) §10.2 R-1 への回答**)
 
@@ -1124,8 +1170,8 @@ auth.md §6.3 / §6.4 への転記は同文書の担当セッションが行う 
 | # | 検査 | 本書の該当節 |
 |---|---|---|
 | 1 | 全テーブルが `contract_id` を持つこと。**除外リストは §4.1.2 (a) の 7 件 + `account_mfa_configs` / `reset_password_requests` = 9 件に限る** (`accounts` / `companies` / `signup_links` は除外しない — DM-A4=B) | §3.3 の① / §4.1.2 |
-| 2-1 | **§3.4.2 の分類① (29 件) の集合 == 所有者移管 UseCase が UPDATE する集合** | §3.3 の②-1 / §3.4.2 |
-| 2-2 | `account_id` を持つテーブル (32 件) が**分類①②③のいずれかに分類されており、②③に属するのは §3.4.2 の有限列挙のテーブルだけ**であること | §3.3 の②-2 / §3.4.2 |
+| 2-1 | **§3.4.2 の分類① (31 件) の集合 == 所有者移管 UseCase が UPDATE する集合** | §3.3 の②-1 / §3.4.2 |
+| 2-2 | `account_id` を持つテーブル (34 件) が**分類①②③のいずれかに分類されており、②③に属するのは §3.4.2 の有限列挙のテーブルだけ**であること | §3.3 の②-2 / §3.4.2 |
 | 3 | 台帳フィールドに書き手が存在すること | §4.11.2 の 4 |
 | 4 | `repository/<domain>` が import する sqlc パッケージが `db/rdb/<domain>` のみであること (depguard の allow list) | §3.6 |
 | 5 | append-only テーブル (`llm_call_records` / `audit_logs`) に対する `UPDATE` / `DELETE` クエリが存在しないこと | §4.10 |
@@ -1202,7 +1248,7 @@ auth.md §6.3 / §6.4 への転記は同文書の担当セッションが行う 
 | **R-DM-5** | [architecture.md](architecture.md) §4 / §8 | **§4 の見出しは既に「確定 — SSOT は data-model.md」に更新済み** (`docs/design/architecture.md:714`)。**残る有効な要求は 3 点**: ①§4 末尾の箇条書き「`db/queries` と sqlc 出力先を**本節で決める**」を本書 DM-18 への参照に置き換える ②§8 の残課題「sqlc の出力先構成 (1 パッケージか複数か)」(`docs/design/architecture.md:834` 付近) を DM-18 で確定済みとして閉じる ③**同 §4 の所有者列の例外記述** (`docs/design/architecture.md:724` の「例外はアイデンティティ・テナント基盤テーブル (`contracts` / `accounts` / `companies` / `auth_roles` 相当) のみ」) を**本書 §4.1.2 への参照に置き換える** — 現状は本書 (11 件を 2 表に分割) / auth.md §6.3 (例外表) / architecture.md (4 件相当) の**3 文書で粒度が異なる** | **未対応** (①〜③) |
 | **R-DM-6** | [operations.md](operations.md) §7.5 | マイグレーションツールの `[Answer]` の二重管理の解消 | **解消済み (要求は無効)**。`docs/design/operations.md:619`〜`:622` が既に「**この問いの `[Answer]` は data-model.md §6.1 に集約した** (2026-07-30) … 本節は参照のまま維持する」と記載しており、同 §7.5 に当該 `[Answer]` 行は無い。**本行は履歴として残す** |
 | **R-DM-7** | [API/assets.md](API/assets.md) の function-tree | レスポンス項目が `{id, parent_id, level, name, description}` (`docs/design/API/assets.md:59`) で、**PoC にある `is_core` (コア機能フラグ。G-4) が無い**。本書は列として保持する (§4.4)。**API に含めるかを決める** (含めないなら「保持するが返さない」ことを明記する) | **未対応** |
-| **R-DM-8** | [observability.md](observability.md) §4.2 | **当初の要求 (テーブル名の参照更新) は解消済み** — `docs/design/observability.md:160` が既に「テーブル名は `llm_call_records`・スキーマは data-model.md §4.10 が SSOT」と記載。**内容を差し替える**: 同 §4.2 の**フィールド要件表に `theme_id` を追加する** (本書 §4.10 の中 3 対応。**O-3 の「テーマ単位のコスト集計」が相関キーの表に無いと、実装リポが列を落として過去分が永久に集計不能になる**)。併せて**相関キー (`session_id` / `theme_id`) は「値が無い経路が正当に存在する」ため計測漏れの CHECK の対象外**であることを同節に明記する | **実施済み (2026-07-30)** — ①`theme_id` の追加は `docs/design/observability.md:138` に反映済み (本書 §4.10 を参照する形) ②相関キーが CHECK の対象外であることは同 `:157` に明記済み (「NULL を許すのはこの `route_kind` のみ」が**トークン系 4 カウンタと `stop_reason` の 5 フィールドに限る**ことを書き分けた。2 巡目レビューの R-4 への対応) |
+| **R-DM-8** | [observability.md](observability.md) §4.2 | **当初の要求 (テーブル名の参照更新) は解消済み** — `docs/design/observability.md:160` が既に「テーブル名は `llm_call_records`・スキーマは data-model.md §4.10 が SSOT」と記載。**内容を差し替える**: 同 §4.2 の**フィールド要件表に `theme_id` を追加する** (本書 §4.10 の中 3 対応。**O-3 の「テーマ単位のコスト集計」が相関キーの表に無いと、実装リポが列を落として過去分が永久に集計不能になる**)。併せて**相関キー (`session_id` / `theme_id`) は「値が無い経路が正当に存在する」ため計測漏れの CHECK の対象外**であることを同節に明記する | **実施済み (2026-07-30)** — ①`theme_id` の追加は `docs/design/observability.md:138` に反映済み (本書 §4.10 を参照する形) ②相関キーが CHECK の対象外であることは同 §4.2 に明記済み (「NULL を許す `route_kind`」が**トークン系 4 カウンタと `stop_reason` の 5 フィールドに限る**ことを書き分けた。2 巡目レビューの R-4 への対応)。**2026-08-02 追記**: NULL を許す `route_kind` は `external_search` に加えて **`image_generation`** の 2 つになった (同 §4.2.2)。行番号の引用は機構の追記でずれるため節番号参照に改めた |
 | **R-DM-9** | [operations.md](operations.md) §6.1 の **RL-2 完了条件** | **prod の初期スキーマ投入が RL-2 の完了条件に含まれていない** (本書 §6.3 が「RL-2 の段で `apply_migration` を単独実行する」と確定させた)。**含まれないと、RL-3 手順②のデータ移送が空の DB に対して走り、当日に手作業で `schema.sql` を適用する = IaC / 承認ゲートを迂回する運用に落ちる** | **反映済み** (2026-07-30。同 §6.1 の RL-2 行に⑦「prod の初期スキーマを投入済み」が追加され、承認欄に **H-2** が追記されている) |
 
 ### 8.4 本書の仮定 (違えば §2 の判断が変わる)
@@ -1214,15 +1260,23 @@ auth.md §6.3 / §6.4 への転記は同文書の担当セッションが行う 
    (**テーブル定義そのものは変わらない**)
 3. **RAG (ナレッジ検索) が第 1 リリースに含まれる**と仮定して `knowledge_file_chunks` を置いた (DM-Q6)。
    外れる場合は同テーブルと埋め込み関連のインデックスのみが後送りになる
-4. **会話型アイデア創出の API 設計 (別途起草) が §4.5 のテーブルを前提にする**と仮定した。
-   同設計で会話の再開・履歴取得の仕様が変わる場合、`conversation_messages` の項目 (特に `status` の値域) が変わる
+4. ~~**会話型アイデア創出の API 設計 (別途起草) が §4.5 のテーブルを前提にする**と仮定した。
+   同設計で会話の再開・履歴取得の仕様が変わる場合、`conversation_messages` の項目 (特に `status` の値域) が変わる~~
+   → **クローズ済み (2026-08-01。仮定は成立した)**。[API/conversation.md](API/conversation.md) が
+   **CV-Q7=A (ターン終了時に 1 メッセージ = 1 行、中断も `aborted` で保存)** を確定し、
+   **`status` の値域は `complete` | `aborted` | `failed` のまま変更なし**。
+   ただし**書き込みのトランザクション境界は §4.5 の追記のとおり主トランザクションの外**になった (R-CVA-4①)
 5. **メンバー削除が本番で発生する運用操作である**と仮定して §3.4.2 の 3 分類と §3.4.3 のバッチ設計を書いた。
    **「メンバーは削除せず無効化のみ」という運用に決まる場合**、分類①の移管 UseCase は不要になり
    (`accounts` の行が消えないため FK の `NO ACTION` が発火しない)、§3.3 の検査②-1 / ②-2 も不要になる。
    ただし**その場合は `accounts` に無効化フラグを持つ必要があり、§4.2 の「v2 の列を変えない」方針が変わる**
    (v2 の `accounts` に `deleted_at` / 無効化列は無い — `hassan-v2-backend/db/schema.sql:30`〜`:47`)
-6. **`llm_call_records` の `theme_id` を「呼び出しの発生時点で決まっているテーマ」**と仮定した (§4.10)。
+6. ~~**`llm_call_records` の `theme_id` を「呼び出しの発生時点で決まっているテーマ」**と仮定した (§4.10)。
    会話が途中でテーマに紐づく仕様 (テーマ未確定のまま会話を始める) の場合、**紐づく前の呼び出しは NULL のまま残り、
-   遡ってテーマ単位に集計されない**。これを避ける必要があるなら、テーマ確定時に当該セッションの
-   明細を更新する経路が必要になり、**append-only (§7.2 の検査 5) と矛盾する** — 会話型 API 設計で
-   「テーマ確定のタイミング」を確認する必要がある (§8.4 の 4 と同じ確定先)
+   遡ってテーマ単位に集計されない**~~
+   → **クローズ済み (2026-08-01)**。**CV-Q8=A (テーマ必須) のユーザー決定**により
+   `conversation_sessions.theme_id` が NOT NULL になった (§4.5) ため、
+   **会話経路の明細は最初の LLM 呼び出しから `theme_id` が埋まる**。
+   遡及更新は不要になり、**append-only (§7.2 の検査 5) との矛盾も生じない**。
+   `theme_id` が NULL になるのは**テーマに紐づかない呼び出し** (アセット抽出・ナレッジ検索・
+   通常モードのナレッジ会話) のみで、これは §4.10 の設計どおり

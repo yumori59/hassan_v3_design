@@ -1,6 +1,8 @@
 # Questions: construction-workflow (実装リポの AI 駆動開発ワークフロー)
 
-> 本 feature が決めるのは「**実装リポジトリ (backend / frontend / infra) で 1 issue をどう回すか**」の運用規約。
+> 本 feature が決めるのは「**実装リポジトリ (app モノレポの backend / frontend サブツリー + infra リポ) で
+> 1 issue をどう回すか**」の運用規約 (**2026-08-03 のモノレポ化前は 3 リポ前提で書かれていた** — §後半の
+> 読み替え注記と同じ内容を冒頭にも反映した)。
 > 対象成果物は [templates/](../../../templates/README.md) 配下のルール追加と `CLAUDE.md.tmpl` の更新のみ
 > (製品コード・`docs/design/` の設計は本 feature のスコープ外)。
 > 要件: [requirements.md](requirements.md) / 計画: [plan.md](plan.md)
@@ -17,8 +19,8 @@
 |---|---|---|
 | F-1 | 実装リポ雛形に `.claude/rules/` が無い。コピー対象は `feedback_review_patterns.md` 1 本のみで、**作業の順序を定める運用ルール (設計リポの rules 01〜06 相当) が存在しない** | [templates/README.md](../../../templates/README.md) の立ち上げ手順 |
 | F-2 | `templates/` 全体で「issue」の語が出るのは GitHub API 呼び出しの 2 行だけ (`github.rest.issues.createComment`)。**C-8「GitHub issue 駆動」を担保する機構が実装リポ側に無い** | [templates/infra-repo/.github/workflows/ci.yml](../../../templates/infra-repo/.github/workflows/ci.yml) の PR コメント処理 |
-| F-3 | モデルの昇格は「**呼び出し側が `model: opus` を指定してエスカレーションする**」と書かれているのみで、判断主体・タイミング・根拠が未定義 | [go-developer.md](../../../templates/backend-repo/.claude/agents/go-developer.md) 冒頭の引用ブロック / [code-reviewer.md](../../../templates/backend-repo/.claude/agents/code-reviewer.md) 同 |
-| F-4 | 人間の承認は断片的に存在する (prod デプロイ = `workflow_dispatch` + GitHub environment / infra の `apply` = autoMode deny) が、**一覧として定義されていない**。DB マイグレーションと Agent 再発行はワークフロー雛形で未実装のまま | [templates/backend-repo/.github/workflows/deploy.yml](../../../templates/backend-repo/.github/workflows/deploy.yml) / [templates/infra-repo/CLAUDE.md.tmpl](../../../templates/infra-repo/CLAUDE.md.tmpl) のハーネス節 |
+| F-3 | モデルの昇格は「**呼び出し側が `model: opus` を指定してエスカレーションする**」と書かれているのみで、判断主体・タイミング・根拠が未定義 | [go-developer.md](../../../templates/app-monorepo/backend/.claude/agents/go-developer.md) 冒頭の引用ブロック / [code-reviewer.md](../../../templates/app-monorepo/backend/.claude/agents/code-reviewer.md) 同 |
+| F-4 | 人間の承認は断片的に存在する (prod デプロイ = `workflow_dispatch` + GitHub environment / infra の `apply` = autoMode deny) が、**一覧として定義されていない**。DB マイグレーションと Agent 再発行はワークフロー雛形で未実装のまま | [templates/app-monorepo/.github/workflows/deploy-backend.yml](../../../templates/app-monorepo/.github/workflows/deploy-backend.yml) / [templates/infra-repo/CLAUDE.md.tmpl](../../../templates/infra-repo/CLAUDE.md.tmpl) のハーネス節 |
 | F-5 | 設計リポには push 前レビューを強制するフック (`scripts/hooks/require-review-before-push.sh`) があるが、**実装リポ雛形の hooks は `pre-commit` 1 本のみ**でレビューゲートが無い | `templates/*/scripts/hooks/` の内容 |
 | F-6 | infra-repo のエージェントは `infra-engineer` 1 体で「**Terraform 実装・レビューエージェント**」と兼任定義。backend/frontend は実装役とレビュー役が分かれている | [templates/infra-repo/CLAUDE.md.tmpl](../../../templates/infra-repo/CLAUDE.md.tmpl) の運用ルール表 |
 
@@ -29,7 +31,7 @@
 C-8 は「GitHub issue 駆動」を定めるが、切り方は未定義 (F-2)。
 設計リポ側の受入基準は **AC-ID** 単位で存在し、実装リポの `go-developer` は
 **テスト名に AC-ID を埋める**規約を既に持っている
-([go-developer.md](../../../templates/backend-repo/.claude/agents/go-developer.md) の TDD 節)。
+([go-developer.md](../../../templates/app-monorepo/backend/.claude/agents/go-developer.md) の TDD 節)。
 
 - **A. 1 issue = 1 PR = 「同じ層・同じ検証手段で閉じる AC 群」** — issue 本文に対象 AC-ID を列挙する。
   1 AC で 1 issue になることも、関連 3 AC で 1 issue になることもある
@@ -51,7 +53,14 @@ issue ↔ AC-ID ↔ テスト名の照合を CI で機械化できるか (AC-2.4
 
 ---
 
-## Q-2. 3 リポ跨ぎの機能の issue / PR 構成とマージ順序の担保
+## Q-2. リポ跨ぎの機能の issue / PR 構成とマージ順序の担保
+
+> **2026-08-03 の前提変更**: リポジトリ構成が **app モノレポ + infra リポの 2 分割**になった
+> (親 [productionization/questions.md](../productionization/questions.md) Q-2 の [Answer 2])。
+> **以下の Q&A は 3 リポ構成を前提に書かれている**。回答 (B) は有効だが、**適用範囲が
+> `infra ↔ app` に限定された** — FE/BE 跨ぎは 1 PR に収まり、契約の整合は CI の `contract` ジョブ
+> (モノレポ機構の MR-3) が機械検証する。破壊的 API 変更の 3 段だけは別 PR 必須 (MR-6)。
+> **現行の規約は [02-issue-granularity.md](../../../templates/shared/.claude/rules/02-issue-granularity.md) §2 が正**。
 
 [templates/README.md](../../../templates/README.md) は
 「1 機能の変更が 3 リポに跨るとき、PR が 3 本になり**順序の担保が人手になる**」と課題を明記している。
@@ -92,7 +101,7 @@ F-4 のとおり承認は断片的に存在するのみ。**AI 駆動でも人�
 - E. Other (please describe after [Answer]: tag below)
 
 > 推奨: **B**、ただし**着手前承認 (C の追加分) は条件付きで要求する** —
-> 「新規ドメインの追加」「設計書に無いパターンの実装」「3 リポ跨ぎ」の 3 条件のいずれかに該当する
+> 「新規ドメインの追加」「設計書に無いパターンの実装」「3 リポ跨ぎ」(**2026-08-03 に「infra 跨ぎ」へ読み替え**) の 3 条件のいずれかに該当する
 > issue のみ、着手前に計画を人間が確認する。理由: 全 issue で着手前承認を要求すると
 > AI 駆動の利点 (待ち時間ゼロで着手) が失われる一方、**設計に無い判断が実装で発生する issue** は
 > 手戻りが最大になるため、そこだけ人間を挟むのが費用対効果が高い。
@@ -112,7 +121,7 @@ Managed Agent 再発行 / 本番デプロイ) + 「新規ドメイン追加・�
 
 グローバル方針は「**コミット・push はユーザーが明示的に依頼したときのみ**」であり、実装エージェント側も
 「ユーザー指示なしのコミット/プッシュ」を禁止事項に挙げている
-([go-developer.md](../../../templates/backend-repo/.claude/agents/go-developer.md) の「やってはいけないこと」)。
+([go-developer.md](../../../templates/app-monorepo/backend/.claude/agents/go-developer.md) の「やってはいけないこと」)。
 一方 issue 駆動 + PR ベースを AI 駆動で回すなら、この線引きを実装リポ向けに決め直す必要がある。
 
 - **A. commit / push / PR 作成まで自律。マージのみ人間** — feature ブランチへの push を許可し、
@@ -198,7 +207,7 @@ F-6 のとおり infra-repo は `infra-engineer` 1 体が実装とレビュー�
 ([.claude/rules/04-review.md](../../../.claude/rules/04-review.md))。
 Terraform は `plan` の出力が差分の説明になるため、レビューの形が backend/frontend と異なり得る。
 
-- **A. `infra-reviewer` を新設する** — 3 リポすべてで「実装役 / レビュー役の分離」を成立させる
+- **A. `infra-reviewer` を新設する** — backend / frontend / infra のすべてで「実装役 / レビュー役の分離」を成立させる
 - **B. 別セッションの `infra-engineer` にレビューを依頼する** — エージェント定義は増やさず、
   「レビュー時は別セッションで呼ぶ」運用ルールだけを追加する
 - **C. `terraform plan` の出力を人間が確認することでレビューに代える** — エージェントレビューは行わない
@@ -213,7 +222,7 @@ Terraform は `plan` の出力が差分の説明になるため、レビュー�
 **この回答が左右するもの**: AC-5.2 / `templates/infra-repo/.claude/agents/` に追加するファイル /
 [templates/infra-repo/CLAUDE.md.tmpl](../../../templates/infra-repo/CLAUDE.md.tmpl) の運用ルール表。
 
-[Answer]: A (2026-07-29) — `infra-reviewer` を新設し、3 リポすべてで実装役 / レビュー役を分離する。
+[Answer]: A (2026-07-29) — `infra-reviewer` を新設し、backend / frontend / infra のすべてで実装役 / レビュー役を分離する。
 `terraform apply` の人間承認は維持する
 
 ---

@@ -14,15 +14,15 @@
 
 | 成果物 | 変更内容 | 新規/更新 |
 |---|---|---|
-| `templates/shared/.claude/rules/01-construction-loop.md` | 1 issue の作業ループ (3 リポ共通) | **新規** |
-| `templates/shared/.claude/rules/02-issue-granularity.md` | issue の粒度・DoD・3 リポ跨ぎの順序 | **新規** |
+| `templates/shared/.claude/rules/01-construction-loop.md` | 1 issue の作業ループ (**2 リポ共通**) | **新規** |
+| `templates/shared/.claude/rules/02-issue-granularity.md` | issue の粒度・DoD・**リポ跨ぎ / サブツリー跨ぎ**の順序 | **新規** |
 | `templates/shared/.claude/rules/03-model-escalation.md` | 既定モデル・昇格/降格の主体と基準 | **新規** |
 | `templates/shared/.claude/rules/04-human-checkpoints.md` | 人間が必ず判断する点と記録先 | **新規** |
-| `templates/<repo>/.github/ISSUE_TEMPLATE/` · `pull_request_template.md` | issue / PR テンプレート (3 リポ分) | **新規** |
+| `templates/<repo>/.github/ISSUE_TEMPLATE/` · `pull_request_template.md` | issue / PR テンプレート (**issue は 3 本: app の `task-backend.yml` / `task-frontend.yml` + infra の `task.yml` / PR は 2 本: app / infra**) | **新規** |
 | `templates/infra-repo/.claude/agents/infra-reviewer.md` | infra のレビュー役 (Q-7=A の場合) | **新規** |
-| `templates/backend-repo/CLAUDE.md.tmpl` · `frontend-repo/CLAUDE.md.tmpl` · `infra-repo/CLAUDE.md.tmpl` | 運用ルール表への索引追加・ハーネス節の更新 | 更新 |
+| `templates/app-monorepo/{CLAUDE.md.tmpl,backend/CLAUDE.md.tmpl,frontend/CLAUDE.md.tmpl}` · `templates/infra-repo/CLAUDE.md.tmpl` | 運用ルール表への索引追加・ハーネス節の更新 | 更新 |
 | `templates/README.md` | 立ち上げ手順に rules / テンプレートのコピーを追加、`.claude/settings.json` の deny 指示を具体化 | 更新 |
-| `templates/backend-repo/.claude/agents/go-developer.md` ほか計 5 定義 | モデル運用の記述をルールへの参照に統一 | 更新 |
+| `templates/app-monorepo/backend/.claude/agents/go-developer.md` ほか計 5 定義 | モデル運用の記述をルールへの参照に統一 | 更新 |
 | `aidlc-docs/aidlc-state.md` | feature 行の追加・進行更新 | 更新 |
 
 ### 実装リポ側で影響を受ける「層」
@@ -35,7 +35,7 @@
 | ローカル開発 (Claude Code セッション) | オーケストレーターの手順・委譲プロンプト・中断/再開の記録 |
 | pre-commit | 変更なし (既存のまま。ループのどこで走るかを明文化するだけ) |
 | CI (`ci.yml`) | 変更なし。**マージ条件としての位置づけ**をループに明記 (AC-6.1) |
-| デプロイ (`deploy.yml`) | 人間承認 (environment) の適用範囲を確定 (AC-4.2) |
+| デプロイ (`deploy-backend.yml`) | 人間承認 (environment) の適用範囲を確定 (AC-4.2) |
 | GitHub 設定 (リポジトリ側) | ブランチ保護・必須レビュー・environment 承認者 — **雛形で自動化できないため手順書として渡す** |
 
 ### 本番ゲート (`08-production-gates.md`) の該当 ID
@@ -57,20 +57,21 @@
 | AC-1.5 | 同ルールに直列必須/並列可の区別表 | 独立 issue の並列着手・同一 issue 内の直列を守る |
 | AC-1.6 | 同ルール §6 に中断・再開の記録形式・更新タイミング・再開手順 ★ | 中断した issue を別セッション・別日でも再開できる |
 | AC-2.1 | `02-issue-granularity.md` に 1 issue の単位定義 (Q-1 の値) | issue 起票時の分割判断 |
-| AC-2.2 | 同ルールに 3 リポ跨ぎの分割と PR マージ順序 (API 互換順序を含む) | 親 issue に順序を書き、子 issue から参照 |
-| AC-2.3 | `.github/ISSUE_TEMPLATE/` が 3 リポ分存在し必須 5 欄を含む ★ | issue 起票時に欄が強制される |
+| AC-2.2 | 同ルールにリポ跨ぎ / サブツリー跨ぎの分割と PR マージ順序 (API 互換順序を含む) | 親 issue に順序を書き、子 issue から参照 |
+| AC-2.3 | `.github/ISSUE_TEMPLATE/` の issue テンプレートが **3 本** (app の `task-backend.yml` / `task-frontend.yml` + infra リポの `task.yml`) 存在し必須 5 欄を含む ★ | issue 起票時に欄が強制される |
 | AC-2.4 | 同ルールに DoD (機械検証項目 / 人間判断項目の区別) | PR テンプレートのチェックリストとして機能 |
 | AC-3.1 | `03-model-escalation.md` に既定モデル表 + 昇格/降格の主体・根拠 ★ | 委譲時に `model:` を明示指定 |
 | AC-3.2 | 同ルールに実行中の昇格トリガー (3 条件) | Red 不成立・重大指摘反復で opus へ切替 |
 | AC-4.1 | `04-human-checkpoints.md` に承認点一覧 (見るもの・記録先) ★ | 人間が待ち行列になる箇所が事前に分かる |
-| AC-4.2 | `deploy.yml` の environment 承認 + `settings.json` deny 指示 + 手順書に反映 ★ | 機構で止まる (規約文書だけにしない) |
+| AC-4.2 | `deploy-backend.yml` の environment 承認 + `settings.json` deny 指示 + 手順書に反映 ★ | 機構で止まる (規約文書だけにしない) |
 | AC-4.3 | `templates/README.md` の立ち上げ手順に自律範囲の deny/allow 指示 ★ | `.claude/settings.json` に落ちる |
 | AC-5.1 | 共通ルールが `templates/shared/` に 1 部だけ存在し、各リポに複製が無い ★ | 規約の二重管理が起きない |
-| AC-5.2 | infra のレビュー役が実装役と分離 (Q-7 の値) ★ | 自己レビュー禁止が 3 リポで成立 |
+| AC-5.2 | infra のレビュー役が実装役と分離 (Q-7 の値) ★ | 自己レビュー禁止が backend / frontend / infra のすべてで成立 |
 | AC-5.3 | 3 つの `CLAUDE.md.tmpl` の運用ルール表に追加ルールが索引され `make doc-lint` が 0 エラー ★ | 実装リポで参照漏れが起きない |
 | AC-5.4 | 追加ルールと親 feature の確定制約 (4 層 / TDD / CI ゲート 3 本 / Agent 再発行 / dev 継続デプロイ) の矛盾なし | 既存設計と衝突しない |
+| AC-5.5 | **MR-1〜MR-6 が ①雛形に実体としてある ②機械検査できるものは `make check-monorepo-ci` の対象 ③できないものは立ち上げチェックリストの設定項目**、の 3 分類に全件が入っている ★ | モノレポ化で新規に要る担保が「宣言だけ」で終わらない (**MR-1 の指定を誤ると PR が永久 pending**) |
 | AC-6.1 | ループ表の各ステップに CI ジョブとマージ条件が対応付けられている | PR のマージ条件が機械強制される |
-| AC-6.2 | 承認点一覧に D-4 / D-6 が含まれ、`deploy.yml` の該当ステップと対応 ★ | マイグレーションと Agent 再発行が人間承認を通る |
+| AC-6.2 | 承認点一覧に D-4 / D-6 が含まれ、`deploy-backend.yml` の該当ステップと対応 ★ | マイグレーションと Agent 再発行が人間承認を通る |
 | AC-6.3 | A / O 領域の扱いと**先送り先の明記** (親 feature の該当設計書) がルール本文にある | 「レビュー観点として通す」だけと分かる |
 | AC-7.1 | `make doc-lint` / `make check-traceability` が本 feature の追加分でエラーを増やさない ★ | — |
 | AC-7.2 | `aidlc-docs/reviews/construction-workflow/review.md` が存在し、変更した成果物の相対パスを含む ★ | push ゲートが通る |
@@ -96,9 +97,9 @@ Q-1〜Q-7 の回答 (または暫定既定の確定)
 | # | タスク | 成果物 | 担当 | 依存 | 対応 AC |
 |---|---|---|---|---|---|
 | Task-1 | **1 issue の作業ループの起草** — ステップ表 (入力/出力/担当)・Red/Green の裏取り・差し戻し上限・設計リポ差し戻し・並列可否・中断/再開の記録 (DF-6) | `templates/shared/.claude/rules/01-construction-loop.md` | `architecture-designer` | Q 回答 (暫定可) | AC-1.1〜AC-1.6 / AC-6.1 |
-| Task-2 | **issue 粒度・DoD・3 リポ跨ぎの順序** + issue/PR テンプレート 3 リポ分 | `templates/shared/.claude/rules/02-issue-granularity.md` / `templates/<repo>/.github/ISSUE_TEMPLATE/*` / `pull_request_template.md` | `architecture-designer` | Task-1 | AC-2.1〜AC-2.4 |
+| Task-2 | **issue 粒度・DoD・リポ跨ぎ / サブツリー跨ぎの順序** + issue/PR テンプレート | `templates/shared/.claude/rules/02-issue-granularity.md` / `templates/<repo>/.github/ISSUE_TEMPLATE/*` / `pull_request_template.md` | `architecture-designer` | Task-1 | AC-2.1〜AC-2.4 |
 | Task-3 | **モデル運用ルール** + 既存エージェント定義 5 本のモデル記述の整合 | `templates/shared/.claude/rules/03-model-escalation.md` + `go-developer.md` / `code-reviewer.md` / `react-developer.md` / `frontend-reviewer.md` / `infra-engineer.md` の該当ブロック | `architecture-designer` | Task-1 | AC-3.1 / AC-3.2 |
-| Task-4 | **人間チェックポイントの確定と機構への落とし込み** — 承認点一覧 + `deploy.yml` の environment 承認 + `settings.json` deny 指示 + GitHub 設定手順書 | `templates/shared/.claude/rules/04-human-checkpoints.md` / `templates/backend-repo/.github/workflows/deploy.yml` (更新) | `architecture-designer` | Task-1 | AC-4.1〜AC-4.3 / AC-6.2 |
+| Task-4 | **人間チェックポイントの確定と機構への落とし込み** — 承認点一覧 + `deploy-backend.yml` の environment 承認 + `settings.json` deny 指示 + GitHub 設定手順書 | `templates/shared/.claude/rules/04-human-checkpoints.md` / `templates/app-monorepo/.github/workflows/deploy-backend.yml` (更新) | `architecture-designer` | Task-1 | AC-4.1〜AC-4.3 / AC-6.2 |
 | Task-5 | **infra のレビュー役の整備** (Q-7=A なら新設。B/C なら運用ルールのみ) | `templates/infra-repo/.claude/agents/infra-reviewer.md` | `architecture-designer` | Q-7 | AC-5.2 |
 | Task-6 | **索引と整合** — 3 つの `CLAUDE.md.tmpl` の運用ルール表・ハーネス節、`templates/README.md` の立ち上げ手順 (rules / テンプレートのコピー・deny 指示)、共通ルールの重複が無いことの確認 | 上記 4 ファイル (更新) | メインセッション | Task-1〜5 | AC-5.1 / AC-5.3 / AC-5.4 / AC-6.3 / AC-7.1 |
 | Task-7 | **レビュー** — 別セッションで `design-reviewer` (本番基準・DR 全件 + 08 の D 領域) | `aidlc-docs/reviews/construction-workflow/review.md` | `design-reviewer` (別セッション) | Task-6 | AC-7.2 |
@@ -130,7 +131,7 @@ Task-1 の例 (他タスクも同形式で書く):
 3. **やること**: ①ステップ表 (入力/出力/担当) ②Red/Green の裏取り手段 ③差し戻し上限と
    エスカレーション ④設計リポ差し戻しの判定 ⑤並列可否 ⑥中断/再開の記録方法
 4. **従うべき既存例**: 設計リポの `.claude/rules/01-aidlc.md` · `02-agents.md` · `04-review.md` の
-   書式と粒度 / `templates/backend-repo/.claude/agents/go-developer.md` の完了条件節
+   書式と粒度 / `templates/app-monorepo/backend/.claude/agents/go-developer.md` の完了条件節
 5. **制約**: 参照リポジトリ (`claude_managed_agents` / `hassan-v2-*`) を読まない・編集しない /
    `docs/design/` を変更しない / 製品コードを書かない / **Task-2〜5 の対象ファイルを触らない** /
    確定制約 C-1〜C-9 と暫定既定 (Q-1〜Q-7 の推奨案) を前提にする

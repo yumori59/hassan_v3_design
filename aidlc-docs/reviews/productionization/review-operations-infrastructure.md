@@ -14,7 +14,7 @@
   `docs/analysis/poc-prompt-inventory.md` / `docs/design/observability.md` / `docs/design/architecture.md` /
   `docs/design/design_memo.md` / `docs/design/API/README.md` /
   `templates/shared/.claude/rules/04-human-checkpoints.md` / `templates/shared/.claude/rules/02-issue-granularity.md` /
-  `templates/backend-repo/.github/workflows/deploy.yml` / `templates/infra-repo/CLAUDE.md.tmpl` / `templates/README.md` /
+  `templates/app-monorepo/.github/workflows/deploy-backend.yml` / `templates/infra-repo/CLAUDE.md.tmpl` / `templates/README.md` /
   `aidlc-docs/inception/productionization/requirements.md`
 - **件数**: **重大 4 件 / 中 9 件 / 軽微 5 件**
 - **判定 (この 2 文書のスコープ)**: **Freeze 不可**。重大 4 件はいずれも「実装リポで手が止まる or 本番で静かに壊れる」種類であり、修正後に再レビューが必要
@@ -63,7 +63,7 @@ $ make check-traceability
 | 12 | F-10 (踏み台 SSH トンネル + 手動 `psqldef`) | **一致** (`README.md:74` 以降の `ssh -N -L 5432:...`) |
 | 13 | F-13 (`ACL: ObjectCannedACLPublicRead`) | **一致** (`hassan-v2-backend/aws/s3.go:46`) |
 | 14 | INF-D の「v2 に `/alive` が存在する」 | **一致** (`hassan-v2-backend/router/router.go:56-58`、`controller/middleware.go:36` でログ抑制対象) |
-| 15 | `operations.md:214` の 6 ジョブ順序と承認位置 | **一致** (`templates/backend-repo/.github/workflows/deploy.yml` の `needs` 連鎖・`environment` 指定) |
+| 15 | `operations.md:214` の 6 ジョブ順序と承認位置 | **一致** (`templates/app-monorepo/.github/workflows/deploy-backend.yml` の `needs` 連鎖・`environment` 指定) |
 | 16 | `operations.md:141` の「GitHub environment 5 つ」 | **一致** (04 §4.2 の表と同一。ただし**保持シークレットの記述が本書と衝突** → 重大 4) |
 | 17 | `infrastructure.md:299` / `operations.md:510` の「dev は AL-6 のみ通知 (出典: observability §4.6)」 | **不一致**。observability.md §4.6 には環境差・重大度分類の記述が無い → 中 5 |
 | 18 | `operations.md:246` の Agent 再発行トリガ (`prompts/` 全体) と `poc-prompt-inventory.md` §2 の「再発行対象は 4 ファイルのみ」 | **不整合** → 中 2 |
@@ -86,7 +86,7 @@ $ make check-traceability
 ### 重大 1. マイグレーションの実行経路が deploy.yml と INF-H で矛盾しており、どちらも「書き換えが必要」と引き渡していない
 
 - 該当: `docs/design/infrastructure.md:96` (INF-H) / `docs/design/operations.md:211`,`:485`,`:550` /
-  `templates/backend-repo/.github/workflows/deploy.yml` の `apply_migration`
+  `templates/app-monorepo/.github/workflows/deploy-backend.yml` の `apply_migration`
 - **事実**: `deploy.yml` の `apply_migration` は `runs-on: ubuntu-latest` で
   `env: DATABASE_URL: ${{ secrets.DATABASE_URL }}` を渡し、**GitHub ランナーから直接 DB へ接続する形**になっている。
   一方 INF-H は「**CI ランナー自身は RDS に到達しない**。ECS RunTask で VPC 内から接続する」を採用案とし、
@@ -376,7 +376,7 @@ $ make check-traceability
 
 **Freeze 不可 (重大 4 件)**。
 
-- **重大 1・重大 4** は `templates/backend-repo/.github/workflows/deploy.yml` と
+- **重大 1・重大 4** は `templates/app-monorepo/.github/workflows/deploy-backend.yml` と
   `templates/shared/.claude/rules/04-human-checkpoints.md` §4.2 の是正を伴う (設計文書だけでは閉じない)。
   引き渡し先が雛形をそのまま使う前提なので、雛形の是正要求を §9 / §10 に書くところまでが修正範囲。
 - **重大 2・重大 3** は `operations.md` 内で閉じる修正 (分類の変更と、Environment ID の追記 + `[Answer]:` 追加)。
@@ -391,7 +391,7 @@ $ make check-traceability
 
 **指摘 18 件すべてに対応済み** (起草側による反映。再レビューは別セッションで行う)。
 変更したファイル: `docs/design/operations.md` / `docs/design/infrastructure.md` /
-`templates/backend-repo/.github/workflows/deploy.yml` /
+`templates/app-monorepo/.github/workflows/deploy-backend.yml` /
 `templates/shared/.claude/rules/04-human-checkpoints.md` (§4.2 のみ) / 本ファイル (本節の追記)。
 
 ### 重大
@@ -454,7 +454,7 @@ YAML OK
 | 2 | `observability.md` への **SSE 接続数メトリクスの追加** | `operations.md` §10.2 の OP-F1 |
 | 3 | `observability.md` §4.6 への **相互参照 1 行の追記** (重大度分類・環境差の SSOT の明示) | 同 OP-F2 |
 | 4 | **04 §2.6 の H-3 行「二重化」列の是正** (§4.2 は是正済み。§2.6 は本タスクの編集範囲外) | 同 OP-F3 |
-| 5 | **`rollback.yml` の雛形追加** (`templates/backend-repo/.github/workflows/`) | 同 OP-F4 / §5.3 |
+| 5 | **`rollback.yml` の雛形追加** (`templates/app-monorepo/.github/workflows/`) | 同 OP-F4 / §5.3 |
 
 ---
 
@@ -469,8 +469,8 @@ YAML OK
 |---|---|
 | `docs/design/operations.md` | 全文 (813 行) |
 | `docs/design/infrastructure.md` | 全文 (580 行) |
-| `templates/backend-repo/.github/workflows/deploy.yml` | 全文 (465 行。`apply_migration` / `apply_agent` の書き換え) |
-| `templates/backend-repo/.github/workflows/rollback.yml` | 全文 (138 行。**新規作成物**) |
+| `templates/app-monorepo/.github/workflows/deploy-backend.yml` | 全文 (465 行。`apply_migration` / `apply_agent` の書き換え) |
+| `templates/app-monorepo/.github/workflows/rollback-backend.yml` | 全文 (138 行。**新規作成物**) |
 | `templates/shared/.claude/rules/04-human-checkpoints.md` | §2.6 / §4.2 / §4.5 |
 | `docs/design/observability.md` | §4.4.1 (新設) / §4.6 冒頭 / §4.3 / §4.4 / §5 |
 
@@ -502,7 +502,7 @@ deploy.yml: OK  jobs=build,plan_migration,apply_migration,plan_agent,apply_agent
   release:         steps=5 / environment=(prod|dev)
 rollback.yml: OK jobs=rollback / steps=8 / environment=${{ inputs.environment }}
 
-$ grep -rn "secrets\." templates/backend-repo/.github/workflows/
+$ grep -rn "secrets\." templates/app-monorepo/.github/workflows/
 (0 件 — GitHub secret への参照が雛形から消えている)
 ```
 
@@ -556,7 +556,7 @@ $ grep -rn "secrets\." templates/backend-repo/.github/workflows/
 
 #### 新規 重大 1. `rollback.yml` の Agent 切り戻しが**未実装でも成功扱いになる** (成功と報告して何もしない)
 
-- 該当: `templates/backend-repo/.github/workflows/rollback.yml:86`-`:98` (ステップ ①)
+- 該当: `templates/app-monorepo/.github/workflows/rollback-backend.yml:86`-`:98` (ステップ ①)
 - **事実**: ① の `run` は `echo "TODO: …"` と `::warning` だけで、**実装が無くても exit 0** する。
   その後 ② `ecspresso rollback` が成功すればジョブは緑になり、③ の出力にも ECS のタスク定義だけが出る。
   つまり `target=service+agent` で起動しても **SSM の Agent ID / Environment ID は前バージョンへ戻らず、
@@ -598,7 +598,7 @@ $ grep -rn "secrets\." templates/backend-repo/.github/workflows/
 |---|---|---|---|
 | a | `docs/design/operations.md:171`-`:173` | 「04 §2.6 の H-3 行の二重化列 … **本節と矛盾したまま残っている**」 | 04 §2.6 は `:200` で是正済み |
 | b | `docs/design/operations.md:480`,`:483`-`:484` | 「**このメトリクスは現時点で observability.md に定義が無い**」「同書への追記が済むまでの暫定値」 | `observability.md` §4.4.1 に定義済み |
-| c | `docs/design/operations.md:720`-`:721`,`:741` | 引き渡し 7「**雛形は `templates/` に無いため、実装リポで新規に作る**」/ 雛形是正表「`rollback.yml` の雛形 = **未整備 (要求)**」 | `templates/backend-repo/.github/workflows/rollback.yml` は作成済み |
+| c | `docs/design/operations.md:720`-`:721`,`:741` | 引き渡し 7「**雛形は `templates/` に無いため、実装リポで新規に作る**」/ 雛形是正表「`rollback.yml` の雛形 = **未整備 (要求)**」 | `templates/app-monorepo/.github/workflows/rollback-backend.yml` は作成済み |
 | d | `docs/design/infrastructure.md:258` | 「(**雛形は未整備** = 同 §10.2 の OP-F4)」 | 同上 |
 
 修正案: a〜d を「是正済み (2026-07-30)」に書き換える。b は下記 中 3 と同時に処理する。
@@ -702,8 +702,8 @@ $ grep -rn "secrets\." templates/backend-repo/.github/workflows/
 | スコープ | 判定 |
 |---|---|
 | `docs/design/operations.md` / `docs/design/infrastructure.md` | **重大ゼロ**。新規 中 2 / 中 3 / 中 5 (と 中 4 の infra 側 1 行) を反映すれば **Freeze 可**。中 2・中 3 は「文書が自分の是正結果を否定している」種類の事実誤りで、**1 コミットで閉じる**。再レビューは軽量 (`model: sonnet`) で足る |
-| `templates/backend-repo/.github/workflows/rollback.yml` | **Freeze 不可 (新規 重大 1)**。新規 中 1 / 中 6 も同ファイルで同時に直す。**ロールバックが「成功したのに戻っていない」形で壊れる**のは、この設計が最も避けたい種類の障害である |
-| `templates/backend-repo/.github/workflows/deploy.yml` / `templates/shared/.claude/rules/04-human-checkpoints.md` / `docs/design/observability.md` | **重大ゼロ**。軽微 1 / 軽微 2 / 軽微 3 と 中 5 (04 側) の反映を推奨。Freeze の阻害要因ではない |
+| `templates/app-monorepo/.github/workflows/rollback-backend.yml` | **Freeze 不可 (新規 重大 1)**。新規 中 1 / 中 6 も同ファイルで同時に直す。**ロールバックが「成功したのに戻っていない」形で壊れる**のは、この設計が最も避けたい種類の障害である |
+| `templates/app-monorepo/.github/workflows/deploy-backend.yml` / `templates/shared/.claude/rules/04-human-checkpoints.md` / `docs/design/observability.md` | **重大ゼロ**。軽微 1 / 軽微 2 / 軽微 3 と 中 5 (04 側) の反映を推奨。Freeze の阻害要因ではない |
 
 feature `productionization` 全体の Freeze は、本レビュー範囲外の設計成果物
 (`llm-migration.md` — [review-llm-migration.md](review-llm-migration.md) / 未着手の `data-model.md`) に依存する。
@@ -731,7 +731,7 @@ feature `productionization` 全体の Freeze は、本レビュー範囲外の�
 
 | 指摘 | 反映先 |
 |---|---|
-| **重大 (新規): `rollback.yml` の Agent 切り戻しが未実装でも exit 0** | `templates/backend-repo/.github/workflows/rollback.yml` の ① を `scripts/rollback-agent.sh` の実行に変え、**未実装なら `exit 1`** (deploy.yml の 3 者一致検査と同じ扱い)。要求動作をエラーメッセージに明記し、`target=service` での再実行を案内 |
+| **重大 (新規): `rollback.yml` の Agent 切り戻しが未実装でも exit 0** | `templates/app-monorepo/.github/workflows/rollback-backend.yml` の ① を `scripts/rollback-agent.sh` の実行に変え、**未実装なら `exit 1`** (deploy.yml の 3 者一致検査と同じ扱い)。要求動作をエラーメッセージに明記し、`target=service` での再実行を案内 |
 | 中 1: SSM パスの不一致 | 同ファイルのコメントとエラーメッセージを **`/hassan-v3/<env>/anthropic/environment-id`** (環境単位) に統一。3 パスの一覧をコメントに固定 |
 | 中 2: stale 4 箇所 | `operations.md` の 04 §2.6 / SSE メトリクス / `rollback.yml` 雛形の 3 箇所、`infrastructure.md` §4.4 の 1 箇所を是正済みの記述へ差し替え |
 | 中 3: SSE 接続数の二重定義 | `operations.md` §6.3 の暫定定義表を削除し、**observability.md §4.4.1 への参照 + 「リリース判断での使い方」だけを残す**形に変更 |
@@ -764,8 +764,8 @@ feature `productionization` 全体の Freeze は、本レビュー範囲外の�
 
 | パス | 見た範囲 |
 |---|---|
-| `templates/backend-repo/.github/workflows/rollback.yml` | 全文 (184 行。①/②/②'/③/④ の条件と本文) |
-| `templates/backend-repo/.github/workflows/deploy.yml` | 失敗時ステップ (`:447`-`:461`) + YAML パース |
+| `templates/app-monorepo/.github/workflows/rollback-backend.yml` | 全文 (184 行。①/②/②'/③/④ の条件と本文) |
+| `templates/app-monorepo/.github/workflows/deploy-backend.yml` | 失敗時ステップ (`:447`-`:461`) + YAML パース |
 | `templates/shared/.claude/rules/04-human-checkpoints.md` | §2.3 (`:141`-`:160`) / §2.6 (`:197`-`:203`) / §4.2 (`:313`-`:342`) |
 | `docs/design/operations.md` | §3.3 / §4.1 / §5.3 / §6.3 / §9 (引き渡し・雛形是正表) / §10.2 |
 | `docs/design/infrastructure.md` | INF-I (`:97`) / §4.4 (`:258`) |
@@ -860,7 +860,7 @@ syntax error near unexpected token `<'      ← 新規 軽微 1 の根拠
   「未実装でも exit 0」「SSM パスの取り違え」「②' の中途状態の明示」がすべて再発し得る
   (この 3 つは雛形の中にしか無い)。中 2 (2 巡目) と同型の再発であり、今回は**引き渡し点で起きている**ため
   影響が大きい。
-- **修正案**: 引き渡し 7 を「雛形 `templates/backend-repo/.github/workflows/rollback.yml` をコピーし、
+- **修正案**: 引き渡し 7 を「雛形 `templates/app-monorepo/.github/workflows/rollback-backend.yml` をコピーし、
   プレースホルダと `scripts/rollback-agent.sh` を実装する」に差し替える。引き渡し 9 を
   「定義は `observability.md` §4.4.1 (追記済み)」に、雛形是正表の 04 §2.6 行を「是正済み」に直す。
 
@@ -905,7 +905,7 @@ syntax error near unexpected token `<'      ← 新規 軽微 1 の根拠
 | スコープ | 判定 |
 |---|---|
 | `docs/design/operations.md` / `docs/design/infrastructure.md` | **重大ゼロ**。**新規 中 1 / 中 2 を反映すれば Freeze 可**。どちらも文書 3〜4 行の修正で閉じ、設計判断の変更を伴わない (再レビューは軽量 = `model: sonnet` で足る) |
-| `templates/backend-repo/.github/workflows/rollback.yml` · `deploy.yml` | **Freeze 可** (2 巡目の重大 1・中 1・中 6 はすべて解消)。新規 軽微 1 / 2 / 4 の反映を推奨 |
+| `templates/app-monorepo/.github/workflows/rollback-backend.yml` · `deploy.yml` | **Freeze 可** (2 巡目の重大 1・中 1・中 6 はすべて解消)。新規 軽微 1 / 2 / 4 の反映を推奨 |
 | `templates/shared/.claude/rules/04-human-checkpoints.md` | **Freeze 可**。construction-workflow の AC-4.1 / AC-4.2 / AC-6.2 は無傷 |
 | `docs/design/observability.md` | **重大ゼロ**。ただし `llm-migration` 側の指摘 (`external_search` の必須フィールドと検索単価) が残る — [review-llm-migration.md](review-llm-migration.md) の 3 巡目を参照 |
 | `aidlc-docs/inception/construction-workflow/requirements.md` | **Freeze 可** (§5 の D-5 記述が OIDC + Secrets Manager 方式に是正済み。`:155`) |

@@ -13,8 +13,10 @@
 
 ## 0. 本書の位置づけと SSOT 境界
 
-**3 リポジトリのうち frontend だけ構造の設計書が無い**状態を埋める。
-既にある規約の断片 ([../../templates/frontend-repo/CLAUDE.md.tmpl](../../templates/frontend-repo/CLAUDE.md.tmpl)
+**backend / frontend / infra のうち frontend だけ構造の設計書が無い**状態を埋める
+(リポジトリ構成は 2026-08-03 に app モノレポ + infra リポの 2 分割へ変わり、
+`frontend/` は app モノレポのサブツリーになった。構成は [architecture.md](architecture.md) §3.11)。
+既にある規約の断片 ([../../templates/app-monorepo/frontend/CLAUDE.md.tmpl](../../templates/app-monorepo/frontend/CLAUDE.md.tmpl)
 の 9 節) は**個々の禁止事項**を並べたもので、「どのディレクトリに何を置き、どちらからどちらへ依存してよいか」
 という構造が無い。本書はそこを決める。**雛形と矛盾させず、雛形の禁止事項を構造で実現する**関係にある。
 
@@ -22,7 +24,7 @@
 
 | 事項 | SSOT | 本書が書くこと |
 |---|---|---|
-| API の契約 (パス・形・エラー本文・SSE の有無・非同期ジョブ J-1〜J-7) | [API/README.md](API/README.md) と同ディレクトリ 6 ファイル | 契約を FE がどう消費するか (型の出所・SSE クライアント・エラー表示) |
+| API の契約 (パス・形・エラー本文・SSE の有無・非同期ジョブ J-1〜J-7) | [API/README.md](API/README.md) と同ディレクトリの各ドメインファイル (一覧は同 §3 の総覧) | 契約を FE がどう消費するか (型の出所・SSE クライアント・エラー表示) |
 | 認証・401/403/404 の判定・トークンの有効期間と失効 | [auth.md](auth.md) §6.1 / §6.6 / §6.9 | **ブラウザ側でトークンをどこに置くか**と、各コードで画面がどうなるか |
 | テスト方針 (段・FE の UT・E2E 5 本・self-skip 禁止) | [testing.md](testing.md) §4.2 / §7 | テストを可能にする**構造**(純粋関数の分離・依存方向)。テストの中身は書かない |
 | Vercel の環境・リリース順序・Production Branch | [operations.md](operations.md) §3.2 / §5.4 | FE 固有の環境変数の分類と、秘密を露出させない置き方 |
@@ -134,12 +136,12 @@ tsc の防御 (§5.3) が効かなくなる。
 | # | 論点 | 採用案 | 却下案と理由 |
 |---|---|---|---|
 | **FE-A** | ディレクトリ規約 | **v2 のトップレベル (V-1) を踏襲**し、`features/<domain>/` の内部を **`api/` `components/` `hooks/` `lib/` `types.ts` の固定 5 種**に定める (§3.1)。`app/` はルーティングと `page.tsx` / `layout.tsx` / `loading.tsx` / `error.tsx` のみを置き、**画面の実装は `features/` に置く** | (a) **PoC の平置き `lib/`** (P-1 / P-2): 47 ファイルが同階層に並び、API クライアントと純粋関数の境界が消えて依存方向を強制できない。(b) **`app/` に画面実装をコロケーションする**: ルーティングの都合 (ルートグループ・並行ルート) でファイルが移動するとテストと import が一斉に壊れる。v2 の 9 features はこの形を採らずに成立している。(c) **ドメイン層を切り出した完全な DDD 分割** (`domain/` `application/` `infrastructure/`): backend の 6 層と対称になるが、FE には**トランザクション境界も永続化も無い**ため層が空になり、`features/` との二重管理になる |
-| **FE-B** | 依存方向の機械強制 | **`eslint-plugin-import` の `import/no-restricted-paths` で zone を定義**し、`npm run lint` = CI ゲート (D-2) で落とす (§3.3 の L-F1〜L-F6) | (a) **規約文書に書くだけ**: 雛形 [CLAUDE.md.tmpl](../../templates/frontend-repo/CLAUDE.md.tmpl) は既に「純粋ロジックに React hook / JSX を持ち込まない (FE-5)」を禁止として書いているが、**それを検知する仕組みが無い** — v2 の eslint 設定にも依存方向のルールは 1 つも無い (V-17)。FE-5 は PoC で実際に起きたパターンであり、禁止の記述だけでは再発を防げない。(b) **`dependency-cruiser`**: 表現力は高いが CI 専用のツールが 1 つ増え、**エディタ上で違反が出ない**ため気付くのがコミット後になる。(c) **`eslint-plugin-boundaries`**: 宣言は読みやすいが v2 に前例が無く、`eslint-plugin-import` は他ルール (`import/order` 等) でも使うため導入コストが小さい方を採る |
+| **FE-B** | 依存方向の機械強制 | **`eslint-plugin-import` の `import/no-restricted-paths` で zone を定義**し、`npm run lint` = CI ゲート (D-2) で落とす (§3.3 の L-F1〜L-F6) | (a) **規約文書に書くだけ**: 雛形 [CLAUDE.md.tmpl](../../templates/app-monorepo/frontend/CLAUDE.md.tmpl) は既に「純粋ロジックに React hook / JSX を持ち込まない (FE-5)」を禁止として書いているが、**それを検知する仕組みが無い** — v2 の eslint 設定にも依存方向のルールは 1 つも無い (V-17)。FE-5 は PoC で実際に起きたパターンであり、禁止の記述だけでは再発を防げない。(b) **`dependency-cruiser`**: 表現力は高いが CI 専用のツールが 1 つ増え、**エディタ上で違反が出ない**ため気付くのがコミット後になる。(c) **`eslint-plugin-boundaries`**: 宣言は読みやすいが v2 に前例が無く、`eslint-plugin-import` は他ルール (`import/order` 等) でも使うため導入コストが小さい方を採る |
 | **FE-C** | サーバ状態の扱い | **既定は Server Component が orval の生成関数を直接呼ぶ** (v2 踏襲。V-3)。更新は **Server Action** + `revalidateTag`。**クライアント主導の再取得が必要な 2 経路だけを例外**にする: ①非同期ジョブの状態ポーリング ([API/README.md](API/README.md) J-6 / J-7) ②会話ターンの SSE。この 2 つは **`features/<domain>/hooks/` の専用フックが持ち、キャッシュライブラリを使わない** | (a) **TanStack Query / SWR を全面導入**: v2 に前例が無く (V-4)、**RSC のキャッシュと二重のキャッシュ層**になる。さらに SSE と長時間ジョブは Query のモデル (キー + fetcher + 再検証) に載らないため、結局例外実装が要る。(b) **v2 の zustand store 方式をストリーミング以外にも広げる** (V-4): サーバ状態のコピーがクライアントに増え、更新後の同期が手動になる。(c) **例外を認めず全てを RSC の再検証で回す**: ジョブの進捗は数秒間隔で変わるため、ページ全体の再検証はコストが合わない |
 | **FE-C'** | クライアント状態の置き場 | **3 分類に固定する** (§4.2): ①**URL に置く** (一覧の絞り込み・ソート・ページ・選択タブ) = **nuqs** (v2 に既存。V-5) ②**画面ローカルの複合状態** (会話ターン・ジョブ進捗・ウィザード) = **`useReducer` + 純粋 reducer** ③**画面を跨いで共有する一時状態のみ zustand**。**②を zustand に置かない** | (a) **v2 の形 (ストリーミング状態を zustand の global store に置く。V-4 の 4 store)**: 会話は「履歴 GET で復元 + 再接続」が仕様 ([design_memo.md](design_memo.md):169) なので、**global store と履歴 API が同じ状態の 2 つのソースになる**。加えて store をまたぐテストは reducer 単体テストより書きにくい (FE-4)。(b) **すべて `useState` で持つ**: 会話ターンは「本文追記 + ツール状態 + オプション + 中断」の複合状態で、`useState` の分割は更新順序のバグを生む。(c) **絞り込み状態を React state に持つ**: 再読込・共有・戻る操作で消える (v2 が nuqs を入れた理由と同じ) |
 | **FE-D** | **トークンの保持と BE の呼び出し経路** | **BE の JWT は next-auth の HttpOnly セッション Cookie 内にのみ置き、ブラウザの JS から触れない**。BE への呼び出しは**すべてサーバ側** (Server Component / Server Action / **Route Handler**) から行い `X-Token` を付ける。**SSE も Next.js の Route Handler で中継する** (§6.3)。**`X-Admin-Token` は送らない** | (a) **v2 方式 (ブラウザに JWT を渡して BE を直接叩く。V-12)**: XSS 1 件で**有効期間 7 日・リフレッシュなし**のトークンが漏れる ([auth.md](auth.md) §6.9)。失効手段は**手動ロック API のみ**で、漏洩に気付いてから人が操作するまで有効。加えてブラウザ直叩きは **Vercel の Preview URL が変動するため BE の CORS 許可リストを維持できない** ([operations.md](operations.md) §3.2 の確認事項 / v2 の許可リストはハードコード — [API/README.md](API/README.md) F-14)。(b) **`localStorage` に保持**: (a) より悪く、Cookie の `HttpOnly` すら失う。(c) **BE に FE 専用の Cookie 認証を新設**: [auth.md](auth.md) §6.1 が `X-Token` 踏襲を決めており、BE 側の逸脱を FE の都合で作ることになる。(d) **BE が SSE 用の短命チケットを発行し、ブラウザが直接 SSE を張る**: 中継のホップが消える利点はあるが、**(a) で却下した CORS の問題 (Preview URL の可変オリジン) をそのまま再現する** — (d) は「(a) より漏洩耐性の高い資格情報を使う案」であって CORS を解く案ではない。加えて BE の新規 API (チケット発行) と失効管理が増える。**FE-Q2 (Vercel で 5 分の中継ができるか) が不成立だった場合の唯一の代替**として §16.1 に骨子を残すが、**成立条件 (許可オリジンの決め方) が未解決であり、採否はユーザー決定を要する** |
 | **FE-D'** | **社内管理者経路 (サインイン / MFA 登録・検証 / MFA リセット / ロック解除) の置き場とトークン系統** | **同一 FE リポ・同一 Next.js アプリの別ルートグループ `(admin)`** に置く (§11.3)。**next-auth のインスタンスとセッション Cookie を一般ユーザー系と分ける** (`app/api/admin-auth/[...nextauth]`・Cookie 名を別にする)。**`X-Admin-Token` を付けるのは `lib/api/admin-mutator.ts` の 1 ファイルのみ**とし、一般ユーザー系の mutator には付けない (§5.2) | (a) **v2 と同じ「1 つの next-auth に provider を並べる」形 (V-19)**: セッションに入っているのが一般ユーザーのトークンか管理者トークンか**区別できず、両ヘッダに同じ値を送る以外の実装が無くなる** (V-20 = V-7 の原因)。加えて Cookie が 1 つなので**管理者作業中に一般ユーザーとしてサインインすると管理者セッションが消える** (逆も同じ)。(b) **別 Vercel プロジェクト (別アプリ) に切り出す**: 分離は最も強いが、①`components/` とデザイントークンを 2 箇所で二重管理する ②本増分の管理者機能は 4 つだけ ([auth.md](auth.md) §6.2) ③Vercel プロジェクトが増えて [operations.md](operations.md) §3.2 の環境対応表と Production Branch 運用が二重になる。**管理者機能が増える増分 (利用状況閲覧・会社管理 = auth.md §6.2 で対象外) で再検討する**。(c) **UI を作らず運用手順で API を直叩きする**: [auth.md](auth.md) §6.2 の却下 (a) が「本番で SQL を手打ちする運用を常設の回復手段にしない」と決めた理由がそのまま当てはまる。TOTP 登録 (QR コード表示) を CLI で行うのも現実的でない。(d) **`(app)` グループに置きロールで出し分ける**: 管理者は `admin_accounts` であり `accounts` ではない。認証系統・トークン・レイアウトのいずれも共有できない ([auth.md](auth.md) §6.7 の 4 系統) |
-| **FE-E** | 型の唯一のソース | **orval 生成物 (`src/generated/`) が唯一の API 型**。入力は **backend リポにコミットされた `swagger.json`** (D-API-13)。**手書きの API 型を作らない**。生成物は**コミットし、CI で再生成差分を検査**する (雛形 [ci.yml](../../templates/frontend-repo/.github/workflows/ci.yml):41-49 が既にこの形) | (a) **v2 方式 (稼働サーバ URL を入力。V-6)**: BE をローカル起動しないと型を更新できず、**CI が型ズレを検知できない** (D-API-13 で既に却下済み)。(b) **`openapi-typescript` に替える**: v2 は orval に加えて `openapi-typescript` も依存に持つが、生成関数 (fetch ラッパ) と **MSW ハンドラ**を得られるのは orval 側で、[testing.md](testing.md) T-O が MSW ハンドラの生成を前提にしている。(c) **backend リポを git submodule にする**: FE の `npm ci` に BE の取得が要り、Vercel のビルドが BE リポの権限に依存する |
+| **FE-E** | 型の唯一のソース | **orval 生成物 (`src/generated/`) が唯一の API 型**。入力は **同一リポジトリの `api/` にコミットされた OpenAPI 定義** (D-API-13。**2026-08-03 のモノレポ化で「別リポからの取得」が不要になった**)。**手書きの API 型を作らない**。生成物は**コミットし、CI で再生成差分を検査**する (雛形 [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `contract` ジョブ が既にこの形) | (a) **v2 方式 (稼働サーバ URL を入力。V-6)**: BE をローカル起動しないと型を更新できず、**CI が型ズレを検知できない** (D-API-13 で既に却下済み)。(b) **`openapi-typescript` に替える**: v2 は orval に加えて `openapi-typescript` も依存に持つが、生成関数 (fetch ラッパ) と **MSW ハンドラ**を得られるのは orval 側で、[testing.md](testing.md) T-O が MSW ハンドラの生成を前提にしている。(c) **backend リポを git submodule にする**: 3 リポ構成での案。FE の `npm ci` に BE の取得が要り、Vercel のビルドが BE リポの権限に依存する。**モノレポ化により検討不要になった** |
 | **FE-E'** | **snake_case の扱い (FE-2)** | **変換しない**。BE の JSON キーは snake_case ([API/README.md](API/README.md) D-API-4) で、**生成型のまま使う**。表示のために別の形が必要な場合のみ、`features/<domain>/lib/` に **ViewModel 型と一方向の変換関数 (生成型 → ViewModel)** を置き、テストを併置する | (a) **API 境界で全レスポンスを camelCase に自動変換**: 変換器が**第 2 のスキーマ**になり、BE のフィールド追加が黙って落ちる (BE-12 の FE 版。PoC の手書きマッパー `claude_managed_agents/frontend/src/lib/conversation-api.ts` がこの形)。(b) **orval の命名変換で camelCase の型を生成する**: 生成型と実際の JSON キーが食い違い、**SSE の payload (生成型を通る経路と通らない経路が混在する) と MSW ハンドラで不整合**が出る。(c) **ViewModel を作らず生成型を全コンポーネントに流す**: 表示都合の整形がコンポーネントに散り、FE-6 のようなパースがテスト対象外の場所に生まれる |
 | **FE-F** | SSE クライアント | **共通クライアント 1 本** (`src/lib/sse/`) に集約する。仕様は §6.2 (ブロック分割・`event:` 名・空行を本文として通す・discriminated union への振り分け・`AbortError` は正常系・無通信タイムアウト・履歴 GET からの復元) | (a) **v2 の per-feature 実装** (V-9 の 7 ファイル): 共通化の未対応コメントが残ったまま複製が増えた実例そのもの。1 箇所の修正が他 6 箇所に伝播しない。(b) **`EventSource` を使う**: **ヘッダを付けられず POST もできない** — `X-Token` / `X-Request-Id` を送れないため FE-D と両立しない。(c) **PoC の `parseSSEBlock` をそのまま流用**: 各 `data:` 行を `.trim()` するため本文のインデントが壊れ (P-4)、`data:` 0 本のブロックを `null` にするため `event:` のみのイベントを表現できない |
 | **FE-G** | デザイントークン | **Tailwind の `theme.extend` を唯一の定義場所**にし、**意味ベースの名前**に作り直す (§7.1)。**hex リテラル・任意値 (`w-[13px]`)・トークン外のクラス新規追加を lint で禁止**する (§7.2) | (a) **v2 の命名を踏襲** (V-15 の `blue.10`〜`blue.90`): 名前が意味を持たないため実装者が既存例を探して判断することになり、結果として**トークン外の手書き CSS が積む** (V-16 が実例)。(b) **PoC の TS 定数 + inline style** (P-6): Tailwind と二重管理になり lint で強制できない。**強制が無いと hex 直書きに戻る**ことを PoC のコメントが記録している。(c) **shadcn/ui の既定トークンのみ**: 中立的だが、プロトタイプが持つ配色・角丸・余白の体系を表現できず、実装時に任意値が増える |
@@ -227,7 +229,7 @@ components/ ──────────► lib/  ◄────────�
 `eslint-plugin-import` の `import/no-restricted-paths` で宣言し、`npm run lint` (CI ゲート) で落とす。
 **「気をつける」に落とさない** — v2 は雛形と同じ禁止事項を文書に持ちながら FE-5 が起きた (V-17)。
 
-**実体**: 雛形の [.eslintrc.json.tmpl](../../templates/frontend-repo/.eslintrc.json.tmpl) に
+**実体**: 雛形の [.eslintrc.json.tmpl](../../templates/app-monorepo/frontend/.eslintrc.json.tmpl) に
 2026-07-30 に追加された (`:55`〜 が L-F2 / L-F3 / L-F6 の zone、その後の overrides が
 L-F1 / L-F4 / L-F5)。**未充足の 1 件と、実装リポで詰める必要がある 2 件は §16.2-1 の表**に挙げる。
 
@@ -307,22 +309,24 @@ reducer に閉じれば「復元 = 初期 state の再計算」で一意に決�
 ### 5.1 型の流れ (FE-E)
 
 ```
-backend リポ: swaggo アノテーション → docs/swagger.json (コミット済み。D-API-13)
+backend/: swaggo アノテーション → api/openapi.yaml (コミット済み・生成物。D-API-13)
                     │  CI / 開発者が取得
                     ▼
-frontend リポ: npm run generate (orval)
+frontend/: npm run generate (orval)。入力は ../api/openapi.yaml
                     ├─► src/generated/models/**      スキーマ型
                     ├─► src/generated/<tag>/*.ts     fetch 関数 + URL ヘルパ
                     └─► src/generated/msw/**         MSW ハンドラ (testing.md T-O)
 ```
 
-- **`swagger.json` の取得方法**: backend リポの**リリース成果物 (GitHub Actions の artifact) または
+- **`swagger.json` の取得方法 (FE-Q3。2026-08-03 に解消)**: **モノレポ化により同一リポジトリ内の
+  `api/openapi.yaml` を直接読む**ため、取得手段の検討そのものが不要になった (§16 の FE-Q3 参照)。
+  **旧 3 リポ構成での検討 (記録)**: backend リポの**リリース成果物 (GitHub Actions の artifact) または
   リポジトリの raw ファイル**を CI と開発者が取得する。**private リポジトリの取得にトークンが要る**ため、
-  その扱いは §16 の要確認 (FE-Q3。[testing.md](testing.md) §7.4 の `E2E_DISPATCH_TOKEN` と同型の論点)
+  `E2E_DISPATCH_TOKEN` と同型の論点になっていた
 - **CI で `npm run generate` を実行し差分ゼロを検査する** (雛形
-  [ci.yml](../../templates/frontend-repo/.github/workflows/ci.yml):41-49 が既にこの形)
+  [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `contract` ジョブ が既にこの形)
 - **生成物は手編集しない**。pre-commit が生成物の変更を警告する
-  ([pre-commit](../../templates/frontend-repo/scripts/hooks/pre-commit):39-46 に既にある)
+  ([pre-commit](../../templates/app-monorepo/scripts/hooks/pre-commit) の「生成型の手編集検出」ブロック に既にある)
 
 ### 5.2 mutator (`src/lib/api/mutator.ts`) の責務
 
@@ -346,7 +350,7 @@ v2 の `apiClient` (V-7) を置き換える。**サーバ側でのみ動く**前
 
 - **`X-Admin-Token` を付ける実装は本ファイル 1 つに限る**。セッションの取得元も
   管理者用 next-auth (`api/admin-auth`) 側であり、一般ユーザーのセッションを読まない
-- **機械検査 (2026-07-30 に雛形へ実装済み — eslint の `no-restricted-syntax` で `admin-mutator.ts` 以外を禁止。[.eslintrc.json.tmpl](../../templates/frontend-repo/.eslintrc.json.tmpl):163〜220)**: `grep -rn "X-Admin-Token" src` の結果が
+- **機械検査 (2026-07-30 に雛形へ実装済み — eslint の `no-restricted-syntax` で `admin-mutator.ts` 以外を禁止。[.eslintrc.json.tmpl](../../templates/app-monorepo/frontend/.eslintrc.json.tmpl):163〜220)**: `grep -rn "X-Admin-Token" src` の結果が
   `src/lib/api/admin-mutator.ts` 以外に無いことを CI で確認する。
   **v2 の V-7 (両ヘッダに同一値) は「どこからでも付けられた」ことで起きた**ため、
   規約ではなく検査で局所化する
@@ -384,7 +388,7 @@ FE がロールを知る必要があるため、**出所を 1 箇所に固定す
 
 - **破棄経路は `app/api/logout/route.ts` の 1 本だけ**にする。`GET /api/logout?next=<元の URL>` が
   ①next-auth のセッション Cookie を削除 (`cookies().delete()`) ②`/login?next=…` へ 303 で送る
-- **すべての 401 が破棄経路に入るわけではない (2026-07-31 のレビュー M-1)**: 破棄するのは
+- **すべての 401 が破棄経路に入るわけではない (2026-07-31 のレビュー 重大 1)**: 破棄するのは
   **`code` が `AU-T-` で始まる 401 と、本文なし・未知のコード**だけ (§9 の分類 T)。
   **`AU-C-` で始まる 401 (サインイン・MFA コードの不一致) はセッションを破棄せず、フォーム内エラーにする**。
   値域の SSOT は [API/auth-accounts.md](API/auth-accounts.md) §3.1.1。
@@ -421,7 +425,7 @@ FE がロールを知る必要があるため、**出所を 1 箇所に固定す
 
 - 一覧の `scope` は **生成型の enum (`mine` / `contract`)** としてしか送れない
   ([API/README.md](API/README.md) D-API-8)。**FE に `account_id` を送る経路を作らない**
-- **増分 1 では `scope` の UI を出さない** (`contract` は BE が 400 で拒否する — D-API-8')。
+- **`scope` の UI は増分 1 から出す** (2026-08-02 改訂。旧記述は「増分 1 では出さない — BE が 400 で拒否する」だったが、**D-API-8' が C-16 の適用で `scope=contract` を増分 1 から有効にした**ため成立しない。共有の切り替え UI も同じ増分に出す = BE-10)。
   共有・可視性の UI は**増分 2 で追加**する (A-7)
 - 所有者の判定・絞り込みは **すべて BE**。FE は「返ってきたものを表示する」だけで、
   **FE 側に可視性の判定ロジックを持たない** (雛形 CLAUDE.md.tmpl のフィーチャーフラグ規約と同じ立場)
@@ -470,12 +474,13 @@ backend (SSE)
 | S-7 | **バッファに残った不完全なブロックは次の chunk まで保持する**。ストリーム終了時に残っていたら**不完全終了として扱う** (§6.4 の失敗表示) | v2 は末尾の不完全行をバッファに残すが、終了時の残骸を無視する |
 | S-8 | イベント型への振り分けは **生成型の discriminated union** (`event` フィールド) で行う。**手書きの `StreamResponse` 型を作らない** | v2 は手書き型と生成型が並存 (V-10) |
 
-| S-9 | **型が未定義の経路 (会話。FE-Q1) では `{ event: string; data: unknown }` 固定で扱う**。`unknown` を具体型に narrow するのは **`lib/sse/decode-event.ts` の 1 ファイルだけ**。他の場所 (hooks / reducer / components) は `unknown` を受け取らない = **decode を通っていない値がそこまで来ない** | 新規 (歯止め) |
+| S-9 | **型が未定義の経路では `{ event: string; data: unknown }` 固定で扱う**。`unknown` を具体型に narrow するのは **`lib/sse/decode-event.ts` の 1 ファイルだけ**。他の場所 (hooks / reducer / components) は `unknown` を受け取らない = **decode を通っていない値がそこまで来ない**。**2026-08-01 時点で該当する経路は無い** — 唯一の対象だった会話は [API/conversation.md](API/conversation.md) §5 で型が確定した。**規約自体は残す** (今後型未定義の SSE 経路を足したときの既定) | 新規 (歯止め) |
 
 **S-8 の前提**: SSE イベント型は OpenAPI の `components/schemas` に discriminated union で定義される
 ([design_memo.md](design_memo.md):149 の決定 / [API/README.md](API/README.md) D-API-12)。
-**その定義が無い経路 (会話型アイデア創出は API 設計が未着手)** については、
-**イベント型が確定するまで FE の実装に着手しない** — 手書き型で先行すると V-10 と同じドリフトになる (§16 の FE-Q1)。
+**会話型アイデア創出のイベント型は 2026-08-01 に確定した** ([API/conversation.md](API/conversation.md) §5) —
+**S-9 の `unknown` 固定を解除してよい唯一の経路**であり、他に型未定義の SSE 経路は残っていない。
+**新たに型未定義の SSE 経路を作る場合は、S-9 を再び適用する** (手書き型で先行すると V-10 と同じドリフトになる)。
 
 **S-9 が必要な理由 (暫定既定の歯止め)**: FE-Q1 の暫定既定は「汎用形で先に作り、
 型の確定後に decode 層だけ差し替える」だが、**payload の型を決めておかないと実装者が
@@ -485,7 +490,7 @@ backend (SSE)
 1. 汎用形の payload の型は **`unknown` 固定**。`interface ConversationEvent { … }` のような
    **暫定の構造体を書かない**
 2. `JSON.parse` の戻り値に**型アサーション (`as`) を書かない** (雛形の eslint が `as` を禁止している —
-   [.eslintrc.json.tmpl](../../templates/frontend-repo/.eslintrc.json.tmpl):28-30)。
+   [.eslintrc.json.tmpl](../../templates/app-monorepo/frontend/.eslintrc.json.tmpl):28-30)。
    narrow は `decode-event.ts` 内の型ガード関数で行う
 3. **`decode-event.ts` に会話用の分岐を書くのは、OpenAPI に union が入った後**。
    それまでは「未知イベント」(S-6) として上位に渡し、画面は本文の追記だけを行う
@@ -500,7 +505,10 @@ backend (SSE)
 |---|---|---|---|---|
 | `GET /asset-extractions/{extraction_id}/stream` ([API/assets.md](API/assets.md) §2) | **GET** | `app/api/stream/asset-extractions/[extractionId]/route.ts` | `/assets/extractions/[extractionId]` | 1 |
 | `POST /knowledge-threads/{thread_id}/messages` ([API/knowledge.md](API/knowledge.md) §2) | **POST** | `app/api/stream/knowledge-threads/[threadId]/messages/route.ts` | `/knowledge/[threadId]` | 1 |
-| 会話ターン (パス未定) | 未定 | 未定 | `/themes/[themeId]/conversations/[conversationId]` | 1 (**FE-Q1 待ち**) |
+| `POST /conversations/{session_id}/messages` ([API/conversation.md](API/conversation.md) §1) | **POST** | `app/api/stream/conversations/[sessionId]/messages/route.ts` | `/themes/[themeId]/conversations/[conversationId]` | 1 |
+| `POST /plans/{plan_id}/generate` ([API/plans.md](API/plans.md) §1) — 8 タブの一括生成 | **POST** | `app/api/stream/plans/[planId]/generate/route.ts` | 企画書ビュー (§11.1) | 1 |
+| `POST /plans/{plan_id}/tabs/{tab_id}/regenerate` ([API/plans.md](API/plans.md) §1) — タブの再生成 | **POST** | `app/api/stream/plans/[planId]/tabs/[tabId]/regenerate/route.ts` | 企画書ビュー (§11.1) | 1 |
+| `POST /plans/{plan_id}/chat/messages` ([API/plans.md](API/plans.md) §1) — 企画書チャット | **POST** | `app/api/stream/plans/[planId]/chat/messages/route.ts` | 企画書ビュー (§11.1) | 1 |
 
 - **SSE 以外を中継しない**。通常の API は Server Component / Server Action が
   生成関数を直接呼ぶ (§5.1) ため、中継の必要が無い。
@@ -596,11 +604,11 @@ backend (SSE)
 
 | 検査 | 手段 | 雛形の実体 (2026-07-30) | 落ちる例 |
 |---|---|---|---|
-| 任意値の禁止 | `eslint-plugin-tailwindcss` の `no-arbitrary-value` | 実装済み: [.eslintrc.json.tmpl](../../templates/frontend-repo/.eslintrc.json.tmpl) の `tailwindcss/no-arbitrary-value` (2026-07-30) | `w-[13px]` / `text-[#0455c5]` |
-| トークン外クラスの禁止 | 同 `no-custom-classname` | **実装済み** (2026-07-30): [.eslintrc.json.tmpl](../../templates/frontend-repo/.eslintrc.json.tmpl):30〜33 | `status-message-shimmer` (v2 の V-16 のような手書きクラス) |
-| **hex リテラルの禁止** | `no-restricted-syntax` の **AST セレクタ** `Literal[value=/^#[0-9a-fA-F]{3,8}$/]` (**正規表現単体では指定できない** — ESLint の同ルールはセレクタを取る)。例外は `src/styles/**` と `tailwind.config.ts` のみ | 実装済み: [.eslintrc.json.tmpl](../../templates/frontend-repo/.eslintrc.json.tmpl):46〜 | `style={{ color: '#B34A00' }}` (PoC の P-6 が戻った形) |
+| 任意値の禁止 | `eslint-plugin-tailwindcss` の `no-arbitrary-value` | 実装済み: [.eslintrc.json.tmpl](../../templates/app-monorepo/frontend/.eslintrc.json.tmpl) の `tailwindcss/no-arbitrary-value` (2026-07-30) | `w-[13px]` / `text-[#0455c5]` |
+| トークン外クラスの禁止 | 同 `no-custom-classname` | **実装済み** (2026-07-30): [.eslintrc.json.tmpl](../../templates/app-monorepo/frontend/.eslintrc.json.tmpl):30〜33 | `status-message-shimmer` (v2 の V-16 のような手書きクラス) |
+| **hex リテラルの禁止** | `no-restricted-syntax` の **AST セレクタ** `Literal[value=/^#[0-9a-fA-F]{3,8}$/]` (**正規表現単体では指定できない** — ESLint の同ルールはセレクタを取る)。例外は `src/styles/**` と `tailwind.config.ts` のみ | 実装済み: [.eslintrc.json.tmpl](../../templates/app-monorepo/frontend/.eslintrc.json.tmpl):46〜 | `style={{ color: '#B34A00' }}` (PoC の P-6 が戻った形) |
 | **`style` 属性の禁止** | `no-restricted-syntax` の `JSXAttribute[name.name='style']`。例外は**計算値が必要な箇所のみ** ESLint の行コメントで明示 | 実装済み: 同 `:50`〜 | 動的でない inline style |
-| **`globals.css` の増加検知** | CI で `src/styles/globals.css` の行数増加を PR に表示する (**ブロックはしない**) | 実装済み: [ci.yml](../../templates/frontend-repo/.github/workflows/ci.yml):119-129 | トークンで表現できずに CSS を足した箇所をレビューの対象にする |
+| **`globals.css` の増加検知** | CI で `src/styles/globals.css` の行数増加を PR に表示する (**ブロックはしない**) | 実装済み: [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `frontend` ジョブの「検査 4 globals.css の行数」ステップ | トークンで表現できずに CSS を足した箇所をレビューの対象にする |
 
 **`style` 属性の禁止に `react/forbid-dom-props` を使わない理由**: 同ルールのためだけに
 プラグインを 1 つ増やすことになり、hex 禁止と同じ `no-restricted-syntax` に並べれば
@@ -636,13 +644,13 @@ backend (SSE)
 - **存在検査**: `src/lib/parse/**/*.ts` と `features/*/lib/**/*.ts` に**同名の `*.test.ts` が無ければ CI で落とす**
   (`index.ts` と型のみのファイルは除外)。[testing.md](testing.md) §10 の
   「必須テストの存在検査を機械強制する」方針の FE 版として実装する。
-  **実体**: [ci.yml](../../templates/frontend-repo/.github/workflows/ci.yml):58-72 (2026-07-30 に追加)
+  **実体**: [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `frontend` ジョブの「検査 1 併置テストの存在」ステップ (2026-07-30 に追加)
 - **[testing.md](testing.md) §10 への登録は完了済み** (2026-07-30 に同節が **6 種**へ拡張され本検査が
   **#6** として登録された。2026-07-31 に I 段の `t.Skip` 禁止が **#7** として加わり現在は **7 種**)。
   当初この検査は同節の 5 種 (AC-ID / X-1・X-2 / tool の A-1' / `entity/` のレンジ入力 / F-1〜F-5 —
   いずれも backend) に含まれておらず、**D-2 の SSOT が [testing.md](testing.md) §9 / §10 である**ため
   §16.2-1 の是正要求として登録を求めていた。**要求は解消済み**で、
-  「frontend リポの CI にだけ存在する、SSOT の外の検査」ではなくなっている
+  「`frontend` ジョブにだけ存在する、SSOT の外の検査」ではなくなっている
 - **L-F1** (`react` / `next` の import 禁止) が FE-5 を、**export + 併置テスト**が FE-4 を潰す
 - **テストの必須ケースは [testing.md](testing.md) §4.2 が SSOT** (レンジ誤抽出・空・欠損・想定外形式)。
   本書では再定義しない
@@ -661,7 +669,7 @@ backend (SSE)
 | ステータス | 画面の振る舞い | 文言 | 補足 |
 |---|---|---|---|
 | **401 / 分類 T** (`code` が **`AU-T-` で始まる**、**または本文が無い・未知のコード**) | **`/api/logout?next=<元の URL>` へリダイレクトする** — セッション破棄は**この 1 経路だけ**が行い、その後 `/login?next=…` へ送る (**手段と経路は §5.2.3**)。トーストは出さない | 固定文言 (「再度サインインしてください」) | トークン自体の失効 (署名不正 / 期限切れ / アカウント不存在 / ロック / MFA ゲート)。**理由は区別しない** — [auth.md](auth.md) §6.9 のロック可視化はメンバー一覧側の仕事。**未知のコードと本文なしをここに寄せるのは fail-safe** (判定できないものを破棄側に倒す) |
-| **401 / 分類 C** (`code` が **`AU-C-` で始まる**) | **セッションを破棄しない**。**フォーム内のエラーとして表示**し、画面に留まる (再入力できる状態を保つ) | BE の `message` | **2026-07-31 のレビュー M-1 で追加**。リクエストボディで提示した資格情報の不一致 (サインイン / MFA コード)。**この分岐が無いと TOTP の打ち間違い 1 回で強制サインアウトになる** (レート制限と重なると正規ユーザーが自分をロックアウトする)。**`/login` では `AU-C-00002` (ロック) を受けたら「管理者に解除を依頼してください」と案内する** — パスワードリセットではロックが外れないため ([auth-accounts.md](API/auth-accounts.md) §3.4) |
+| **401 / 分類 C** (`code` が **`AU-C-` で始まる**) | **セッションを破棄しない**。**フォーム内のエラーとして表示**し、画面に留まる (再入力できる状態を保つ) | BE の `message` | **2026-07-31 のレビュー 重大 1 で追加**。リクエストボディで提示した資格情報の不一致 (サインイン / MFA コード)。**この分岐が無いと TOTP の打ち間違い 1 回で強制サインアウトになる** (レート制限と重なると正規ユーザーが自分をロックアウトする)。**`/login` では `AU-C-00002` (ロック) を受けたら「管理者に解除を依頼してください」と案内する** — パスワードリセットではロックが外れないため ([auth-accounts.md](API/auth-accounts.md) §3.4) |
 
 **401 の分岐は「コードの接頭辞」だけで行う (経路で分岐しない)**: 判定規則は 3 行 —
 `AU-T-` → 破棄 / `AU-C-` → フォーム内 / **それ以外 (本文なし・未知・ALB 由来) → 破棄 (分類 T の扱い)**。
@@ -756,14 +764,14 @@ type StreamState =
 | `/` → `/themes` | `(app)` | **ホーム = テーマ管理** (一覧・統計 4 指標 = テーマ / アイデア / 企画書 / ナレッジ件数 — [themes.md](API/themes.md) TH-Q6 で確定) | [themes.md](API/themes.md) `GET /themes` `GET /themes/stats` | **[API]**。プロトタイプもホーム = テーマ管理 (`hassan_agent_prototype_v2.html:6648-6649`。ナビ上のラベルは「テーマ」— `:6636`) | 1 |
 | `/themes/[themeId]` | `(app)` | テーマ詳細 | `GET /themes/{theme_id}` | **[API]** | 1 |
 | `/themes/[themeId]/members` | `(app)` | テーマのメンバー共有 | `GET/PUT /themes/{theme_id}/members` `PUT …/visibility` | **[API]** (増分 2。**増分 1 では導線を出さない** — §5.4 / A-7) | 2 |
-| `/themes/[themeId]/conversations/[conversationId]` | `(app)` | **アイデア発散 (会話)** | 会話 API | **[未確定]** — [API/README.md](API/README.md) の**対象外**。SSE イベント型が未定のため実装着手不可 (§16 FE-Q1) | 1 |
+| `/themes/[themeId]/conversations/[conversationId]` | `(app)` | **アイデア発散 (会話)** | [API/conversation.md](API/conversation.md) §1 の 7 本 (ターンは SSE — §6.3.1 の中継表) | **[API]** (2026-08-01 に FE-Q1 クローズ。実装着手可) | 1 |
 | `/knowledge` | `(app)` | ナレッジ (スレッド一覧) | `GET /knowledge-threads` | **[API]** | 1 |
 | `/knowledge/[threadId]` | `(app)` | ナレッジ チャット (**SSE**) | `GET/POST /knowledge-threads/{thread_id}/messages` | **[API]** | 1 |
 | `/knowledge/files` | `(app)` | ナレッジ ファイル管理 (アップロード・一括削除) | `/knowledge-files` 系 5 本 | **[API]** | 1 |
 | `/idea-boards` | `(app)` | アイデアボード 一覧 | `GET /idea-boards` | **[API]** | 1 |
 | `/idea-boards/[boardId]` | `(app)` | ボード詳細 (フェーズ別カンバン・コメント) | `/idea-boards/{board_id}/items` 系 | **[API]** (ロール別の 403 は §9) | 1 |
 | `/idea-boards/phases` | `(app)` | フェーズマスタ管理 | `/idea-board-phases` 系 4 本 | **[API]** | 1 |
-| `/ideas` | `(app)` | アイデア一覧 (参照専用・スター) + **CSV エクスポートボタン** (2026-08-01 に R-12 で追加 — v2 は発散画面に置いていたが、v3 は一覧の絞り込み結果を出す形のため本画面に置く) | `GET /ideas` `PUT /ideas/{idea_id}/star` `GET /ideas/csv` ([API/idea-boards.md](API/idea-boards.md) §2.4) | **[API]** | 1 |
+| `/ideas` | `(app)` | アイデア一覧 (参照・スター・**本文/タグ編集・削除・手動登録**) + **CSV エクスポートボタン** (2026-08-01 に R-12 で追加 — v2 は発散画面に置いていたが、v3 は一覧の絞り込み結果を出す形のため本画面に置く) | [API/ideas.md](API/ideas.md) §1 の 13 本 (**2026-08-02 に `idea-boards.md` §7 から移設**) | **[API]** | 1 |
 | `/ideas/[ideaId]` | `(app)` | アイデア詳細 | `GET /ideas/{idea_id}` | **[API]** | 1 |
 | `/assets` | `(app)` | アセット一覧 + フォルダツリー | `/assets` `/asset-folders` 系 | **[API]** | 1 |
 | `/assets/[assetId]` | `(app)` | アセット詳細 (スペック・機能ツリー・添付) | `/assets/{asset_id}` 系 | **[API]** | 1 |
@@ -771,7 +779,7 @@ type StreamState =
 | `/news` | `(app)` | お知らせ 一覧 (未読バッジ) | `/news` 系 5 本 | **[API]** | 1 |
 | `/news/[newsId]` | `(app)` | お知らせ 詳細 | `GET /news/{news_id}` | **[API]** | 1 |
 | `/settings` | `(app)` | 設定 (通知) | `/settings/notifications` | **[API]** | 1 |
-| **`/settings/profile`** | `(app)` | **自分のアカウント設定** — 氏名・所属・役割 / アイコン (アップロード・削除) / メールアドレス変更 (現在パスワード確認) / パスワード変更 / **MFA (TOTP) の再登録**。**2026-07-31 のレビュー M-3 で追加** — [auth-accounts.md](API/auth-accounts.md) §2.3.1 の 6 本に消費者となる画面が本表に無く、v2 で提供していた機能 (`hassan-v2-backend/router/router.go:66`, `:69`, `:71`-`:74`, `:233`) が v3 で使えなくなる状態だった | [auth-accounts.md](API/auth-accounts.md) `PUT /accounts/me` / `PUT /accounts/me/email` / `PUT /accounts/me/password` / `POST`・`DELETE /accounts/me/icon` / `POST /mfa/totp/reset` | **[API]** ([auth-accounts.md](API/auth-accounts.md) §2.3.1)。**メール変更・パスワード変更・MFA 再登録の「現在の資格情報が違う」は 400** (同書 AA-D-17。`old_password` / `password` / `totp_code` という**フィールドに紐づく**エラーのため) — **401 ではないのでサインアウト経路に入らない**。§9 の 400 行どおりフィールドエラーとして表示する | 1 |
+| **`/settings/profile`** | `(app)` | **自分のアカウント設定** — 氏名・所属・役割 / アイコン (アップロード・削除) / メールアドレス変更 (現在パスワード確認) / パスワード変更 / **MFA (TOTP) の再登録**。**2026-07-31 のレビュー 重大 3 で追加** — [auth-accounts.md](API/auth-accounts.md) §2.3.1 の 6 本に消費者となる画面が本表に無く、v2 で提供していた機能 (`hassan-v2-backend/router/router.go:66`, `:69`, `:71`-`:74`, `:233`) が v3 で使えなくなる状態だった | [auth-accounts.md](API/auth-accounts.md) `PUT /accounts/me` / `PUT /accounts/me/email` / `PUT /accounts/me/password` / `POST`・`DELETE /accounts/me/icon` / `POST /mfa/totp/reset` | **[API]** ([auth-accounts.md](API/auth-accounts.md) §2.3.1)。**メール変更・パスワード変更・MFA 再登録の「現在の資格情報が違う」は 400** (同書 AA-D-17。`old_password` / `password` / `totp_code` という**フィールドに紐づく**エラーのため) — **401 ではないのでサインアウト経路に入らない**。§9 の 400 行どおりフィールドエラーとして表示する | 1 |
 | `/settings/workspace` | `(app)` | ワークスペース設定 = アセット可視性の既定 (**契約内管理者のみ**) | `GET/PUT /settings/workspace` | **[API]** (R-1。403)。**ST-Q8 により増分 2 へ後ろ倒し** | **2** |
 | `/settings/usage` | `(app)` | 利用量集計 — 月 × メンバー × 活動種別のクロス集計 + CSV (**契約内管理者のみ**) | `GET /usage-summary` | **[API]** (R-1。403)。形は ST-Q9 で確定 | 1 |
 | `/settings/activity-logs` | `(app)` | 活動ログ (**契約内管理者のみ**) | `GET /activity-logs` | **[API]** (R-1。403) | 1 |
@@ -781,6 +789,12 @@ type StreamState =
 | **`/admin/mfa`** | `(admin)` | **社内管理者の TOTP 検証** | [auth-accounts.md](API/auth-accounts.md) §2.4.1 の管理者 TOTP 検証 | **[API]**。**コード不一致の 401 はフォーム内エラー** (§9 の②) | 1 |
 | **`/admin/accounts`** | `(admin)` | **アカウント検索 + ロック状態表示 + ロック解除** (全契約横断・**解除専用**) | [auth-accounts.md](API/auth-accounts.md) §2.4.2 (アカウント検索 + ロック解除) | **[API]**。[auth.md](auth.md) §6.9 の実行者 2 経路 (社内管理者は解除のみ) | 1 |
 | **`/admin/admins`** | `(admin)` | 社内管理者の一覧と **MFA リセット** (**SuperAdmin のみ**。権限不足は 403) | [auth-accounts.md](API/auth-accounts.md) §2.4.2 (管理者一覧 + MFA リセット) | **[API]** (SuperAdmin のみ = 403)。[auth.md](auth.md) §6.2 (MFA デバイス紛失時の回復) | 1 |
+
+> **`Idea` 型の SSOT は [API/ideas.md](API/ideas.md) §2.1** (2026-08-02 確定。同書 §8 の R-IDA-11)。
+> **手書きの型を作らず orval の生成型を使う** (§6.2 の FE-2 対策)。**旧 `idea-boards.md` §2.1 の型を参照しないこと** —
+> `tag` (単数) → **`tags`** (配列)、`evaluation.rank` → **`evaluation.grade`** に変わっており、
+> 旧型を正として実装すると生成型と手書きの期待が食い違う。新たに読める項目は
+> `market_size` / `cagr` / `stage` / `has_knowledge` / `is_owner` / `latest_version`。
 
 **ロック操作の UI 要件** (2026-07-30 の 2 巡目レビューで追加。[auth.md](auth.md) §6.9 のガードに対応):
 
@@ -856,7 +870,7 @@ type StreamState =
 `(admin)` ↔ `ADMIN_PUBLIC_PATHS ∪ ADMIN_MFA_PENDING_PATHS`
 (`(admin)` の残り = `/admin/accounts` / `/admin/admins` は「管理者認証 + MFA 検証済み」必須)。
 
-- **実体**: [ci.yml](../../templates/frontend-repo/.github/workflows/ci.yml):73-98 が
+- **実体**: [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `frontend` ジョブの「検査 2 公開パスの許可リストとルートグループの一致」ステップ が
   許可リストの存在確認と `scripts/check-public-paths.sh` の呼び出しまでを持つ。
   **照合スクリプト本体は実装リポで書く** (雛形は「無ければ落ちる」形にしてある)
 - **集合の一致は和集合で見る**: `(auth)` の page 集合 = `PUBLIC_PATHS ∪ MFA_PENDING_PATHS`
@@ -944,11 +958,11 @@ ALB が見る送信元 IP は**運用者のオフィスの IP ではなく Verce
   (フラグ OFF のエンドポイントは 404)」「FE の役割は導線を隠すだけ」**を確定済みなので、
   **FE のフラグはサーバ側で導線を出すかどうかを決めるだけ**であり、
   **`NEXT_PUBLIC_` を付ける必要が無い** (付けるとフラグの内容がブラウザバンドルに載る)
-- **秘密を `NEXT_PUBLIC_*` に置かない** (雛形 [CLAUDE.md.tmpl](../../templates/frontend-repo/CLAUDE.md.tmpl)
+- **秘密を `NEXT_PUBLIC_*` に置かない** (雛形 [CLAUDE.md.tmpl](../../templates/app-monorepo/frontend/CLAUDE.md.tmpl)
   の Vercel 節 / [operations.md](operations.md) §3.2)。
   **機械強制**: CI で `NEXT_PUBLIC_` の付いた変数名の一覧を出力し、
   **許可リスト (上表の `NEXT_PUBLIC_APP_ENV` 1 件のみ) と一致しなければ落とす**
-  ([ci.yml](../../templates/frontend-repo/.github/workflows/ci.yml):99-118 の `ALLOWED`)。
+  ([ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `frontend` ジョブの「検査 3 NEXT_PUBLIC_ の許可リスト」ステップの `ALLOWED`)。
   **フラグを追加しても許可リストは増えない** — 増やす必要が生じたら、それは
   「サーバ側で判定していない」ことの徴候なので PR で設計に戻す
 - **Preview には prod の値を登録しない** ([operations.md](operations.md) §3.2 の運用ルール)。
@@ -1005,10 +1019,10 @@ ALB が見る送信元 IP は**運用者のオフィスの IP ではなく Verce
 | # | パターン | 本書の判断 | 担保手段 |
 |---|---|---|---|
 | **FE-1** | AbortError 未処理 (useEffect クリーンアップで unhandled rejection) | **§5.2 の 6 / §6.4**: 中断は**正常系**として仕様化。状態 `canceled` を型に持つ (§10.1)。握り潰しは**専用ヘルパ `isAbortError()` 1 箇所**に限定 | **構造** (型に `canceled` がある) + **lint** (空 `catch` 禁止 / `isAbortError()` 以外の握り潰しを検索可能に) + **テスト** ([testing.md](testing.md) §4.2 の必須ケース) |
-| **FE-2** | snake_case 漏れ | **§5.3 / §2 FE-E'**: **変換層を作らない**のが既定。生成型を唯一の型ソースにし、ViewModel は 4 条件のいずれかに該当する場合のみ作る (一方向変換) | **構造** (orval 生成型 + L-F6) + **CI** (生成物の再生成差分検査。雛形 [ci.yml](../../templates/frontend-repo/.github/workflows/ci.yml):41-49) |
-| **FE-3** | デザイントークン未使用 (ハードコード px / 汎用クラス) | **§7**: 意味ベースのトークン体系を 5 系統に限定して定義し、`theme.extend` を唯一の定義場所にする | **lint**: hex リテラル禁止と `style` 属性禁止は**実装済み** ([.eslintrc.json.tmpl](../../templates/frontend-repo/.eslintrc.json.tmpl):31-38)。`no-arbitrary-value` / `no-custom-classname` は実装済み: [.eslintrc.json.tmpl](../../templates/frontend-repo/.eslintrc.json.tmpl) の `tailwindcss/no-arbitrary-value` (2026-07-30) + **可視化** (`globals.css` の行数。[ci.yml](../../templates/frontend-repo/.github/workflows/ci.yml):119-129) |
-| **FE-4** | パーサーの非 export (テスト不能) | **§8.1**: パースは `lib/parse/` と `features/*/lib/` に置き、**必ず `export`**。reducer も純粋関数として `export` (§4.2 の要件 1) | **CI の存在検査** (対象ファイルに同名 `*.test.ts` が無ければ落とす。§8.2)。**実装済み**: [ci.yml](../../templates/frontend-repo/.github/workflows/ci.yml):58-72 — export されていなければテストが書けないため、存在検査が export を強制する。**[testing.md](testing.md) §10 への登録は未了** (§16.2-1) |
-| **FE-5** | lib への JSX/hook 混入 (循環依存) | **§3.3 の L-F1 / L-F2**: `lib/**` と `features/*/lib/**` から `react` / `react-dom` / `next/*` を import 禁止。`lib` は `features` を知らない | **lint** (`import/no-restricted-paths` + `no-restricted-imports`)。**実装済み**: [.eslintrc.json.tmpl](../../templates/frontend-repo/.eslintrc.json.tmpl):55〜 (zone) と後続の overrides。v2 の eslint には依存方向のルールが 1 つも無く (V-17)、雛形も 2026-07-30 まで設定ファイルを持っていなかった — **2026-07-30 の 2 巡目レビューで `no-restricted-imports` にも「override は上書き」の欠陥が見つかり修正済み** — `src/features/*/lib/**` 用の override (:164 付近) に **L-F1 と L-F4 の両方を再掲**した (片方だけ書くと後勝ちで react / next 禁止が消え、FE-5 の担保が失われる)。**残作業は L-F4 の `@/features/*` パターンを実ドメイン名へ展開すること** (実装リポ。§15.1 の 1-b) |
+| **FE-2** | snake_case 漏れ | **§5.3 / §2 FE-E'**: **変換層を作らない**のが既定。生成型を唯一の型ソースにし、ViewModel は 4 条件のいずれかに該当する場合のみ作る (一方向変換) | **構造** (orval 生成型 + L-F6) + **CI** (生成物の再生成差分検査。雛形 [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `contract` ジョブ) |
+| **FE-3** | デザイントークン未使用 (ハードコード px / 汎用クラス) | **§7**: 意味ベースのトークン体系を 5 系統に限定して定義し、`theme.extend` を唯一の定義場所にする | **lint**: hex リテラル禁止と `style` 属性禁止は**実装済み** ([.eslintrc.json.tmpl](../../templates/app-monorepo/frontend/.eslintrc.json.tmpl):31-38)。`no-arbitrary-value` / `no-custom-classname` は実装済み: [.eslintrc.json.tmpl](../../templates/app-monorepo/frontend/.eslintrc.json.tmpl) の `tailwindcss/no-arbitrary-value` (2026-07-30) + **可視化** (`globals.css` の行数。[ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `frontend` ジョブの「検査 4 globals.css の行数」ステップ) |
+| **FE-4** | パーサーの非 export (テスト不能) | **§8.1**: パースは `lib/parse/` と `features/*/lib/` に置き、**必ず `export`**。reducer も純粋関数として `export` (§4.2 の要件 1) | **CI の存在検査** (対象ファイルに同名 `*.test.ts` が無ければ落とす。§8.2)。**実装済み**: [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `frontend` ジョブの「検査 1 併置テストの存在」ステップ — export されていなければテストが書けないため、存在検査が export を強制する。**[testing.md](testing.md) §10 の存在検査に 6 番として登録済み** (2026-07-30。同書 §10 の表を参照。以前の「未了」は状態語の stale だった = DR-8) |
+| **FE-5** | lib への JSX/hook 混入 (循環依存) | **§3.3 の L-F1 / L-F2**: `lib/**` と `features/*/lib/**` から `react` / `react-dom` / `next/*` を import 禁止。`lib` は `features` を知らない | **lint** (`import/no-restricted-paths` + `no-restricted-imports`)。**実装済み**: [.eslintrc.json.tmpl](../../templates/app-monorepo/frontend/.eslintrc.json.tmpl):55〜 (zone) と後続の overrides。v2 の eslint には依存方向のルールが 1 つも無く (V-17)、雛形も 2026-07-30 まで設定ファイルを持っていなかった — **2026-07-30 の 2 巡目レビューで `no-restricted-imports` にも「override は上書き」の欠陥が見つかり修正済み** — `src/features/*/lib/**` 用の override (:164 付近) に **L-F1 と L-F4 の両方を再掲**した (片方だけ書くと後勝ちで react / next 禁止が消え、FE-5 の担保が失われる)。**残作業は L-F4 の `@/features/*` パターンを実ドメイン名へ展開すること** (実装リポ。§15.1 の 1-b) |
 | **FE-6** | 数値パーサのレンジ誤抽出 (「120-420億円」→「-420億円」) | **§8**: 数値・レンジ・単位のパースを `src/lib/parse/` に**集約**し、**併置テストを CI で必須化**。PoC は分離済みでも発生した (P-7) ため、分離ではなくテストで潰す | **CI の存在検査** + **テストの必須ケース** ([testing.md](testing.md) **§4.2 の `lib/` 行**が FE の SSOT。§4.1 は backend の表なので参照しない) |
 | **FE-7** | 分割 waitFor による中間レンダーの誤検知 | **§10.2**: **完了を示す単一の観測可能な要素 (`data-testid`) を FE が提供する**ことを仕様にする。§4.2 の要件 3 (イベント列から state を再構築) で中間状態の非決定性を減らす | **構造** (完了マーカーの提供義務) + **テスト規約** ([testing.md](testing.md) §7.2 の規約 1〜4 と 雛形 CLAUDE.md.tmpl のテスト規約が SSOT) |
 
@@ -1036,11 +1050,11 @@ ALB が見る送信元 IP は**運用者のオフィスの IP ではなく Verce
    **(a) が不成立、または (b) が否なら §2 FE-D の採用案が崩れ、
    BE の新規 API・[auth.md](auth.md) の是正・plan.md への Task 追加が連鎖する** —
    後の段で判明すると手戻りが最大になるため、**最初に潰す**
-1. **雛形の展開 + 基盤設定** — `templates/frontend-repo/` をコピーし、次を**引き渡し物として作る**:
+1. **雛形の展開 + 基盤設定** — `templates/app-monorepo/frontend/` をコピーし、次を**引き渡し物として作る**:
 
    | # | 成果物 | 由来 |
    |---|---|---|
-   | 1-a | `package.json` (scripts: `dev` / `build` / `lint` / `test` / `generate`) + `tsconfig.json` + `.node-version` | 雛形の [ci.yml](../../templates/frontend-repo/.github/workflows/ci.yml) が前提にしている |
+   | 1-a | `package.json` (scripts: `dev` / `build` / `lint` / `test` / `generate`) + `tsconfig.json` + `.node-version` | 雛形の [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) が前提にしている |
    | 1-b | **`.eslintrc.json`** (雛形の `.eslintrc.json.tmpl` をリネーム。**L-F4 の `@/features/*` パターンを実ドメイン名に展開**し、**`eslint-plugin-tailwindcss` の `no-arbitrary-value` / `no-custom-classname` を追加**する) | §3.3 / §7.2 / §16.2-1 |
    | 1-c | **vitest 設定** (`vitest.config.ts` + `setup` ファイル。Testing Library) | [testing.md](testing.md) §4.2 |
    | 1-d | **`scripts/check-public-paths.sh`** (§11.2.3 の照合。雛形は呼び出し側だけを持つ) | §11.2.3 |
@@ -1081,7 +1095,7 @@ ALB が見る送信元 IP は**運用者のオフィスの IP ではなく Verce
 | SSE のブロックパーサ | `claude_managed_agents/frontend/src/lib/sse.ts` | **`event:` 名を読み複数 `data:` を連結する形は踏襲**。`.trim()` (`:15`) と `null` 返し (`:19-21`) は採らない |
 | Tailwind の設定 | `hassan-v2-frontend/tailwind.config.ts:104-176` | **keyframes / animation は流用可**。`theme.extend` の色・間隔の命名 (`:12-97`) は採らない |
 | Playwright の構成 | `hassan-v2-frontend/playwright.config.ts` | [testing.md](testing.md) §7.3 が踏襲を決定済み (storageState 方式) |
-| 雛形 (CI / pre-commit / エージェント定義) | [../../templates/frontend-repo/](../../templates/frontend-repo/CLAUDE.md.tmpl) | **そのまま使い、§16 の是正要求を反映してから展開する** |
+| 雛形 (CI / pre-commit / エージェント定義) | [../../templates/app-monorepo/frontend/](../../templates/app-monorepo/frontend/CLAUDE.md.tmpl) | **そのまま使い、§16 の是正要求を反映してから展開する** |
 
 ---
 
@@ -1089,8 +1103,13 @@ ALB が見る送信元 IP は**運用者のオフィスの IP ではなく Verce
 
 ### 16.1 ユーザー・調査待ち (暫定既定で設計を進めている)
 
-- **FE-Q1: 会話 (アイデア発散) の SSE イベント型が未定義**。[API/README.md](API/README.md) は
-  会話型アイデア創出を**対象外**としており、SSE イベントの discriminated union が OpenAPI に無い。
+- **FE-Q1: 会話 (アイデア発散) の SSE イベント型が未定義** →
+  **クローズ済み (2026-08-01)**。[API/conversation.md](API/conversation.md) §5 が
+  **イベント型を discriminated union として確定**した (PoC 9 種を土台に、`artifact` を単一形 `{kind, payload}` へ統一・
+  進捗を `progress` 1 種へ統合・`error` を `CodedError` 形へ・`turn_summary` を追加。同 §5.4 に PoC からの対応表)。
+  **解けたブロック**: ①§6.3.1 の中継 Route Handler が確定 (`app/api/stream/conversations/[sessionId]/messages/route.ts`)
+  ②§6.2 の **S-9 (`unknown` 固定) の対象経路が無くなった** ③§11.1 の会話画面が `[未確定]` → `[API]` になり
+  **増分 1 のスコープが閉じた**。以下は当時の記録 (経緯として残す)。
   **暫定既定**: §6 の共通クライアントは「イベント名 + payload」の汎用形で先に作り、
   **型の確定後に decode 層 (`lib/sse/decode-event.ts`) だけを差し替える**。
   **暫定既定の歯止め (§6.2 の S-9)**: 汎用形の payload の型は **`unknown` 固定**。
@@ -1167,9 +1186,17 @@ ALB が見る送信元 IP は**運用者のオフィスの IP ではなく Verce
   **派生問いも回答済み**: 「**Vercel Pro 以上を前提にする**」(2026-07-31 ユーザー回答。Hobby は上限 300 秒で
   余裕ゼロのため。`maxDuration` を明示設定して 800 秒まで確保する)
 
-- **FE-Q3: `swagger.json` を FE の CI が private リポジトリから取得する手段**。
-  [testing.md](testing.md) §7.4 の `E2E_DISPATCH_TOKEN` と同型の論点
-  ([operations.md](operations.md) §4.1 の「GitHub 側に置いてよい値」の限定列挙に無い)。
+- ~~**FE-Q3: `swagger.json` を FE の CI が private リポジトリから取得する手段**~~ →
+  **解消 (2026-08-03)**。**リポジトリ構成が app モノレポ + infra リポの 2 分割になり**
+  ([architecture.md](architecture.md) §3.11)、`frontend/` と `api/openapi.yaml` が同一リポジトリに
+  なったため**クロスリポジトリの取得が不要**になった。CI の `contract` ジョブ (モノレポ機構の MR-3) が
+  `make -C backend docs` → **`scripts/check-regen.sh api/openapi.yaml`** → `npm run generate` →
+  **`scripts/check-regen.sh frontend/src/generated`** を実行して同期を機械検証する
+  (**裸の `git diff` は使わない** — 未追跡ファイルを見ないため**新規に生成された型の追加漏れ**が
+  素通りする。2026-08-04 の design-reviewer 指摘 重大 1 / 2026-08-05 の D-5)。
+  **同型の論点だった `E2E_DISPATCH_TOKEN` も同時に廃止された** ([testing.md](testing.md) §13.1 T-Q5 の [Answer 2]) —
+  `operations.md` §4.1 の限定列挙は**例外ゼロ件**に戻っている。
+  **以下は旧 3 リポ構成での検討 (記録として残す)**:
   **暫定既定**: BE の CI が成功時に `swagger.json` を artifact として公開し、
   FE の CI が **`gh` CLI + GitHub App のインストールトークン**で取得する。
   **影響範囲**: 不可なら「BE リポが FE リポへ PR を出して `swagger.json` をコミットする」方式に変わり、
@@ -1230,18 +1257,18 @@ ALB が見る送信元 IP は**運用者のオフィスの IP ではなく Verce
    **経緯**: 本書の初版は「lint zone は `npm run lint` に含まれる」と書いたが、
    **当時の雛形には eslint 設定ファイルが 1 件も存在せず、その記述は誤りだった**。
    2026-07-30 にメインセッションが
-   [.eslintrc.json.tmpl](../../templates/frontend-repo/.eslintrc.json.tmpl) を新規作成し、
-   [ci.yml](../../templates/frontend-repo/.github/workflows/ci.yml) に検査 4 本を追加した。
+   [.eslintrc.json.tmpl](../../templates/app-monorepo/frontend/.eslintrc.json.tmpl) を新規作成し、
+   [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) に検査 4 本を追加した。
    **現状と残りを表で確定させる**:
 
    | # | 検査 | 雛形の実体 (2026-07-30) | 残作業 |
    |---|---|---|---|
    | 1 | 依存方向 zone (L-F1〜L-F6。§3.3) | `.eslintrc.json.tmpl:55〜` (L-F2 / L-F3 / L-F6) + 後続の overrides (L-F1 / L-F4 / L-F5) | **L-F4 の `@/features/*` パターンを実ドメイン名に展開する** (実装リポ。§15.1 の 1-b) |
    | 2 | トークン強制 (FE-3。§7.2) | 同 `:46`〜 (hex) / `:50`〜 (`style` 属性) / **`:30`〜 (`no-arbitrary-value` / `no-custom-classname`。2026-07-30 追加)** | **`eslint-plugin-tailwindcss` の依存追加**が実装リポで必要 (§15.1 の 1-b) |
-   | 3 | 併置テストの存在 (FE-4 / FE-6。§8.2) | `ci.yml:58-72` | — |
-   | 4 | 公開パス許可リストの照合 (§11.2.3) | `ci.yml:73-98` (許可リストの存在確認 + スクリプト呼び出し) | **照合スクリプト本体** (`scripts/check-public-paths.sh`) を実装リポで書く。**2 本の許可リストを区別したまま照合する** (§11.2.3) |
-   | 5 | `NEXT_PUBLIC_` 許可リスト (§12) | `ci.yml:99-118` | — |
-   | 6 | `globals.css` 行数の可視化 (§7.2) | `ci.yml:119-129` | — |
+   | 3 | 併置テストの存在 (FE-4 / FE-6。§8.2) | `ci.yml` の `frontend` ジョブの「検査 1 併置テストの存在」ステップ | — |
+   | 4 | 公開パス許可リストの照合 (§11.2.3) | `ci.yml` の `frontend` ジョブの「検査 2 公開パスの許可リストとルートグループの一致」ステップ (許可リストの存在確認 + スクリプト呼び出し) | **照合スクリプト本体** (`scripts/check-public-paths.sh`) を実装リポで書く。**2 本の許可リストを区別したまま照合する** (§11.2.3) |
+   | 5 | `NEXT_PUBLIC_` 許可リスト (§12) | `ci.yml` の `frontend` ジョブの「検査 3 NEXT_PUBLIC_ の許可リスト」ステップ | — |
+   | 6 | `globals.css` 行数の可視化 (§7.2) | `ci.yml` の `frontend` ジョブの「検査 4 globals.css の行数」ステップ | — |
    | 7 | **`X-Admin-Token` の局所化** (§5.2.1) | **実装済み** (2026-07-30): 同 `:163`〜`:220` — eslint の `no-restricted-syntax` で `lib/api/admin-mutator.ts` 以外での使用を禁止 (`ci.yml` ではなく lint で担保) | 残作業なし |
 
    **[testing.md](testing.md) §9 / §10 への登録** — **①は 2026-07-30 に反映済み** (下記)。
@@ -1250,19 +1277,19 @@ ALB が見る送信元 IP は**運用者のオフィスの IP ではなく Verce
    登録しないと上表が「SSOT の外にある検査」になる。**要求の内容と状態**:
    ①§10 の一覧に **FE の併置テスト存在検査 (検査 3)** を加える → **反映済み**
    (同節は **#6** として登録し 6 種へ、2026-07-31 に **#7** が加わり現在 **7 種**)
-   ②§9.1 の段の表に **FE の検査 1〜7 が frontend リポの PR 必須チェックに含まれる**ことを明記する
+   ②§9.1 の段の表に **FE の検査 1〜7 が PR 必須チェック (`gate` 経由) に含まれる**ことを明記する
    (§9.1 は「新しい必須チェックを増やさない」と書いているが、これは backend の CI ジョブについての
-   記述であり、**frontend リポには既存の `ci.yml` ジョブがある**ので新ジョブは増えない)
+   記述であり、**`ci.yml` に既存の `frontend` ジョブがある**ので新ジョブは増えない)
    ③[testing.md](testing.md) §7 の **E-1 の「Vercel の FE と ECS の BE の間の CORS」という記述**は
    FE-D により**ブラウザ → BE のクロスオリジンが無くなる**ため陳腐化する
    (E2E で確認すべきは Cookie と MFA 遷移であって CORS ではない) → **FE-Q2 の実測後に是正する**
 
-2. **[../../templates/frontend-repo/CLAUDE.md.tmpl](../../templates/frontend-repo/CLAUDE.md.tmpl)**:
+2. **[../../templates/app-monorepo/frontend/CLAUDE.md.tmpl](../../templates/app-monorepo/frontend/CLAUDE.md.tmpl)**:
    ①`:37` の「`fetch` には **AbortSignal** を渡し」が**ブラウザから直接 BE を叩く前提**に読める —
    §2 FE-D (サーバ経由) と整合する記述に直す (「BE 呼び出しは `features/*/api` / `lib/api` / `lib/sse` を通す」)
    ②`:46-51` のフィーチャーフラグ節が**「配布方法は未確定」のまま**だが、
    **[operations.md](operations.md) §7.2 (OP-I) は既に確定済み** —
-   「実装は環境変数のみ (BE = ECS タスク定義、**FE = Vercel の環境変数**)」「**フラグを API で配らない**」
+   「実装は環境変数のみ (BE = `env/<env>.env`、**FE = Vercel の環境変数**)」「**フラグを API で配らない**」
    (専用エンドポイント案は同節の却下案 (a))。雛形の 2 択の提示は不要になったので、
    **OP-I を参照する記述に差し替える** (併せて `GET /api/features` の例示は 2026-07-30 に削除済み =
    本書初版の指摘②は解消済み)

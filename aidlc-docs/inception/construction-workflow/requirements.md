@@ -11,7 +11,8 @@
 
 ## 1. 目的とスコープ
 
-実装リポジトリ (backend / frontend / infra の 3 リポ) で **1 issue を受け取ってから PR がマージされるまで**の
+実装リポジトリ (**app モノレポ (`backend/` + `frontend/` + `api/`) + infra リポの 2 リポ**。
+**2026-08-03 に 3 リポ分割から方針転換** — 親 [productionization/questions.md](../productionization/questions.md) Q-2 の [Answer 2]) で **1 issue を受け取ってから PR がマージされるまで**の
 作業手順・担当 (人間 / オーケストレーター / サブエージェント)・停止条件を規約として確定し、
 [templates/](../../../templates/README.md) に反映する。
 
@@ -26,7 +27,7 @@
 
 ### スコープ内 (本 feature の成果物)
 
-- `templates/backend-repo/.claude/rules/` · `templates/frontend-repo/.claude/rules/` ·
+- `templates/app-monorepo/backend/.claude/rules/` · `templates/app-monorepo/frontend/.claude/rules/` ·
   `templates/infra-repo/.claude/rules/` への**運用ルールの追加** (共通部分は `templates/shared/` 側)
 - 各 `CLAUDE.md.tmpl` の運用ルール表・ハーネス節の更新 (追加ルールの索引)
 - GitHub issue / PR テンプレートの雛形 (`.github/ISSUE_TEMPLATE/` · `.github/pull_request_template.md`)
@@ -46,12 +47,12 @@
 | # | 制約 | 出典 |
 |---|---|---|
 | C-1 | **AIDLC ベースを維持する**。他手法への乗り換えはしない。ただし他手法の部分的な取り込み (例: tasks 粒度規約) は設計判断として可 | ユーザー指示 (2026-07-29) |
-| C-2 | **TDD は確定**。受入基準を失敗するテストへ翻訳してから実装する (Red → Green → Refactor)。テスト名に AC-ID を埋める | 親 C-8 / [go-developer.md](../../../templates/backend-repo/.claude/agents/go-developer.md) の TDD 節 |
+| C-2 | **TDD は確定**。受入基準を失敗するテストへ翻訳してから実装する (Red → Green → Refactor)。テスト名に AC-ID を埋める | 親 C-8 / [go-developer.md](../../../templates/app-monorepo/backend/.claude/agents/go-developer.md) の TDD 節 |
 | C-3 | **実装とレビューはサブエージェントに委譲する**。実装 = `go-developer` / `react-developer` / `infra-engineer`、レビュー = **別セッション**の `code-reviewer` / `frontend-reviewer` (infra は Q-7) | ユーザー指示 / [.claude/rules/04-review.md](../../../.claude/rules/04-review.md) |
 | C-4 | **CI で UT と lint を機械強制する**。マージ条件は CI ゲートで担保する | 親 C-8 |
 | C-5 | **GitHub issue 駆動**。作業の起点は issue とする | 親 C-8 |
 | C-6 | **`templates/` は雛形 (初期値) であり SSOT ではない**。切り出し後は実装リポ側が正になる。この位置づけを変えない | [templates/README.md](../../../templates/README.md) の注意節 |
-| C-7 | リポジトリは **backend / frontend / infra の 3 分割**。OpenAPI スキーマが backend → frontend の契約 | 親 C-10 / [templates/README.md](../../../templates/README.md) |
+| C-7 | リポジトリは **app モノレポ (`backend/` + `frontend/` + `api/`) + infra リポの 2 分割** (**2026-08-03 に 3 分割から変更**)。**`api/openapi.yaml` が backend → frontend の契約 (SSOT) で、同期は CI の `contract` ジョブが機械検証する** (モノレポ機構の MR-3) | 親 C-10 / [templates/README.md](../../../templates/README.md) / [architecture.md](../../../docs/design/architecture.md) §3.11 |
 | C-8 | **要件・設計の変更が必要になったら実装で辻褄を合わせず、設計リポ (hassan_v3) に差し戻す** | 各 `CLAUDE.md.tmpl` の運用ルール節 |
 | C-9 | 本リポジトリに製品コードを置かない。参照リポジトリは読み取り専用 | ルート `CLAUDE.md` |
 
@@ -79,7 +80,9 @@
 
 - **AC-2.1** 「**1 issue = 何単位か**」が AC-ID との対応で定義されていること
   (1 issue が含む AC の範囲・1 PR / 1 コミットとの関係)
-- **AC-2.2** **3 リポ跨ぎの機能**の issue 分割と **PR のマージ順序** (API 契約の互換順序:
+- **AC-2.2** **リポ跨ぎ (infra ↔ app) / サブツリー跨ぎ (backend ↔ frontend) の機能**の issue 分割と
+  **PR のマージ順序** (**2026-08-03 の 2 リポ化で読み替え**: 後方互換な FE/BE 跨ぎは 1 issue = 1 PR に
+  統合可 / 破壊的変更の 3 段は別 PR 必須 = MR-6) (API 契約の互換順序:
   backend で新旧併存 → frontend 切替 → 旧削除) が定義されていること
 - **AC-2.3** **issue テンプレート**が雛形として存在し、少なくとも「対象 AC-ID / 影響する層 /
   実行すべき検証コマンド / 人間チェックポイントの該当有無 / 親 issue」の欄を持つこと
@@ -104,9 +107,9 @@
   ブランチ削除) が許可・拒否の形で定義され、実装リポの `.claude/settings.json` に落とす指示が
   雛形の立ち上げ手順に含まれていること
 
-### 3.5 3 リポジトリ間の整合
+### 3.5 リポジトリ・サブツリー間の整合
 
-- **AC-5.1** 追加するルールが backend / frontend / infra の 3 リポで**一貫**していること。
+- **AC-5.1** 追加するルールが **app モノレポ (backend / frontend の 2 サブツリー) と infra リポ**で**一貫**していること。
   共通部分は 1 箇所 (`templates/shared/`) に置き、リポ固有部分のみ各リポに置く (同じ規約を 3 箇所に複製しない)
 - **AC-5.2** infra-repo のレビュー体制が「**自己レビュー禁止**」と矛盾しないこと (Q-7)
 - **AC-5.3** 各 `CLAUDE.md.tmpl` の運用ルール表に追加ルールが**索引**され、索引されたパスが
@@ -114,6 +117,17 @@
   (`scripts/doc-lint.sh` は `*.md` のみ) のため、この照合は手動または grep で行う
 - **AC-5.4** 追加ルールが親 feature の確定制約と矛盾しないこと
   (4 層構成 / TDD / CI ゲート 3 本 / Agent 再発行の必須化 / dev 継続デプロイと本番一括切替)
+- **AC-5.5** **モノレポ機構 MR-1〜MR-6** ([architecture.md](../../../docs/design/architecture.md) §3.11.2 が定義元) が
+  **①雛形 (`templates/app-monorepo/`) に実体として存在し ②機械検査できるものは `make check-monorepo-ci` の
+  検査対象に入っており ③できないものは立ち上げチェックリスト
+  ([04-human-checkpoints.md](../../../templates/shared/.claude/rules/04-human-checkpoints.md) §4) に
+  設定項目として載っている**こと。
+  **③に該当するものは「なぜ機械化できないか」を代償として設計に書く** (DR-10)。
+  > 2026-08-05 追加 (design-reviewer 3 巡目の 中 5)。**MR-1 / MR-2 / MR-4 / MR-5 は受入基準を持たないまま
+  > 雛形に実装されていた** — `make check-traceability` は AC → 設計書の方向しか見ないため、
+  > 「AC が無い設計判断」は検出されない (DR-6 の逆方向)。
+  > とくに **MR-1 (必須チェックは `gate` 1 本) は「指定を誤ると PR が永久 pending」という運用事故の
+  > 唯一の予防線**であり、承認された受入基準が無いと「落としても落としたと言えない」状態になる
 
 ### 3.6 本番ゲート (`08-production-gates.md`) との対応
 
@@ -141,7 +155,7 @@
 |---|---|---|
 | DF-1 | 実装リポに**独立した AIDLC ドキュメント一式を置かない**。作業計画は **issue 本文のテンプレート欄**で表現する | 設計リポの `requirements.md` / `plan.md` が唯一の要件・計画の SSOT (C-6 / C-8)。実装リポに計画文書を持つと二重管理になり、どちらが正か曖昧になる |
 | DF-2 | 追加ルールの置き場所は **`templates/<repo>/.claude/rules/`** とし、番号付きファイル名 (設計リポと同じ命名) にする | 設計リポの rules 01〜08 と同じ手触りにすることで、両リポを往復する人間・エージェントの学習コストを下げる |
-| DF-3 | 3 リポ共通のループ規約は **`templates/shared/.claude/rules/`** に置き、立ち上げ手順でコピーする (skills と同じ扱い) | AC-5.1 (同じ規約を 3 箇所に複製しない) の実装形。skills が既に同じ方式 ([templates/README.md](../../../templates/README.md) の立ち上げ手順) |
+| DF-3 | **2 リポ共通**のループ規約は **`templates/shared/.claude/rules/`** に置き、立ち上げ手順でコピーする (skills と同じ扱い) | AC-5.1 (同じ規約を複数箇所に複製しない) の実装形。skills が既に同じ方式 ([templates/README.md](../../../templates/README.md) の立ち上げ手順)。**2026-08-03 のモノレポ化でコピー先は 3 → 2 リポに減ったが、仕組みは残る** (app と infra で共有する必要は変わらない) |
 | DF-4 | **レビュー結果の保存先は PR 上** (レビューコメント or PR 本文) とし、実装リポにレビュー文書ファイルを置かない | 設計リポは push ゲートのために `review.md` をファイルで持つが、実装リポは PR という記録場所が既にある。ファイル化は差分ノイズになる |
 | DF-5 | レビュー未実施の PR を止める仕組みは **GitHub 側のブランチ保護 (必須レビュー)** で担保し、設計リポのような push フックは実装リポに持ち込まない | F-5 の差 (実装リポ雛形に review ゲートが無い) の解消手段として、GitHub 標準機能の方が確実 (ローカルフックは回避できる) |
 | DF-6 | **1 issue の作業ループは 1 セッションで完結させることを前提としない**。中断・再開のためにループの現在位置を issue コメントに残す | AI 駆動でもコンテキスト上限・人間承認待ちで中断は必ず起きる。再開点が残らないと二重実装・作業漏れになる |
@@ -152,8 +166,8 @@
 
 | 領域 | 本 feature での扱い |
 |---|---|
-| **D (CI/CD・デプロイ・IaC)** | **主対象**。D-2 (CI ゲート) / D-4 (マイグレーション承認) / D-6 (Agent 再発行) を作業ループと人間チェックポイントに組み込む (AC-6.1 / AC-6.2)。成果物は D-3 (deploy.yml のロールバック手順) / D-5 (シークレットを GitHub 側に置かず、OIDC ロール経由で Secrets Manager / SSM から実行時に取得する形。2026-07-30 に親 feature の `docs/design/operations.md` §4.1 と整合させて是正) / D-7 (本番リリースの承認) にも機構面で回答している。**D-1 / D-8 の設計回答は親 feature が持つ** (`docs/design/architecture.md` §5 の表 — D-8 は回答済み、D-1 は部分回答で環境間の切り分けは運用設計で確定予定)。本増分は機構化のみ |
-| **A (認証・テナント分離・権限)** | **レビュー観点としての担保のみ**。観点は [code-reviewer.md](../../../templates/backend-repo/.claude/agents/code-reviewer.md) に既に定義済み (A-1 / A-4 / A-6 相当) で、本 feature は「その レビューを必ず通す」ループを定める。**A の設計自体は先送り先 = 親 feature productionization** (`docs/design/auth.md`) |
+| **D (CI/CD・デプロイ・IaC)** | **主対象**。D-2 (CI ゲート) / D-4 (マイグレーション承認) / D-6 (Agent 再発行) を作業ループと人間チェックポイントに組み込む (AC-6.1 / AC-6.2)。成果物は D-3 (deploy-backend.yml のロールバック手順) / D-5 (シークレットを GitHub 側に置かず、OIDC ロール経由で Secrets Manager / SSM から実行時に取得する形。2026-07-30 に親 feature の `docs/design/operations.md` §4.1 と整合させて是正) / D-7 (本番リリースの承認) にも機構面で回答している。**D-1 / D-8 の設計回答は親 feature が持つ** (`docs/design/architecture.md` §5 の表 — D-8 は回答済み、D-1 は部分回答で環境間の切り分けは運用設計で確定予定)。本増分は機構化のみ |
+| **A (認証・テナント分離・権限)** | **レビュー観点としての担保のみ**。観点は [code-reviewer.md](../../../templates/app-monorepo/backend/.claude/agents/code-reviewer.md) に既に定義済み (A-1 / A-4 / A-6 相当) で、本 feature は「その レビューを必ず通す」ループを定める。**A の設計自体は先送り先 = 親 feature productionization** (`docs/design/auth.md`) |
 | **O (可観測性・LLM コスト)** | 同上。**先送り先 = 親 feature productionization** (`docs/design/observability.md`)。本 feature では扱わない (AC-6.3) |
 
 ## 6. 回答状況 (2026-07-29 時点)
@@ -161,8 +175,8 @@
 | Q | 内容 | 回答 | 反映先 |
 |---|---|---|---|
 | Q-1 | issue の粒度 | **A** (1 issue = 1 PR = 同じ層・同じ検証で閉じる AC 群) | AC-2.1 / AC-2.3 / AC-2.4 |
-| Q-2 | 3 リポ跨ぎの issue / PR 構成 | **B** (リポごとに独立 issue。親子関係なし) — **推奨 A と異なる**。順序の担保は共通ルールのマージ順序規約 + issue テンプレートの「依存 issue (他リポ)」欄 + 人間による横断完了判定で補う ([questions.md](questions.md) Q-2 の回答注記) | AC-2.2 |
-| Q-3 | 人間チェックポイントの範囲 | **B + 条件付き着手前承認** (4 点 + 新規ドメイン / 設計に無いパターン / 3 リポ跨ぎのみ着手前確認) | AC-4.1 / AC-4.2 |
+| Q-2 | リポ跨ぎの issue / PR 構成 | **B** (リポごとに独立 issue。親子関係なし) — **推奨 A と異なる**。順序の担保は共通ルールのマージ順序規約 + issue テンプレートの「依存 issue」欄 + 人間による横断完了判定で補う ([questions.md](questions.md) Q-2 の回答注記)。**2026-08-03 の 2 リポ化で適用範囲が infra ↔ app に限定された** (FE/BE 跨ぎは 1 PR に収まり、`contract` ジョブが機械検証する) | AC-2.2 |
+| Q-3 | 人間チェックポイントの範囲 | **B + 条件付き着手前承認** (4 点 + 新規ドメイン / 設計に無いパターン / **infra 跨ぎ** のみ着手前確認。**2026-08-03 に「3 リポ跨ぎ」→「infra 跨ぎ」へ読み替え**) | AC-4.1 / AC-4.2 |
 | Q-4 | エージェントの自律範囲 | **A** (commit / push / PR 作成まで自律。マージのみ人間) | AC-4.3 |
 | Q-5 | モデルエスカレーションの主体と基準 | **A + 実行中の昇格トリガー** (オーケストレーターが着手前判定 + 実行中 3 トリガー) | AC-3.1 / AC-3.2 |
 | Q-6 | レビュー差し戻しの反復上限 | **A** (2 回まで。3 巡目前に人間へエスカレーション) | AC-1.3 |
