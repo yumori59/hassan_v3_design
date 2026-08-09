@@ -1,0 +1,49 @@
+version: 2
+
+# app モノレポの依存更新 (MR-4 の代償のうち「Dependabot の単位」を受ける)。
+#
+# ■ なぜ明示宣言が要るか (2026-08-05 に新設。design-reviewer 3 巡目の 中 8)
+#
+#   3 リポ構成では「リポジトリ 1 つ = 依存更新の単位」で、`dependabot.yml` が無くても
+#   リポジトリ設定の security updates が効いていた。**モノレポでは version updates は
+#   `directory:` ごとの宣言が必要**で、宣言しないサブツリーは**更新 PR が出なくなる**
+#   (security alerts は出続けるため「動いているように見えて更新は止まる」形になる)。
+#   `architecture.md` §3.11.2 の MR-4 の代償欄に記載。
+#
+# ■ 運用
+#   - 更新 PR も CI の `gate` を通る (`backend/**` / `frontend/**` の path filter に当たる)
+#   - レビュー担当は `.github/CODEOWNERS` のサブツリー担当に自動で当たる
+#   - <owner> / チーム名は立ち上げ時に実際の GitHub team に置換する
+
+updates:
+  - package-ecosystem: gomod
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, backend]
+    commit-message:
+      prefix: "chore(backend)"
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, frontend]
+    commit-message:
+      prefix: "chore(frontend)"
+    # メジャー更新は破壊的変更を伴うため、まとめずに個別 PR で受ける
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+
+  # GitHub Actions のバージョン固定を追従する (`uses: actions/*@vN` の更新)。
+  # **`.github/**` は CI の `meta` フィルタに当たる**ため、更新 PR でも actionlint が走る。
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies, ci]
+    commit-message:
+      prefix: "chore(ci)"

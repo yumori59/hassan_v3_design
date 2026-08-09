@@ -3,7 +3,7 @@
 **hassan_v3 — 本番化のための設計リポジトリ**。PoC (`claude_managed_agents`) で検証済みの
 「テーマ管理 × アセット管理 × 会話型アイデア創出」を、**本番システムとして再構築するための設計・仕様・
 移行計画**をここで確定させる。**このリポジトリに製品コードは置かない** (実装は別リポジトリで行い、
-本リポジトリの設計成果物と `templates/` (backend / frontend / infra の 3 セット) のハーネス雛形を引き渡す)。
+本リポジトリの設計成果物と `templates/` (**app モノレポ / infra リポの 2 セット** + shared) のハーネス雛形を引き渡す)。
 
 ## 本番アーキテクチャの方針 (ハイブリッド)
 
@@ -42,7 +42,11 @@ make check-traceability    # requirements.md の AC-ID が plan.md と設計書�
 make check-workflow-shell  # templates のワークフローに埋めた複数行 run の bash 構文検査
 make check-table-counts    # data-model.md のテーブル件数と、他文書・CI 期待値への転記の整合
 make check-endpoint-mapping # API のエンドポイント件数・移植チェックリストの対応の整合
-make check                 # 上記 5 つをまとめて実行
+make check-template-sync   # templates/ 配下の同期コピーが SSOT (.claude/rules/) と一致するかの照合
+make check-monorepo-ci     # app モノレポの CI 機構 (MR-1〜MR-6) の整合 — gate の needs / 必須欄 / 件数
+make check                 # 上記をまとめて実行 (**本数はここに書かない** — 実体は `Makefile` の
+                           #  `check` ターゲットの依存が正。DR-9。2026-08-05 に「上記 5 つ」が
+                           #  実体 7 本とずれているのを是正した際に数値を落とした)
 ```
 
 このリポジトリの「テスト」は上記のコマンド群。**設計成果物を確定 (コミット・push) する前に必ず実行し、
@@ -56,13 +60,14 @@ docs/
   analysis/     PoC 棚卸し・ギャップ分析 (現状の事実。推測と事実を分けて書く)
   design/       本番アーキテクチャ・データモデル・API・非機能設計 (確定した設計判断の正)
     README.md       **索引** — 「何を作るか → どのファイルのどの節を読むか」。
-                    実装リポの開発者・AI はここから入る (18 ファイル・約 12,000 行あるため)
+                    実装リポの開発者・AI はここから入る (1 セッションで読み切れない規模のため。
+                    **件数を書かない** — 実測との乖離が DR-9 として指摘された)
     design_memo.md  ユーザーによる技術スタック・方針の生メモ (入力。設計の一次要求)
   prototype/    UI プロトタイプ (HTML)。設計入力であって仕様ではない
 aidlc-docs/
   inception/<feature>/   questions.md / requirements.md / plan.md (+ concept.md)
   reviews/<feature>/     review.md — design-reviewer の成果物 (push ゲートが要求)
-templates/               実装リポジトリ雛形 3 セット (backend-repo / frontend-repo / infra-repo + shared)
+templates/               実装リポジトリ雛形 2 セット (app-monorepo/{backend,frontend,api} / infra-repo + shared)
 scripts/                 doc-lint.sh・traceability チェック・git hooks
 .claude/rules/           Claude Code 運用ルール (下表)
 .aidlc-rule-details/     AIDLC フェーズ詳細 (aidlc-planner が参照)

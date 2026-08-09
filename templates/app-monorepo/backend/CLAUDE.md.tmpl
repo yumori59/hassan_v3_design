@@ -1,0 +1,79 @@
+# CLAUDE.md — `backend/` (バックエンド)
+
+hassan_v3 の設計 (`<hassan_v3 の絶対パス>/docs/design/`) を実装する本番バックエンド。
+**app モノレポの `backend/` サブツリー** — リポジトリ全体の規約とサブツリー跨ぎのルール (MR-1〜MR-6) は
+**ルートの [`../CLAUDE.md`](../CLAUDE.md) が正**。本ファイルは backend 固有のみを持つ。
+
+**設計書を読むときは必ず `docs/design/README.md` (索引) から入る** — 同ディレクトリは **1 セッションで読み切れない規模**であり、**1 つのタスクに必要なのはその一部**である。索引は「何を作るか → どのファイルのどの節を読むか」と「実装時に読まなくてよい節」を示す。
+アーキテクチャは **クリーンアーキテクチャ 4 層 (Controller → UseCase → Service → Repository) +
+`entity/` / `gateway/` の計 6 パッケージ層** + hassan-v2-backend のコーディング規約・認証機構、
+LLM / エージェント層は **Anthropic Managed Agents** (PoC `claude_managed_agents` 方式)。
+**Dify は使わない** (廃止決定)。
+
+**2 リポジトリ構成**: このリポジトリ (app モノレポ) が `backend/` と `frontend/` を持ち、
+infra (Terraform) は別リポジトリ。**`../api/openapi.yaml` が frontend との契約 (SSOT)** で、
+**再生成漏れは CI の `contract` ジョブ (MR-3) が落とす**。
+
+## コマンド
+
+| 目的 | コマンド |
+|---|---|
+| ローカル起動 | `<make run>` |
+| スキーマ適用 | `<make psqldef>` |
+| SQL→Go コード生成 | `<make sqlc>` |
+| DI コード生成 | `<make wire>` |
+| OpenAPI 定義生成 (IF 変更時に必須) | `<make docs>` — **出力先は `../api/openapi.yaml`**。frontend の型生成の元。忘れると CI の `contract` が落ちる |
+| Managed Agent の発行・更新 | `<コマンド>` (system prompt / tool schema 変更時に必須) |
+
+## 検証ゲート (完了条件)
+
+```
+go build ./... / go vet ./... / go test ./... / <golangci-lint run>
+```
+
+`go test` は「振る舞い実装の完了ゲート」。新機能・複数ファイル・挙動変更はテスト先行 (Red→Green)。
+lint も CI で機械強制される。
+
+## アーキテクチャ (4 層 + `entity/` / `gateway/` の計 6 パッケージ層)
+
+**層の責務・依存規則 (L-1〜L-6)・エラー契約・設定値の SSOT・Managed Agent 運用・LLM の使い分け・
+DB 変更フローは `.claude/rules/05-architecture-coding-rules.md` に集約した** — 実装前に必ず読む
+(決定の正は設計リポの `docs/design/architecture.md` §3)。**依存方向は `rules/05` の図が正
+(直列ではない — `repository` / `gateway` は IF を満たす側)**。
+ディレクトリ構成の索引は [`STRUCTURE.md`](STRUCTURE.md) を参照。
+
+## Claude Code 運用ルール
+
+| ファイル | 内容 |
+|---|---|
+| `.claude/rules/01-construction-loop.md` | **1 issue の作業ループ (S-1〜S-10)。全作業の起点** |
+| `.claude/rules/02-issue-granularity.md` | issue の粒度・DoD (V-1〜V-10)・リポ跨ぎ / サブツリー跨ぎのマージ順序 |
+| `.claude/rules/03-model-escalation.md` | モデルの既定・昇格判定 (M-1〜M-4 / T-1〜T-3) |
+| `.claude/rules/04-human-checkpoints.md` | 人間承認点 (H-1〜H-5) と機構・自律範囲 |
+| `.claude/rules/05-architecture-coding-rules.md` | **層の責務・依存規則 L-1〜L-6・エラー契約・Managed Agent 運用・DB 変更フロー (backend 固有)** |
+| `.claude/agents/go-developer.md` | Go 実装エージェント |
+| `.claude/agents/code-reviewer.md` | 実装レビュー (本番基準) |
+| `.claude/rules/feedback_review_patterns.md` | 頻出バグパターン (設計リポの同期コピー。新パターンは設計リポへ還流する) |
+| `.claude/skills/implementing-robustly/` | 着手前の影響半径測定・完了前セルフレビュー |
+| `.claude/skills/test-driven-development/` | Red→Green の進め方 |
+
+- **作業は GitHub issue 起点** (`../.github/ISSUE_TEMPLATE/task-backend.yml` で起票)。ループの現在位置と
+  中断・再開は rules 01 の §6
+- 実装は `go-developer`、レビューは**別セッションで** `code-reviewer`
+- 要件・設計の変更が必要になったら**実装で辻褄を合わせず、設計リポ (hassan_v3) に差し戻す**
+- 既存コードとの平仄 (命名・エラー返却スタイル・テストスタイル・DTO 命名) を最優先で揃える
+- **frontend に影響する変更 (API の IF)** は、`../api/openapi.yaml` の再生成と
+  `../frontend/src/generated` の型再生成まで**同じ PR で行う** (MR-3)。
+  **破壊的変更の場合は ①新旧併存 / ②FE 切替 / ③旧削除 を別 PR に分ける** (MR-6。ルート `CLAUDE.md`)
+
+## ハーネス
+
+- pre-commit (ルートの `../scripts/hooks/pre-commit`) が staged パスを見て
+  `go build` + `go vet` + 差分パッケージの `go test` を実行する。
+  `--no-verify` 回避はユーザー明示指示がない限り禁止
+- CI (`../.github/workflows/ci.yml`) の `backend` ジョブが **`working-directory: backend`** で
+  全体テスト + lint + 生成物の差分を機械強制する。**必須チェックは `gate` ジョブ 1 本のみ** (MR-1)
+- **`.golangci.yml` / `layering-scopes.yml` / `scripts/` はこのサブツリーのルートに置く** —
+  CI が `working-directory` を切るため、パス表記は 3 リポ構成のときと変わらない
+  (設計: `architecture.md` §3.11.1 のサブツリー自己完結)
+- `.env` 読取・DB 破壊操作・force push・migration 削除は autoMode で deny

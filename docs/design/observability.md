@@ -46,7 +46,7 @@
 | O-E | コスト制御 | **課金上限による拒否は設けない** (ユーザー決定 C-12)。可視化 + しきい値アラートで運用する。**別途「暴走の安全弁」を機能要件として実装する** (§4.4) | (a) アカウント月次上限で拒否: ユーザー決定により却下 (b) 安全弁も設けない: **却下** — 会話フローは LLM がツールを繰り返す構造で、打ち切りが無いと停止条件が LLM 任せになる。これはコスト制限ではなく無限ループ対策 |
 | O-F | 失敗の可観測性 | **LLM 起因の失敗を 5 分類し、warn ログ + メトリクスの両方に出す** (§4.3)。握り潰し禁止。**実施時期 = 初期実装 (第 1 増分)** (§6.1 の ⑧。§6.1 の表が実施時期の SSOT) — **⑦ の「利用量・コスト系メトリクスの先送り」の対象ではない** | (a) エラーログのみ: 発生率の推移が見えず、劣化に気付けない (b) メトリクスのみ: 個別事象の原因調査ができない (c) メトリクスを利用量系と同じく v2 併用期間中へ先送り: **失敗は明細から後付けで再計算できない** — 発生した事実が残らないと遡れない |
 | O-G | 分散トレース | **初期増分では導入しない** (先送り)。`request_id` によるログ相関で代替する。**再検討の契機**: サービスが 2 つ以上に分割されたとき / 外部呼び出しのレイテンシ内訳が問題になったとき | (a) OpenTelemetry / X-Ray を初期から導入: 単一サービス構成では相関 ID で足り、計装コストが先に立つ。**先送りであって「不要」ではない** ことを明記する |
-| O-H | 単価テーブル | **モデル単価は設定として外部化**する。**トークン単価の行型に加えて「1 リクエストあたりの単価」の行型を持つ** (外部検索 API 用。§4.2 の `external_search` の注) (コード内ハードコードにしない。置き場は `config`。[architecture.md](architecture.md) §3.9②)。更新日を持たせ、**古い単価で計算し続けていることが分かる**ようにする。**実施時期 = v2 併用期間中** (§6.1 の表): 単価テーブルはコスト算出の入力であり、**明細に 4 種のトークン数が残っていれば後から遡って再計算できる**。逆に明細のカラムが欠けていると再計算できないため、**O-D の明細を先に入れる** | (a) ハードコード (v2 現状): 単価改定・モデル追加のたびにデプロイが必要で、実態と乖離しても気付けない (b) 単価テーブルを明細より先に入れる: 再計算可能な側を先に作ることになり、**後から遡れない明細の実装が遅れる** |
+| O-H | 単価テーブル | **モデル単価は設定として外部化**する。**トークン単価の行型に加えて「1 リクエストあたりの単価」の行型を持つ** (外部検索 API 用 = §4.2 の `external_search` の注 / **画像生成 1 枚あたりも同じ行型で表す** = §4.2.2) (コード内ハードコードにしない。置き場は `config`。[architecture.md](architecture.md) §3.9②)。更新日を持たせ、**古い単価で計算し続けていることが分かる**ようにする。**実施時期 = v2 併用期間中** (§6.1 の表): 単価テーブルはコスト算出の入力であり、**明細に 4 種のトークン数が残っていれば後から遡って再計算できる**。逆に明細のカラムが欠けていると再計算できないため、**O-D の明細を先に入れる** | (a) ハードコード (v2 現状): 単価改定・モデル追加のたびにデプロイが必要で、実態と乖離しても気付けない (b) 単価テーブルを明細より先に入れる: 再計算可能な側を先に作ることになり、**後から遡れない明細の実装が遅れる** |
 
 ## 3. 構成
 
@@ -135,8 +135,8 @@ Agent 経路・直接 API 経路の**両方**で、1 回の LLM 呼び出しご�
 |---|---|
 | `request_id` / `account_id` / `contract_id` / `session_id` | 4.1 と同じ相関キー |
 | `feature` | 機能識別子 (例: `conversation.turn` / `plan.generate` / `asset.extract`)。**Go の const 群として `entity/` の 1 ファイルに列挙し、リテラルの直書きを禁止する** — 追加は同一 PR でこの const 群に足す。**この const 群が [testing.md](testing.md) §10 の存在検査 #5 (LLM 経路のテスト存在検査) の対象集合になる**ため、定義が無いと検査が 0 件を検査して緑になる (同 §13.3)。値は `<ドメイン>.<操作>` 形式 |
-| **`theme_id`** | **テーマ単位のコスト集計に必要** (NULL 可。テーマが確定する前の呼び出しがあるため)。列定義と FK を張らない判断は [data-model.md](data-model.md) §4.10 (2026-07-30 追加) |
-| `route_kind` | `managed_agent` / `direct_api` / **`external_search`** (Exa 等の外部検索 API。Anthropic 呼び出しではないが**課金を伴うため計測対象に含める** — [llm-migration.md](llm-migration.md) §4 の P-12 / C-5)。**値の追加はこの表を SSOT として行う** |
+| **`theme_id`** | **テーマ単位のコスト集計に必要** (NULL 可)。**NULL になるのはテーマに紐づかない経路だけ** — アセット抽出・ナレッジ検索・通常モードのナレッジ会話。**会話経路は最初の呼び出しから必ず埋まる** (CV-Q8=A でテーマ必須になり `conversation_sessions.theme_id` が NOT NULL になったため。2026-08-01 に「テーマが確定する前の呼び出しがある」を撤回した)。列定義と FK を張らない判断は [data-model.md](data-model.md) §4.10 (2026-07-30 追加) |
+| `route_kind` | `managed_agent` / `direct_api` / **`external_search`** / **`image_generation`** (2026-08-02 追加。§4.2.2) (Exa 等の外部検索 API。Anthropic 呼び出しではないが**課金を伴うため計測対象に含める** — [llm-migration.md](llm-migration.md) §4 の P-12 / C-5)。**値の追加はこの表を SSOT として行う** |
 | `provider` / `model` | 実際に使われたプロバイダとモデル |
 | `input_tokens` / `output_tokens` | **全 LLM プロバイダで取得する** (v2 は OpenAI のみ — 継承不可)。**`route_kind=external_search` は対象外** (トークン課金ではなくリクエスト課金のため。下記の注) |
 | `cache_read_input_tokens` / `cache_creation_input_tokens` | **プロンプトキャッシュのトークン。単価が通常入力と異なるため、これが無いとコストが構造的に誤る**。Managed Agents は既に 4 カウンタを返している (`claude_managed_agents/internal/stream/processor.go:65`〜`:68` が `InputTokens` / `OutputTokens` / `CacheReadInputTokens` / `CacheCreationInputTokens` を受け取っている)。**明細は append-only なので、取り損なった分は後から復元できない** |
@@ -152,7 +152,7 @@ Agent 経路・直接 API 経路の**両方**で、1 回の LLM 呼び出しご�
 - **同じ明細テーブルに載せる**。理由: コストは「LLM + 検索」の合計で見なければ AL-4 (日次コストの急増) が
   総額を捉えられず、検索の回数だけが増えた場合に検知できない
 - **トークン系 4 カウンタと `stop_reason` は NULL 可**とする (トークン課金ではないため)。
-  **この 5 フィールドについて NULL を許すのはこの `route_kind` のみ** — LLM 経路で NULL は計測漏れであり、
+  **この 5 フィールドについて NULL を許すのは `external_search` と `image_generation` の 2 つの `route_kind` のみ** (後者は 2026-08-02 追加。§4.2.2) — LLM 経路で NULL は計測漏れであり、
   区別できる形にする。
   **相関キー (`session_id` / `theme_id`) はこの規則の対象外** — どの `route_kind` でも
   「値が無い経路が正当に存在する」ため NULL は計測漏れを意味せず、**計測漏れの CHECK にも掛けない**
@@ -171,6 +171,45 @@ Agent 経路・直接 API 経路の**両方**で、1 回の LLM 呼び出しご�
   **失敗系の warn メトリクス (§4.3) は同じ扱いにしない** (§6.1 の ⑧)
 - **単価テーブル (O-H) は 4 種のトークン単価を別々に持つ** (入力 / 出力 / キャッシュ書き込み / キャッシュ読み出し)。
   1 種の単価で概算すると、キャッシュを多用する Agent 経路で誤差が積み上がる
+
+#### 4.2.1 `feature` の登録済みの値 (会話型アイデア創出。2026-08-01 追加)
+
+[API/conversation.md](API/conversation.md) §3.3 が確定した会話ドメインの `feature` 値。
+**`entity/` の const 群に登録する対象**であり、登録されないと
+[testing.md](testing.md) §10 の存在検査 #5 が**対象 0 件を検査して緑になる**
+([API/conversation.md](API/conversation.md) §8 の R-CVA-5)。
+
+| `feature` | 経路 | 実装形態 |
+|---|---|---|
+| `conversation.turn` | 会話ターン (P-1 オーケストレーター) | Managed Agent |
+| `idea.diverge` | 発散 (P-2。`generate_ideas` ハンドラから) | Managed Agent |
+| `plan.generate` | 企画書タブ生成 (P-4)。**会話ターン経由と REST の再生成で同じ値**を使う | Managed Agent |
+| `idea.evaluate` | アイデア評価 (P-5) | 直接 API |
+| `conversation.deepdive` | 深掘り (P-6) | 直接 API |
+| `conversation.match` | 機能マッチング (P-7) | 直接 API |
+| `conversation.research` | 市場調査 (P-8。Exa 併用のため `route_kind` が分かれる) | 直接 API + `external_search` |
+| `plan.chat` | 企画書チャット (V-8 の後継。ツールを持たない chat) | 直接 API |
+| `plan.thumbnail` | 企画書サムネイル生成 (V-9 の後継) | **画像生成** (`route_kind=image_generation`) |
+
+**アイデア・企画書ドメインが追加する値はそれぞれの API 設計が起票する** —
+本表に無い値をリテラルで直書きしない。
+
+#### 4.2.2 `route_kind=image_generation` (企画書サムネイル) の扱い (2026-08-02 追加)
+
+**起票元**: [API/plans.md](API/plans.md) §12 の R-PL-6。対象は `feature=plan.thumbnail` の 1 経路
+(v2 の `GET /business-plans/generate-image` の後継。実体は **Gemini による画像生成**であり
+テキスト生成ではない — `hassan-v2-backend/usecase/business_plan/generate_business_plan_thumbnail.go:85` / `:91`)。
+
+- **同じ明細テーブルに載せる**。理由は `external_search` と同じ — **コストは「LLM + 検索 + 画像生成」の合計**で
+  見なければ AL-4 (日次コストの急増) が総額を捉えられない
+- **トークン系 4 カウンタと `stop_reason` は NULL 可**とする。**この 5 フィールドで NULL を許すのは
+  `external_search` と `image_generation` の 2 つの `route_kind` のみ** (§4.2 の記述を本節が拡張する)。
+  LLM 経路で NULL は計測漏れであり、区別できる形にする
+- **単価テーブル (O-H) に「1 枚あたりの単価」の行型を持たせる** — トークン単価しか持たない設計だと
+  `estimated_cost` が 0 になり、**画像生成のコストが総額から丸ごと落ちる**。
+  外部検索の「1 リクエストあたりの単価」と同じ行型で表現できる
+- `provider` / `model` には画像生成モデルの識別子を入れる (例: `provider=gemini`)
+
 
 ### 4.3 失敗の分類と検知 (O-4 / AC-2.3)
 

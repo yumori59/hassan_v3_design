@@ -17,7 +17,7 @@
 |---|---|
 | **いつテストを書くか** (Red → Green → Refactor・Red の受理条件) | [01-construction-loop.md](../../templates/shared/.claude/rules/01-construction-loop.md) §2 + [test-driven-development/SKILL.md](../../templates/shared/.claude/skills/test-driven-development/SKILL.md) |
 | **モック・テストダブルの禁じ手** | [testing-anti-patterns.md](../../templates/shared/.claude/skills/test-driven-development/testing-anti-patterns.md) |
-| **CI ゲートの内容とマージ条件** | [01-construction-loop.md](../../templates/shared/.claude/rules/01-construction-loop.md) §7 + [architecture.md](architecture.md) §5 の D-2 + [ci.yml](../../templates/backend-repo/.github/workflows/ci.yml) |
+| **CI ゲートの内容とマージ条件** | [01-construction-loop.md](../../templates/shared/.claude/rules/01-construction-loop.md) §7 + [architecture.md](architecture.md) §5 の D-2 + [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) |
 | **DoD の機械検証項目 (V-1〜V-10)** | [02-issue-granularity.md](../../templates/shared/.claude/rules/02-issue-granularity.md) §3.1 |
 | **LLM 出力の品質評価** (ゴールデンセット 20 件・ブラインド A/B・合否) | **[llm-migration.md](llm-migration.md) §8** — 本書の対象外 |
 | テナント境界の規約 (所有者列・クエリ条件・401/403/404) | [auth.md](auth.md) §6.3〜§6.6 |
@@ -86,7 +86,7 @@
 | # | 論点 | 採用案 | 却下案と理由 |
 |---|---|---|---|
 | **T-A** | 段の集合 | **4 段: U (単体) / I (統合・実 DB) / C (契約) / E (E2E・Playwright)**。段の境界は「何を担保しないか」で切る (§3.1) | (a) **U + E の 2 段**: v2 の実害 (T-F3) がある SQL・所有者条件は U では見えず、E では他テナントの ID を得る手段が無いため**構造的に検証不能**な穴が残る。(b) **U / I / E の 3 段** (契約を段にしない): OpenAPI・tool schema・`entity/toolresult` のズレは「実行しても緑になる」種類の欠陥 (BE-8 / BE-12 / FE-2) で、振る舞いテストでは捕まらない。(c) **段を 5 つに増やし FE のコンポーネントテストを独立段にする**: 実行環境と担保範囲が U と同じ (jsdom・実 DB なし) で、境界が「何を担保しないか」で切れない |
-| **T-B** | Repository の検証方法 | **実 PostgreSQL を使う** (CI の `services: postgres` — [ci.yml](../../templates/backend-repo/.github/workflows/ci.yml):17〜26 に既にある) | (a) **`sqlmock` で SQL 文字列を照合**: 「`WHERE account_id = $1` という文字列があるか」は見えるが、**実際に行が絞られるか**は見えない。[auth.md](auth.md) §6.4 の F-15 は「クエリは正しいのに呼び出し側が越境していた」実例であり、文字列照合はこれを通す。(b) **`testcontainers` / `dockertest`**: 起動制御はできるが、CI では `services` で同じことができ、依存が 1 つ増える。ローカルでの起動は `docker compose` で足りる。(c) **Repository をテストしない (v2 の現状)**: T-F3 がそのまま v3 に来る |
+| **T-B** | Repository の検証方法 | **実 PostgreSQL を使う** (CI の `services: postgres` — [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `backend` ジョブの `services: postgres` に既にある) | (a) **`sqlmock` で SQL 文字列を照合**: 「`WHERE account_id = $1` という文字列があるか」は見えるが、**実際に行が絞られるか**は見えない。[auth.md](auth.md) §6.4 の F-15 は「クエリは正しいのに呼び出し側が越境していた」実例であり、文字列照合はこれを通す。(b) **`testcontainers` / `dockertest`**: 起動制御はできるが、CI では `services` で同じことができ、依存が 1 つ増える。ローカルでの起動は `docker compose` で足りる。(c) **Repository をテストしない (v2 の現状)**: T-F3 がそのまま v3 に来る |
 | **T-C** | モックの境界 | **テストダブルに差し替えてよいのは「利用側が定義した repository IF / gateway IF」だけ**。`entity/` と `service/` は常に実物、SQL は実 DB (§3.2) | (a) **層ごとに直下をモックする**: `usecase` のテストで `service` をモックすると、L-2 / L-3 を守るために UseCase に集まった協調ロジック (§3.9⑤) がまるごと未検証になる。(b) **何もモックせず全部実物 (外部 API も)**: LLM を毎テスト叩くことになり、時間・コスト・非決定性で U 段が成立しない。(c) **モック生成ツール (mockery / gomock) を導入**: v2 に前例が無く生成物が増える。[architecture.md](architecture.md) §3.6 が IF を 1〜3 メソッドに縛るため**手書きの方が短い** (T-F4 の巨大スタブは v2 の巨大 IF の帰結であり、IF が小さければ再発しない) |
 | **T-D** | LLM を叩かない担保 | **`gateway` IF (利用側定義の小さい IF) をテストダブルに差し替える**。差し替え点は **1 つだけ** | (a) **Anthropic SDK をモックする**: SDK の型が `service` / `usecase` のテストに漏れ、L-5 (外部型を上位層に出さない) をテストが破る。(b) **HTTP レベルの録画再生 (VCR 方式)**: 記録の更新が手作業になり、`stop_reason` や usage を任意に変えた異常系 (§5.4) を作れない。(c) **CI で実 LLM を叩く**: 非決定性・コスト・外部障害で赤くなる。実 LLM は E 段と [llm-migration.md](llm-migration.md) §8 の品質評価に限る |
 | **T-E** | BE-12 (読み手・書き手・テストの契約不一致) の潰し方 | **`entity/toolresult` の Go 型を単一の SSOT とし、テストは型を組み立てて `json.Marshal` する**。加えて**型から生成した golden ファイル** (`testdata/golden/toolresult/<tool>.json`) を置き、**読み手のテストは golden を入力に使う** (§5.3) | (a) **golden ファイルのみ**: golden を**手書き**すると T-F17 と同じ状態になる (「golden」という名前の合成 JSON)。生成された golden でなければ意味がない。(b) **JSON Schema を SSOT にして Go 型を生成**: ツールが増え、しかも tool の**入力**スキーマ (Anthropic に登録するもの) と**出力**型で SSOT が 2 つになる。(c) **CI 検査だけに任せる** (`check-tool-contract.sh`): 読み手が独自構造体を作らないことは検査できるが、**テスト内の手書き JSON リテラルは残る** — T-F17 はまさにそれで隠れた |
@@ -99,7 +99,7 @@
 | **T-L** | E2E での LLM の扱い | **実 LLM を叩く** (dev のモデルプロファイル。[llm-migration.md](llm-migration.md) §5.2)。**アサーションは構造だけに限る** (イベント種別・要素の出現・文字数の下限) | (a) **dev の BE に LLM スタブを差す**: E2E が検証する経路が本番と別物になる (BE-5 と同型の「本番に無い経路が動く」問題)。(b) **Playwright の route interception で BE 応答をモック**: E2E が FE 単体テストに退化し、結合を担保しない。(c) **LLM の文言をアサートする**: 出力が毎回変わるため恒常的にフレークする |
 | **T-M** | 統合段の DB 初期化 | **既定は「1 テスト = 1 トランザクション + 末尾で必ず ROLLBACK」**。**別トランザクションの相互作用を見るテストだけ専用スキーマ方式**にする (§8.2) | (a) **全テーブル TRUNCATE**: 遅く、並列実行できない。(b) **テンプレート DB から `CREATE DATABASE`**: 並列度は上がるがテストごとに接続が増え、CI の `services` の接続上限に当たる。(c) **ロールバック方式のみ**: [architecture.md](architecture.md) §3.9③ の監査ログは**別トランザクション**の best-effort であり、単一トランザクション内では本体の未コミットデータを見られないため**この経路のテストが書けない** |
 | **T-N** | カバレッジ | **数値目標を置かない** (BE / FE とも)。代わりに **7 種の「必須テストの存在検査」を機械強制する** (§10。うち 1 種は FE の併置テスト検査 = §9.1.1 の F-C3。**#7 = I 段のテストが `t.Skip` で自分をスキップしないこと** — 2026-07-31 追加) | (a) **80% 目標**: v2 は既に `-coverprofile` + Codecov を持ちながらしきい値が無く (T-F6)、数字は集まっても何も強制していない。加えて率目標は「書きやすい `entity/` を厚く、書きにくい `repository/` を薄く」する誘因になり、**実効性が最も必要な場所 (A-4) が薄くなる**。(b) **差分カバレッジ目標**: v2 からの移植 PR (既存コードの移動) で意味を失う |
-| **T-O** | FE のテスト土台 | **vitest + Testing Library**。API は **orval が生成する MSW ハンドラ**を使う (§4.2) | (a) **jest**: v2 に前例が無く (T-F10)、**雛形の pre-commit が既に `npx vitest related --run` を呼んでいる** ([pre-commit](../../templates/frontend-repo/scripts/hooks/pre-commit):34)。PoC も vitest (T-F14)。(b) **手書きの MSW ハンドラ**: 「テストが独自にスキーマを持つ」形になり、FE で BE-12 と同型の問題が起きる。(c) **`global.fetch` を差し替える**: orval の生成形 (クライアント種別) に依存し、生成設定を変えるとテストが一斉に壊れる。(d) **Storybook の play function を主役にする**: v2 は Storybook を持つが CI が無く (T-F9)、実行が担保された前例になっていない |
+| **T-O** | FE のテスト土台 | **vitest + Testing Library**。API は **orval が生成する MSW ハンドラ**を使う (§4.2) | (a) **jest**: v2 に前例が無く (T-F10)、**雛形の pre-commit が既に `npx vitest related --run` を呼んでいる** ([pre-commit](../../templates/app-monorepo/scripts/hooks/pre-commit) の frontend ブロックの「関連テスト」)。PoC も vitest (T-F14)。(b) **手書きの MSW ハンドラ**: 「テストが独自にスキーマを持つ」形になり、FE で BE-12 と同型の問題が起きる。(c) **`global.fetch` を差し替える**: orval の生成形 (クライアント種別) に依存し、生成設定を変えるとテストが一斉に壊れる。(d) **Storybook の play function を主役にする**: v2 は Storybook を持つが CI が無く (T-F9)、実行が担保された前例になっていない |
 
 ---
 
@@ -163,7 +163,7 @@
 | 対象 | 段 | 方針 | 必須ケース |
 |---|---|---|---|
 | `lib/` の純粋関数 (パース・整形) | U | 実物のみ。**LLM 出力を数値化する関数は必ずテスト対象** | FE-6 のレンジ誤抽出 / 空・欠損・想定外形式 |
-| コンポーネント | U | Testing Library。**関連する複数の期待は同一 `waitFor` コールバックに置く** (FE-7。[CLAUDE.md.tmpl](../../templates/frontend-repo/CLAUDE.md.tmpl) のテスト規約と一致) | **`AbortError` が正常系として扱われること** (FE-1) / ストリーミング中断・タイムアウトが画面に出ること |
+| コンポーネント | U | Testing Library。**関連する複数の期待は同一 `waitFor` コールバックに置く** (FE-7。[CLAUDE.md.tmpl](../../templates/app-monorepo/frontend/CLAUDE.md.tmpl) のテスト規約と一致) | **`AbortError` が正常系として扱われること** (FE-1) / ストリーミング中断・タイムアウトが画面に出ること |
 | API クライアント | U | **orval が生成する MSW ハンドラ**を使う (T-O)。手書きのレスポンス定義を作らない | 生成型に無いフィールドを参照していないこと (tsc が担保) |
 | SSE 読み取りの共通クライアント | U | `\n\n` 区切りの分割・**空行を本文として通す**・改行を含む本文 (BE-7 の FE 側)・再接続 | 分割が chunk 境界を跨いだ場合 / 途中切断 |
 | 画面遷移・実 SSE | **E** | §7 | — |
@@ -220,7 +220,7 @@ usecase/conversation (実物)
 | 1 | **テストは `entity/toolresult` の型を組み立て、`json.Marshal` した値を使う**。JSON 文字列リテラルをテストに書かない | [architecture.md](architecture.md) §3.8.5 の規約 5 を機械強制する (§13 の是正要求 3) |
 | 2 | **golden ファイルは型から生成する** — `go test -update` 相当のフラグで `testdata/golden/toolresult/<tool>.json` を再生成し、**差分を PR に出す**。手書きしない | 生成の入力が型なので、フィールドを増減すると golden 差分として必ず見える |
 | 3 | **読み手のテストは golden を入力に使う** — 台帳への write-through / SSE 変換 / 還流 / 永続化の 4 経路すべて | 読み手が独自構造体を作れば golden をパースできず落ちる |
-| 4 | **`entity/toolresult` の型を変更した PR は、golden の差分を含まなければ落ちる** | **CI に golden 再生成の専用ステップがある** (2026-07-30 に追加済み: [ci.yml](../../templates/backend-repo/.github/workflows/ci.yml):88〜 の「golden ファイルの差分チェック」。`make golden` → `git diff --exit-code`。`Makefile` に `golden` ターゲットが無ければ `exit 1`)。**生成物差分チェックとは別ステップにした** — 落ちた原因が sqlc/wire か golden かをジョブ名で切り分けられるようにするため |
+| 4 | **`entity/toolresult` の型を変更した PR は、golden の差分を含まなければ落ちる** | **CI に golden 再生成の専用ステップがある** (2026-07-30 に追加済み: [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の「golden ファイルの差分チェック」ステップ。`make golden` → **`scripts/check-regen.sh backend/testdata/golden`**。`Makefile` に `golden` ターゲットが無ければ `exit 1`)。**生成物差分チェックとは別ステップにした** — 落ちた原因が sqlc/wire か golden かをジョブ名で切り分けられるようにするため |
 
 **なぜ golden と型の両方が必要か**: 型だけだと「読み手と書き手が同じ型を使っている」ことしか担保されず、
 **JSON 表現 (フィールド名・省略・型) が変わったこと**が PR のレビューに見えない。
@@ -271,8 +271,8 @@ golden は「外部に出る形」のスナップショットであり、`json` 
 2. **テーブル駆動**: `{method, path, ownedIDBuilder}` の表を 1 ファイルに持ち、X-1 / X-2 を回す
 3. **表の網羅を機械検査する** — **route 登録一覧に存在して表に無い route があれば CI で落とす**。
    route 一覧は **A-1 の `check-route-auth.sh` が既に走査するもの**を再利用する
-   (呼び出し元は [ci.yml](../../templates/backend-repo/.github/workflows/ci.yml):97〜105)。実装は `check-owner-scope.sh` に足す
-   (呼び出し元は同 :107〜116)
+   (呼び出し元は [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の「A-1 認証の適用漏れ検査」ステップ)。実装は `check-owner-scope.sh` に足す
+   (呼び出し元は同 `ci.yml` の「A-4 所有者スコープの検査」ステップ)
    (§13 の是正要求 4)
 4. **パスパラメータ以外の入り口も表に含める** — クエリパラメータ・リクエストボディで**所有者 ID を受け取る API**
    ([auth.md](auth.md) §6.4 の経路②) は、**「B のトークンで A の `account_id` を指定 → 404」**を必ず持つ。
@@ -341,7 +341,7 @@ E2E では「呼ばれなかった」と「越境しなかった」を区別で�
    中間の逐次描画を別々の `expect` で待たない — 分割すると中間レンダーを拾ってフレークする (FE-7)
 2. **`page.waitForTimeout` (固定待ち) を禁止する**。待つのは常に状態 (要素・URL・ネットワーク) に対して行う
 3. **逐次描画そのものを検証したい場合は U 段 (Testing Library) で行う** —
-   関連する期待は同一 `waitFor` コールバックに置く ([CLAUDE.md.tmpl](../../templates/frontend-repo/CLAUDE.md.tmpl) のテスト規約)
+   関連する期待は同一 `waitFor` コールバックに置く ([CLAUDE.md.tmpl](../../templates/app-monorepo/frontend/CLAUDE.md.tmpl) のテスト規約)
 4. **アサーションを LLM の文言に依存させない** (T-L) — 「特定の語が出る」ではなく
    「本文が N 文字以上」「イベント種別が観測された」で見る
 
@@ -357,9 +357,9 @@ E2E では「呼ばれなかった」と「越境しなかった」を区別で�
 | 項目 | 決定 | v2 との差 |
 |---|---|---|
 | テストアカウント | **第 1 リリースでは E2E 専用契約 A を 1 つ + 1 アカウントだけ作る**。§6 の越境は I 段で見るため E2E に 2 契約は不要である。**契約 B は共有機能 (A-7) を E2E に載せる時点で追加する** — それまで作らない (作ると資格情報が 1 組増え、使われないまま失効してローテーション対象になる) | v2 は 1 アカウント |
-| 資格情報の所在 | **dev の Secrets Manager**。E2E ジョブが `dev` environment の OIDC ロールで取得する ([operations.md](operations.md) §4.1 の経路に合わせる。GitHub secret に置かない) | v2 は環境変数 (CI が無いのでローカルのみ) |
+| 資格情報の所在 | **dev の Secrets Manager**。E2E ジョブが **専用 environment `dev-e2e`** の OIDC ロールで取得する (**`dev` と分ける** — モノレポでは `sub` クレームが environment で決まるため、共有すると E2E が dev のデプロイ用ロールを引き受けられる。[infrastructure.md](infrastructure.md) §4.5 / 2026-08-05 変更)。[operations.md](operations.md) §4.1 の経路に合わせる (GitHub secret に置かない) | v2 は環境変数 (CI が無いのでローカルのみ) |
 | **MFA** | **E2E 専用アカウントは MFA 無効とする** (**2026-07-31 のユーザー決定 = §13.1 T-Q3 の案 B**。当初推奨の「TOTP を実行時生成」はシークレット 1 件増と時刻ずれ起因のフレークを理由に不採用)。**代償**: E-1 は MFA 画面遷移を担保しない (U / I 段に委ねる — §7.1 の E-1 行に明記)。**歯止め**: MFA 無効の例外は **dev の E2E 専用アカウントに限定し、prod には作らない**。例外の表現方法は Task-3i が定義する。**却下: 固定コードを環境変数で渡す** — TOTP は時刻依存で固定値では成立しない (v2 の `E2E_MFA_CODE` はこの形。T-F12) | v2 は固定コード |
-| `baseURL` | **dev の固定 URL** を渡す。**環境変数名は `E2E_BASE_URL` に固定**し (雛形の [e2e.yml](../../templates/frontend-repo/.github/workflows/e2e.yml):104 が渡している名前)、**`playwright.config.ts` は既定値を持たず、未設定なら読み込み時に throw する**。Vercel の Preview URL は使わない (デプロイごとに変わる)。**却下: v2 の `PLAYWRIGHT_BASE_URL` を踏襲する** — v2 は既定 `http://localhost:3000` を持つため (T-F11)、CI で env が落ちたときに**存在しないローカルへ接続して全件赤**になり、原因が「env 落ち」か「dev の障害」か切り分けられない。既定値を持たない方が失敗メッセージが 1 行で確定する | v2 は `PLAYWRIGHT_BASE_URL` (既定 `localhost:3000`) |
+| `baseURL` | **dev の固定 URL** を渡す。**環境変数名は `E2E_BASE_URL` に固定**し (雛形の [e2e.yml](../../templates/app-monorepo/.github/workflows/e2e.yml) の Playwright 実行ステップ が渡している名前)、**`playwright.config.ts` は既定値を持たず、未設定なら読み込み時に throw する**。Vercel の Preview URL は使わない (デプロイごとに変わる)。**却下: v2 の `PLAYWRIGHT_BASE_URL` を踏襲する** — v2 は既定 `http://localhost:3000` を持つため (T-F11)、CI で env が落ちたときに**存在しないローカルへ接続して全件赤**になり、原因が「env 落ち」か「dev の障害」か切り分けられない。既定値を持たない方が失敗メッセージが 1 行で確定する | v2 は `PLAYWRIGHT_BASE_URL` (既定 `localhost:3000`) |
 
 ### 7.4 実行タイミングと、その代償への対処 (T-K)
 
@@ -375,12 +375,16 @@ E2E では「呼ばれなかった」と「越境しなかった」を区別で�
 2. **E2E が赤の状態で prod デプロイ (H-4) を進めない** — 最新の E2E 結果を H-4 の承認材料に含める
    ([04-human-checkpoints.md](../../templates/shared/.claude/rules/04-human-checkpoints.md) §1.1 への追記。§13 の是正要求 6)。
    **承認材料として成立する条件: E2E の結果が「BE のどの commit を検証したか」と対応が取れること**。
-   E2E は frontend リポで走るため `github.sha` は **FE 側の commit** であり、
-   H-4 が承認しようとしている **BE の commit とは別物**である。
-   **dispatch の `client_payload.sha` (BE 側 commit) と FE 側 commit の両方を実行サマリに出す**
-   (雛形の [e2e.yml](../../templates/frontend-repo/.github/workflows/e2e.yml):177〜 は **2026-07-30 に BE / FE 両方の commit を出すよう是正済み**。`repository_dispatch` 以外の起動では **BE の commit は不明**として出力し、「H-4 の承認材料に使わない」ことを明示する)。
-   nightly / 手動実行には `client_payload` が無く BE の commit を特定できないため、
-   **サマリに「対象 BE commit: 不明 (nightly / 手動)」と明示し、その実行結果は H-4 の承認材料に使わない**
+   **モノレポ化 (2026-08-03。D-I の方針転換) でこの条件は構造的に満たされた** —
+   BE と FE が同一リポジトリの同一 commit に属するため、
+   `workflow_run.head_sha` 1 つが BE / FE 双方の検証対象を一意に指す
+   (3 リポ構成では E2E が frontend リポで走り `github.sha` が FE 側の commit だったため、
+   BE 側 commit を `client_payload.sha` で別途運ぶ必要があった。**その分岐は不要になった**)。
+   雛形の [e2e.yml](../../templates/app-monorepo/.github/workflows/e2e.yml) は
+   `workflow_run` 起動時に `head_sha` を明示 checkout する
+   (既定の ref はデフォルトブランチの最新であり、デプロイ対象とずれるため)。
+   nightly / 手動実行は「どの commit が dev に載っているか」を特定できないため、
+   **サマリに「対象 commit: 不明 (nightly / 手動)」と明示し、その実行結果は H-4 の承認材料に使わない**
    (dev の継続監視用と位置づける)。**「対象 commit 不明」を承認材料に載せない** —
    稼働中の BE の revision を外部から知る手段が現状の設計に無いため (§13.2 の T-Q10)
 3. **赤の切り分け手順を先に決めておく** — 実 LLM を叩くため、赤の原因が「回帰」か「LLM / 外部障害」かを
@@ -388,24 +392,31 @@ E2E では「呼ばれなかった」と「越境しなかった」を区別で�
    ②同じ commit で 1 回だけ再実行する ③再実行も赤なら回帰として扱う。
    **「フレークだから再実行して緑にする」を無制限に許さない** (再実行は 1 回まで)
 
-**トリガーの送信側 (2026-07-30 に追加)**: FE の `e2e.yml` は `repository_dispatch` (`types: [dev-deployed]`) を
-待つ形にしたため、**送信側が無いとこのトリガーは永久に発火しない**。
-`templates/backend-repo/.github/workflows/deploy.yml` の `release` ジョブ末尾に、
-**dev のときだけ frontend リポへ dispatch する**ステップを追加した。
+**トリガー (2026-08-03 に `workflow_run` へ変更。モノレポ化に伴う簡素化)**:
+`e2e.yml` は **`on.workflow_run` (`workflows: [Deploy]` / `types: [completed]`)** で
+`deploy-backend.yml` の完了を直接受け取る。**送信側の実装は不要**になった。
 
-- **クロスリポジトリの dispatch には frontend リポへの権限を持つトークンが必要** (`GITHUB_TOKEN` は自リポジトリのみ)。
-  GitHub App のインストールトークンか fine-grained PAT を `E2E_DISPATCH_TOKEN` として dev environment に登録する
-- **これは [operations.md](operations.md) §4.1 の「GitHub 側に置いてよい値」の限定列挙に無い** —
-  例外として認めるか、別の起動方式 (nightly のみ) に寄せるかは **要確認** (§13.1 の T-Q5)
-- トークン未設定でもデプロイは失敗させない (E2E はブロックしない) が、**警告を出す** —
-  無言のスキップにするとトリガーが死んでいることに気付けない
-- **警告を出す条件は 2 つ**(どちらもデプロイは失敗させない):
-  ①**トークンが未設定**のとき ②**dispatch の HTTP ステータスが 204 でないとき**
-  (`204 No Content` が GitHub の `POST /repos/{repo}/dispatches` の成功応答)。
-  **②を明示する理由**: `curl -sS` は 401 / 403 / 404 でも終了コード 0 を返すため、
-  `|| echo` だけの実装では**実務で最も起きやすい「トークンの権限不足」「repo 名の誤り」が無言になる**。
-  ステータスを `-o /dev/null -w '%{http_code}'` で取り出して分岐する。
-  **雛形は 2026-07-30 にこの形で実装済み** ([deploy.yml](../../templates/backend-repo/.github/workflows/deploy.yml):491〜507)
+- **`E2E_DISPATCH_TOKEN` は廃止**。3 リポ構成では frontend が別リポだったため
+  クロスリポジトリの `repository_dispatch` が必要で、そのトークンが
+  [operations.md](operations.md) §4.1 の限定列挙における**唯一の例外**だった
+  (§13.1 の T-Q5 [Answer])。**モノレポ化で例外そのものが消えた** (§13.1 の T-Q5 [Answer 2])
+- ⚠️ **`repository_dispatch` を `GITHUB_TOKEN` で打つ形に置き換えてはいけない** —
+  GitHub は `GITHUB_TOKEN` 起因のイベントで新しいワークフロー実行を起動しない (無限ループ防止)。
+  同一リポジトリでは **`workflow_run` が唯一成立する経路**である
+- **dev / prod の判別は `workflow_run.event`** (`push` = dev 継続デプロイ / `workflow_dispatch` = prod)。
+  この条件を外すと **prod デプロイでも E2E が dev に対して走る**
+- **FE のみの変更では `deploy-backend.yml` が起動しない** (path filter。MR-1) ため
+  `workflow_run` も発火しない。その場合は nightly が拾う
+- **`workflow_run` は送信側の実装を持たない**ため、「トークン未設定」「dispatch が 4xx で無言に失敗」
+  という 3 リポ構成での失敗モードは**構造的に消滅した**。
+  ~~トークン未設定の警告~~ / ~~dispatch の HTTP 204 判定~~ は**要求から削除**
+  (2026-08-04。design-reviewer 指摘 重大 3 — 「廃止した」と書きながら同じ節でその機構の実装を
+  「実装済み」として要求しており、読者を `repository_dispatch` の再導入 =
+  [operations.md](operations.md) §4.1 の限定列挙への例外の再導入へ誘導していた)
+- **代わりに残る失敗モードは 1 つ**: **`workflow_run` の `workflows:` に書いた名前が
+  `deploy-backend.yml` の `name:` とずれると、E2E が無言で起動しなくなる**。
+  雛形の `e2e.yml` にリネーム時の注意をコメントで置いている。
+  **`deploy-backend.yml` の `name:` を変える PR は `e2e.yml` を同じ差分で直す**
 
 **Playwright の retry 設定**: `retries: 1` (CI のみ)。**却下: `retries: 2` 以上** —
 リトライで隠れるフレークは仕様の非決定性を示しており、隠すべきではない。
@@ -446,7 +457,7 @@ E2E では「呼ばれなかった」と「越境しなかった」を区別で�
   **アラートのしきい値・通知先の SSOT は observability 側**であり、テスト戦略から新規のアラートを増やすと
   SSOT が 2 つになる。**まず nightly の 1 本で検出可能にし、常時監視が必要と判明したら observability へ移す**
 
-**実体**: 雛形の [e2e.yml](../../templates/frontend-repo/.github/workflows/e2e.yml) に nightly 限定プロジェクトが無い
+**実体**: 雛形の [e2e.yml](../../templates/app-monorepo/.github/workflows/e2e.yml) に nightly 限定プロジェクトが無い
 (§13 の是正要求 10)。
 
 ---
@@ -479,7 +490,7 @@ E2E では「呼ばれなかった」と「越境しなかった」を区別で�
 **「テスト用のスキーマ SQL を別に持つ」ことを禁止する** — 本番のマイグレーションとテスト DB のスキーマが
 別管理になると、**マイグレーションのバグがテストを通り抜ける** (I 段の存在意義が消える)。
 
-**雛形は 2026-07-30 に是正済み**: [ci.yml](../../templates/backend-repo/.github/workflows/ci.yml) に
+**雛形は 2026-07-30 に是正済み**: [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) に
 **「スキーマ適用 (統合段の前提)」ステップ**を追加した (`SCHEMA_APPLY_TARGET` が未設定なら `exit 1` — 
 方式 (D-4) の確定前に「テーブル無しで統合段が緑になる」のを防ぐ)。
 
@@ -498,7 +509,7 @@ Go の慣習では「DB が無い環境ではスキップ」と書きがちだ�
 | 却下: ビルドタグ (`//go:build integration`) | タグを付け忘れた統合テストが単体扱いで DB 無しに走り、別の形で沈黙する |
 
 > **この規約だけでは塞げない残余を §10 の存在検査 #7 が閉じる** (2026-07-30 の 2 巡目レビュー 中 R-2)。
-> **CI は常に `DATABASE_URL` を設定する** ([ci.yml](../../templates/backend-repo/.github/workflows/ci.yml):73〜74) ため
+> **CI は常に `DATABASE_URL` を設定する** ([ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `backend` ジョブの `go test` ステップ (`DATABASE_URL` を env に持つ)) ため
 > `TestMain` の `log.Fatal` は **CI では発火しない** — 実際の抜け道は個別テストに
 > `if os.Getenv("DATABASE_URL") == "" { t.Skip() }` を書く形であり、**規約の遵守に依存する限り残る**。
 > #7 は `repository/` · `controller/` の `_test.go` に `t.Skip` / `t.Skipf` が現れたら落とす
@@ -542,36 +553,36 @@ Go の慣習では「DB が無い環境ではスキップ」と書きがちだ�
 | **E** | — | **回さない** | **✓** (dev デプロイ後) | **✓** |
 
 - **U / I / C は既存の CI ジョブに収まる** (`go test ./...` が U と I の両方を含む。`services: postgres` があるため)。
-  **backend リポに新しい必須チェックのジョブを増やさない**
-- **E は frontend リポの `e2e.yml`** が実行主体 —
-  **2026-07-30 に雛形へ作成済み** ([e2e.yml](../../templates/frontend-repo/.github/workflows/e2e.yml))。
-  **PR の必須チェックではない** (`repository_dispatch` / `schedule` / `workflow_dispatch` のみで起動し、
+  **新しい必須チェックのジョブを増やさない** (必須チェックは `gate` 1 本のみ — モノレポ機構の MR-1)
+- **E は app モノレポの `.github/workflows/e2e.yml`** が実行主体 (`frontend/` のテストを実行する) —
+  **2026-07-30 に雛形へ作成済み** ([e2e.yml](../../templates/app-monorepo/.github/workflows/e2e.yml))。
+  **PR の必須チェックではない** (`workflow_run` / `schedule` / `workflow_dispatch` のみで起動し、
   `pull_request` トリガーを持たない)
 - **S-6 (検証) で OR が実行するコマンドは変えない** ([01-construction-loop.md](../../templates/shared/.claude/rules/01-construction-loop.md) §1.3)。
   E は S-6 の対象外である (dev にデプロイされていないコードに対して回せない)
 
-#### 9.1.1 frontend リポの機械検査 7 種の割り当て (D-2 の SSOT への登録)
+#### 9.1.1 frontend (`frontend/`) の機械検査 7 種の割り当て (D-2 の SSOT への登録)
 
 **[frontend.md](frontend.md) §16.2-1 が要求する登録項目**。同書が定義した FE の機械検査 7 種は
-**すべて frontend リポの既存 CI ジョブ (`ci.yml` の `frontend` ジョブ) の中にある**ため、
+**すべて `ci.yml` の `frontend` ジョブ (`working-directory: frontend`) の中にある**ため、
 **新しいワークフローもジョブも増えない**。§9.1 の「新しい必須チェックを増やさない」は
-**backend リポの CI ジョブについての記述**であり、frontend リポの既存ジョブへのステップ追加は含まない。
+**backend の CI ジョブについての記述**であり、`frontend` ジョブへのステップ追加は含まない。
 
 | # | 検査 | 段 | PR の必須チェック | 実体 (2026-07-30 実測) |
 |---|---|---|---|---|
-| **F-C1** | 依存方向 zone (L-F1〜L-F6。[frontend.md](frontend.md) §3.3) | **C** (構造の契約) | **✓** (`npm run lint`) | [.eslintrc.json.tmpl](../../templates/frontend-repo/.eslintrc.json.tmpl):55〜 (`import/no-restricted-paths` の zone = L-F2 / L-F3 / L-F6) + :92〜 (L-F1) + :164〜 (**L-F1 と L-F4 の再掲**。`no-restricted-imports` は override で上書きされるため — 2026-07-30 修正) |
+| **F-C1** | 依存方向 zone (L-F1〜L-F6。[frontend.md](frontend.md) §3.3) | **C** (構造の契約) | **✓** (`npm run lint`) | [.eslintrc.json.tmpl](../../templates/app-monorepo/frontend/.eslintrc.json.tmpl):55〜 (`import/no-restricted-paths` の zone = L-F2 / L-F3 / L-F6) + :92〜 (L-F1) + :164〜 (**L-F1 と L-F4 の再掲**。`no-restricted-imports` は override で上書きされるため — 2026-07-30 修正) |
 | **F-C2** | デザイントークン強制 (FE-3。[frontend.md](frontend.md) §7.2) | **C** | **✓** (`npm run lint`) | 同 :30 (`tailwindcss/no-arbitrary-value`) / :31〜38 (`no-custom-classname` + whitelist `^(app\|admin)-.*`) / :45〜48 (生 hex) / :49〜52 (`style` 属性)。例外は `src/styles/**` と `tailwind.config.*` のみ (同 :196〜224) |
-| **F-C3** | **併置テストの存在** (FE-4 / FE-6。[frontend.md](frontend.md) §8.2) | **U** (存在検査。§10 の 6 番) | **✓** | [ci.yml](../../templates/frontend-repo/.github/workflows/ci.yml):58〜71 |
-| **F-C4** | 公開パス許可リストとルートグループの一致 ([frontend.md](frontend.md) §11.2.3) | **C** | **✓** | 同 :73〜97 (許可リスト `PUBLIC_PATHS` の存在確認 + `scripts/check-public-paths.sh` の呼び出し。**スクリプト本体は実装リポで書く** — 未実装なら :95〜96 で落ちる) |
-| **F-C5** | `NEXT_PUBLIC_` 許可リスト ([frontend.md](frontend.md) §12) | **C** | **✓** | 同 :99〜117 (`ALLOWED="NEXT_PUBLIC_APP_ENV"`) |
-| **F-C6** | `globals.css` の行数可視化 (FE-3) | **C** | **✗ (非ブロック)** | 同 :119〜129 (`if: always()` + `::notice` のみ。ブロックしないのは [frontend.md](frontend.md) §7.2 の判断) |
-| **F-C7** | **`X-Admin-Token` の局所化** ([frontend.md](frontend.md) §5.2.1) | **C** | **✓** (`npm run lint`) | [.eslintrc.json.tmpl](../../templates/frontend-repo/.eslintrc.json.tmpl):162〜195 (`src/**` から `admin-mutator.ts` を除外し `Literal` / `Property` の 2 セレクタで禁止) + :196〜224 (styles 側の override でも維持) |
+| **F-C3** | **併置テストの存在** (FE-4 / FE-6。[frontend.md](frontend.md) §8.2) | **U** (存在検査。§10 の 6 番) | **✓** | [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `frontend` ジョブの「検査 1 併置テストの存在」ステップ |
+| **F-C4** | 公開パス許可リストとルートグループの一致 ([frontend.md](frontend.md) §11.2.3) | **C** | **✓** | 同 `ci.yml` の `frontend` ジョブの「検査 2 公開パスの許可リストとルートグループの一致」ステップ (許可リスト `PUBLIC_PATHS` の存在確認 + `scripts/check-public-paths.sh` の呼び出し。**スクリプト本体は実装リポで書く** — 未実装なら同ステップ内で `exit 1` する) |
+| **F-C5** | `NEXT_PUBLIC_` 許可リスト ([frontend.md](frontend.md) §12) | **C** | **✓** | 同 `ci.yml` の `frontend` ジョブの「検査 3 NEXT_PUBLIC_ の許可リスト」ステップ (`ALLOWED="NEXT_PUBLIC_APP_ENV"`) |
+| **F-C6** | `globals.css` の行数可視化 (FE-3) | **C** | **✗ (非ブロック)** | 同 `ci.yml` の `frontend` ジョブの「検査 4 globals.css の行数」ステップ (`if: always()` + `::notice` のみ。ブロックしないのは [frontend.md](frontend.md) §7.2 の判断) |
+| **F-C7** | **`X-Admin-Token` の局所化** ([frontend.md](frontend.md) §5.2.1) | **C** | **✓** (`npm run lint`) | [.eslintrc.json.tmpl](../../templates/app-monorepo/frontend/.eslintrc.json.tmpl):162〜195 (`src/**` から `admin-mutator.ts` を除外し `Literal` / `Property` の 2 セレクタで禁止) + :196〜224 (styles 側の override でも維持) |
 
 - **U / I / C / E の段への当てはめ**: FE には**実 DB を伴う段が無い**ため **I 段は空**である
   (BE 呼び出しは MSW / E 段が担う。§4.2)。F-C1〜F-C7 のうち **F-C3 だけが「テストの存在」を見る検査**なので
   **U 段**に置き、残りは「型・構造・設定のズレを実行せずに見る」ものなので **C 段**に置く
   (§3.1 の C 段の定義 = 「実行しても緑になる種類の欠陥」)
-- **frontend リポの `ci.yml` は `push` / `pull_request` の両方で全ブランチに走る** (同 :7〜11) ため、
+- **`ci.yml` は `pull_request` で全ブランチの PR に走る** (`push` は `main` のみ。path filter で変更サブツリーのジョブのみ実行。MR-1) ため、
   **F-C1〜F-C5・F-C7 は PR のマージ条件に入る** (V-1 の「CI が緑」に含まれる。マージ条件そのものの SSOT は
   [01-construction-loop.md](../../templates/shared/.claude/rules/01-construction-loop.md) §7.2 で、本書は変更しない)
 - **雛形の記述との差異 (2026-07-30 実測)**: [frontend.md](frontend.md) §16.2-1 の表は
@@ -614,7 +625,7 @@ T-H の判断 (全件必須) が実質無効化される。
    **E-1 (認証) と E-3 (SSE) の 2 本**に限る (「デプロイで壊れやすい結合」がこの 2 本に集中している)。
    E-2 / E-4 / E-5 は nightly で回す。**代償: 生成物の還流の回帰が最大 24 時間気付かれない**
    (§7.4 の緩和策 1 = PR の I 段への依存が増える)
-3. **`timeout-minutes` を上げる** ([e2e.yml](../../templates/frontend-repo/.github/workflows/e2e.yml):54 が 30 分) —
+3. **`timeout-minutes` を上げる** ([e2e.yml](../../templates/app-monorepo/.github/workflows/e2e.yml) の `e2e` ジョブの `timeout-minutes` が 30 分) —
    **最後の手段**。実行時間の上限を上げるだけで、赤の切り分け時間は延びる
 
 **E 段で削ってはいけないもの**: **E-1 (認証)** — サインインが通らなければ他の 4 本も回らないため、
@@ -646,9 +657,9 @@ T-H の判断 (全件必須) が実質無効化される。
 | 2 | **認証を要する全 route に X-1 / X-2 がある** | I | §6.1 の 3 (`check-owner-scope.sh` に追加。§13.3 の是正要求 4) |
 | 3 | **全 tool に A-1' がある** | I | §6.2 (同スクリプト。同上) |
 | 4 | **LLM 出力を数値化する `entity/` の関数に、レンジ表記を含む入力ケースがある** | U | **`scripts/check-required-tests.sh`** (新規。§13.3 の是正要求 12)。**判定規則**: `entity/` 配下で [llm-migration.md](llm-migration.md) §8.3 の Q-3 が対象とする関数 (**関数名または `//nolint` ではなく、`// llmparse:` マーカーコメントを付けた関数**を対象集合とする) それぞれについて、対応する `_test.go` に**ハイフンを挟んだ数値レンジのリテラル** (`[0-9]+ *[-〜–] *[0-9]+`) が 1 件以上現れることを確認する。**Q-3 は「ケースを含める」という規約であって欠落を検出する検査ではない**ため、検査は本書で新規に定める |
-| 5 | **各 LLM 経路に F-1〜F-5 のケースが 1 件以上ある** | U | 同スクリプト。**判定規則**: [observability.md](observability.md) §4.2 の `feature` 識別子の**定数一覧** (**`entity/` の 1 ファイルに置く Go の const 群。この要求は同 §4.2 の `feature` 行が SSOT** — 2026-07-30 に追記。定義が無いと本検査は 0 件を検査して緑になる) を対象集合とし、各識別子について `service/` 配下のテスト名に `F1`〜`F5` の 5 つのサフィックスが揃っていることを確認する (例: `TestConversationTurn_F1_Truncated`)。**テスト名の命名規則を検査の入力にする**のは V-2 (AC-ID をテスト名に入れる) と同じ方式であり、新しい仕組みを増やさない |
-| **6** | **FE: `src/lib/parse/**` と `features/*/lib/**` に併置テストがある** | U | **F-C3** (§9.1.1) = [ci.yml](../../templates/frontend-repo/.github/workflows/ci.yml):58〜71。**[frontend.md](frontend.md) §8.2 が本節への登録を要求していたもの** — 登録しないと「SSOT の外にある検査」になる |
-| **7** | **I 段のテストが自分をスキップする経路を持たない** | I | 同 **`scripts/check-required-tests.sh`**。**判定規則**: `repository/` · `controller/` 配下の `_test.go` に `t.Skip` / `t.Skipf` が現れたら `exit 1`。**許可は `-short` フラグ判定の 1 箇所のみ** (`if testing.Short()`) とし、それ以外の条件でのスキップを認めない。**§8.2 の `TestMain` 規約だけでは塞げない**ため必要 — CI は常に `DATABASE_URL` を設定する ([ci.yml](../../templates/backend-repo/.github/workflows/ci.yml):73〜74) ので `TestMain` の `log.Fatal` は CI では発火せず、実際の抜け道は個別テストへの `if os.Getenv("DATABASE_URL") == "" { t.Skip() }` である。**v2 の E2E が `test.skip` で緑になっていた形 (T-F13) と BE-5 (DB 未接続フォールバック) の再演余地を、規約の遵守ではなく検査で閉じる** |
+| 5 | **各 LLM 経路に F-1〜F-5 のケースが 1 件以上ある** | U | 同スクリプト。**判定規則**: [observability.md](observability.md) §4.2 の `feature` 識別子の**定数一覧** (**`entity/` の 1 ファイルに置く Go の const 群。この要求は同 §4.2 の `feature` 行が SSOT** — 2026-07-30 に追記。定義が無いと本検査は 0 件を検査して緑になる) を対象集合とし、各識別子について `service/` 配下のテスト名に `F1`〜`F5` の 5 つのサフィックスが揃っていることを確認する (例: `TestConversationTurn_F1_Truncated`)。**テスト名の命名規則を検査の入力にする**のは V-2 (AC-ID をテスト名に入れる) と同じ方式であり、新しい仕組みを増やさない。**限界と補い (2026-08-02 追加。[API/plans.md](API/plans.md) §12 の R-PL-12)**: 本検査は `feature` 単位なので、**同じ `feature` に入口が複数ある経路は 1 入口だけテストしても緑になる**。該当するのは **`plan.generate` の 3 入口** (会話ターンの `generate_plan` tool / `POST /plans/{plan_id}/generate` / `POST /plans/{plan_id}/tabs/{tab_id}/regenerate`) で、**3 入口すべてを U 段のテスト対象にする** — 入口によって所有者スコープ・安全弁・計測が変わる退行は、1 入口のテストでは検出できない |
+| **6** | **FE: `src/lib/parse/**` と `features/*/lib/**` に併置テストがある** | U | **F-C3** (§9.1.1) = [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `frontend` ジョブの「検査 1 併置テストの存在」ステップ。**[frontend.md](frontend.md) §8.2 が本節への登録を要求していたもの** — 登録しないと「SSOT の外にある検査」になる |
+| **7** | **I 段のテストが自分をスキップする経路を持たない** | I | 同 **`scripts/check-required-tests.sh`**。**判定規則**: `repository/` · `controller/` 配下の `_test.go` に `t.Skip` / `t.Skipf` が現れたら `exit 1`。**許可は `-short` フラグ判定の 1 箇所のみ** (`if testing.Short()`) とし、それ以外の条件でのスキップを認めない。**§8.2 の `TestMain` 規約だけでは塞げない**ため必要 — CI は常に `DATABASE_URL` を設定する ([ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `backend` ジョブの `go test` ステップ (`DATABASE_URL` を env に持つ)) ので `TestMain` の `log.Fatal` は CI では発火せず、実際の抜け道は個別テストへの `if os.Getenv("DATABASE_URL") == "" { t.Skip() }` である。**v2 の E2E が `test.skip` で緑になっていた形 (T-F13) と BE-5 (DB 未接続フォールバック) の再演余地を、規約の遵守ではなく検査で閉じる** |
 
 **#4 / #5 / #7 を「規約」で済ませない理由**: §11 は「『テストが通ること』だけでなく『必要なテストが在ること』を
 機械で見る形にした」と主張している。**実装先の無い 3 件を残すとこの主張が 7 分の 4 しか裏付けを持たない**
@@ -664,7 +675,7 @@ T-H の判断 (全件必須) が実質無効化される。
 
 | # | 担保 | 実体 | 何を防ぐか |
 |---|---|---|---|
-| 1 | **併置テストの存在検査** (上表の 6 番 = F-C3) | [ci.yml](../../templates/frontend-repo/.github/workflows/ci.yml):58〜71 | **FE-6** (数値パーサのレンジ誤抽出)。PoC は純粋関数として分離済みでも FE-6 が起きた — **分離は必要条件、テストが十分条件** ([frontend.md](frontend.md) §8.2 の P-7) |
+| 1 | **併置テストの存在検査** (上表の 6 番 = F-C3) | [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `frontend` ジョブの「検査 1 併置テストの存在」ステップ | **FE-6** (数値パーサのレンジ誤抽出)。PoC は純粋関数として分離済みでも FE-6 が起きた — **分離は必要条件、テストが十分条件** ([frontend.md](frontend.md) §8.2 の P-7) |
 | 2 | **必須ケースの指定** (率ではなく内容) | §4.2 の表 (レンジ誤抽出 / 空・欠損・想定外形式 / `AbortError` が正常系 / SSE の chunk 境界) | 「テストファイルはあるが正常系 1 本だけ」 |
 | 3 | **カバレッジは計測して PR に出すが、ゲートにしない** | `vitest --coverage` の出力を PR のサマリに出す | 率を上げるための無意味なテスト (誘因の逆転) |
 
@@ -725,7 +736,7 @@ T-H の判断 (全件必須) が実質無効化される。
 
 ### 12.2 並列可能
 
-- **0 は 1〜6 と完全に独立** (frontend リポの作業。backend の着手を待たない)
+- **0 は 1〜6 と完全に独立** (`frontend/` の作業。backend の着手を待たない)
 - **4 と 5 は 1〜3 と独立**に着手できる (DB を使わない)
 - **6 の setup project (E-1) は FE のサインイン画面ができ次第**着手可。E-2〜E-5 は各画面に依存。
   **E-S1 (§7.6) は画面に依存しない**ため、BE の検索エンドポイントができ次第着手できる
@@ -822,6 +833,16 @@ GitHub environment secret に置く**ことになる。これは [operations.md]
 `repository_dispatch` 権限のみの fine-grained トークン。**[operations.md](operations.md) §4.1 の
 限定列挙に「唯一の例外」として追記済み** (例外を増やす場合は同表への追記 + レビューを必須とする)
 
+[Answer 2]: **本項目は消滅 (2026-08-03)** — **リポジトリ構成が app モノレポ + infra リポの 2 分割に
+変わったため** ([../../aidlc-docs/inception/productionization/questions.md](../../aidlc-docs/inception/productionization/questions.md) Q-2 の [Answer 2] / [architecture.md](architecture.md) §3.11)、
+frontend が backend と同一リポジトリになり**クロスリポジトリ dispatch が不要**になった。
+`e2e.yml` は **`on.workflow_run`** で `deploy-backend.yml` の完了を直接受ける (§7.4)。
+**`E2E_DISPATCH_TOKEN` は廃止し、`operations.md` §4.1 の限定列挙から例外行を削除した** —
+これにより「GitHub 側に置いてよい値 = IAM ロール ARN と非秘密の識別子のみ」に例外なしで戻った。
+案 B (nightly のみ) / 案 C (稼働バージョン確認) はいずれも採らない (どちらも不要になった)。
+**注意**: `workflow_run` は `GITHUB_TOKEN` 起因イベントの制約 (新規実行を起動しない) を受けない
+唯一の同一リポジトリ内トリガーである — `repository_dispatch` + `GITHUB_TOKEN` へ「簡素化」しないこと
+
 ### 13.2 調査が必要 (推測で埋めない)
 
 **ID は §13.1 (T-Q1〜T-Q5) の続きで通し番号にする** — 以前は §13.1 と §13.2 で T-Q5 / T-Q6 が
@@ -847,19 +868,19 @@ GitHub environment secret に置く**ことになる。これは [operations.md]
 
 | # | 対象 | 内容 |
 |---|---|---|
-| 1 | [templates/backend-repo/.github/workflows/ci.yml](../../templates/backend-repo/.github/workflows/ci.yml) | **2026-07-30 に解消済み** — 「スキーマ適用 (統合段の前提)」ステップを追加 (`SCHEMA_APPLY_TARGET` 未設定なら `exit 1`)。**残る要求は §8.2 の「`DATABASE_URL` 未設定を skip にしない」規約を実装リポの `TestMain` に落とすこと** |
-| 2 | [templates/frontend-repo/.github/workflows/e2e.yml](../../templates/frontend-repo/.github/workflows/e2e.yml) | **2026-07-30 に作成済み** — dev デプロイ後 (`repository_dispatch`) + nightly + 手動のトリガー、`environment: dev`、retries は Playwright 設定側、**スキップ検出 (0 件実行とレポート欠損も失敗扱い)**、資格情報は **OIDC + Secrets Manager** から取得。送信側は [deploy.yml](../../templates/backend-repo/.github/workflows/deploy.yml) の `release` 末尾 |
+| 1 | [templates/app-monorepo/.github/workflows/ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) | **2026-07-30 に解消済み** — 「スキーマ適用 (統合段の前提)」ステップを追加 (`SCHEMA_APPLY_TARGET` 未設定なら `exit 1`)。**残る要求は §8.2 の「`DATABASE_URL` 未設定を skip にしない」規約を実装リポの `TestMain` に落とすこと** |
+| 2 | [templates/app-monorepo/.github/workflows/e2e.yml](../../templates/app-monorepo/.github/workflows/e2e.yml) | **2026-07-30 に作成済み / 2026-08-03 にトリガーを `workflow_run` へ変更** — dev デプロイ完了 (`workflow_run`。`deploy-backend.yml` の完了を直接受ける) + nightly + 手動のトリガー、`environment: dev`、retries は Playwright 設定側、**スキップ検出 (0 件実行とレポート欠損も失敗扱い)**、資格情報は **OIDC + Secrets Manager** から取得。**`environment: dev-e2e`** (2026-08-05 に `dev` から変更 = design-reviewer 2 巡目の D-4。**`dev` を共有すると OIDC の `sub` が同一になり、E2E が dev のデプロイ用ロールを引き受けられる** — [infrastructure.md](infrastructure.md) §4.5)。**送信側は存在しない** — `e2e.yml` の `on.workflow_run` が [deploy-backend.yml](../../templates/app-monorepo/.github/workflows/deploy-backend.yml) の完了を直接受ける (同書 `release` 末尾にあるのは**記録用の `echo`** のみ) |
 | 3 | [architecture.md](architecture.md) §3.8.4 の検査 5 | **検査対象に「テストファイル内の手書き JSON リテラル」を含める** — 同 §3.8.5 の規約 5 (テストは合成 JSON を手書きしない) に対応する機械強制が現状の検査 1〜5 に無い。T-F17 はこれで隠れた |
-| 4 | [auth.md](auth.md) §6.4 の CI 検査 / [ci.yml](../../templates/backend-repo/.github/workflows/ci.yml):107〜116 の `check-owner-scope.sh` | **「全 route に越境テスト (X-1 / X-2) が存在すること」と「全 tool に A-1' が存在すること」の網羅検査を追加する** (§6.1 の 3 / §6.2)。route 一覧は `check-route-auth.sh` (同 :97〜105) が既に走査するものを再利用する |
+| 4 | [auth.md](auth.md) §6.4 の CI 検査 / [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の「A-4 所有者スコープの検査」ステップ (`check-owner-scope.sh`) | **「全 route に越境テスト (X-1 / X-2) が存在すること」と「全 tool に A-1' が存在すること」の網羅検査を追加する** (§6.1 の 3 / §6.2)。route 一覧は `check-route-auth.sh` (同 `ci.yml` の「A-1 認証の適用漏れ検査」ステップ) が既に走査するものを再利用する |
 | 5 | [operations.md](operations.md) §4.1 の限定列挙 | **E2E 専用アカウントの資格情報の所在を追加する** — 現在の列挙にこの用途が無く、GitHub secret に置かれる余地が残る (§7.3)。**組数は 1 組 (契約 A の 1 アカウント分: メールアドレス + パスワード + TOTP シークレット)**。§7.3 の決定どおり**契約 B は第 1 リリースでは作らない**ため、B の資格情報は列挙に加えない (共有機能を E2E に載せる時点で追加する) |
 | 6 | [04-human-checkpoints.md](../../templates/shared/.claude/rules/04-human-checkpoints.md) §1.1 の H-4 | **確認観点に「最新の E2E 結果」を追加する** (§7.4 の緩和策 2)。T-Q4 が B なら機械ブロックに変える |
 | 7 | [02-issue-granularity.md](../../templates/shared/.claude/rules/02-issue-granularity.md) §3.1 | **E2E の追加が必要な issue の扱いが V-x に無い** — E 段は PR で回らないため V-1〜V-4 では検証できない。「E2E シナリオに影響する変更を含む PR は、E2E の追加・更新をしたことを PR 本文に書く」を V-10 (ドキュメント更新) と同じ形で足す |
-| **8** | [ci.yml](../../templates/backend-repo/.github/workflows/ci.yml):88〜 | **2026-07-30 に実施済み** — golden 再生成の**専用ステップ**「golden ファイルの差分チェック」を追加 (`make golden` → `git diff --exit-code`。`Makefile` に `golden` ターゲットが無ければ `exit 1`)。**設計は当初「生成物差分チェックに追加」と書いていたが、別ステップにした** — 落ちた原因を sqlc/wire と golden で切り分けられるようにするため (§5.3 の規約 4 を実態に合わせて更新済み) |
-| **9** | [e2e.yml](../../templates/frontend-repo/.github/workflows/e2e.yml):177〜 | **2026-07-30 に実施済み** — サマリに FE の commit と BE の commit (`client_payload.sha`) を出す。`repository_dispatch` 以外の起動では **BE の commit を「不明」と明示し、H-4 の承認材料に使わない**旨も出力する |
-| **10** | [e2e.yml](../../templates/frontend-repo/.github/workflows/e2e.yml) | **nightly 限定の Playwright プロジェクト (E-S1 = Exa の疎通確認) を追加する** (§7.6)。`github.event_name == 'schedule'` のときだけ実行する形にし、dev デプロイ後の実行には含めない (15 分予算を守る) |
-| **11** | [frontend.md](frontend.md) §16.2-1 の表 / 同 §3.3 / 同 §7.2 | **雛形の実装状況と行番号が現ファイルとずれている** (2026-07-30 実測。§9.1.1): ①§16.2-1 の検査 2 「`no-custom-classname` が未設定」→ **設定済み** ([.eslintrc.json.tmpl](../../templates/frontend-repo/.eslintrc.json.tmpl):31〜38) ②同 検査 7 「`X-Admin-Token` の局所化は未実装」→ **実装済み** (同 :162〜195) ③§3.3 の `:42-73` / `:76-125` と §7.2 の `:31-34` / `:35-38` を実測値 (§9.1.1 の表) に更新する ④**§8.2 の「testing.md §10 の 5 種に本検査は含まれていない」という記述は解消済み** — 本書 §10 の 6 番として登録した (§9.1.1 の F-C3)。**残る実作業は「npm 依存の追加」「L-F4 のドメイン名展開」「`check-public-paths.sh` の実装」の 3 件**であり、eslint 設定側の未実装はもう無い |
-| **12** | [ci.yml](../../templates/backend-repo/.github/workflows/ci.yml):104〜 | **2026-07-30 に CI ステップは実施済み** — 「必須テストの存在検査」で `scripts/check-required-tests.sh` を呼び、未実装なら `exit 1`。**残る作業は実装リポでのスクリプト本体の実装** (§10 の #4 / #5 / **#7** の判定規則に従う。**#7 = `repository/` · `controller/` のテストに `t.Skip` が無いこと** — 2026-07-30 の 2 巡目レビュー 中 R-2 で追加。CI のエラーメッセージも 3 検査を列挙する形に更新済み) |
-| **13** | [deploy.yml](../../templates/backend-repo/.github/workflows/deploy.yml):478〜507 (E2E の起動通知) | **2026-07-30 に是正済み** — `curl` の HTTP ステータスを `-w '%{http_code}'` で取り、**204 以外を警告にする**形になっている (`curl -sS` は 4xx でも exit 0 のため `\|\| echo` だけでは無言になる)。**残る要求は無い**。§7.4 に警告条件 2 つとして明記した |
+| **8** | [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の「golden ファイルの差分チェック」ステップ | **2026-07-30 に実施済み** — golden 再生成の**専用ステップ**を追加 (`make golden` → `scripts/check-regen.sh backend/testdata/golden`。`Makefile` に `golden` ターゲットが無ければ `exit 1`)。**設計は当初「生成物差分チェックに追加」と書いていたが、別ステップにした** — 落ちた原因を sqlc/wire と golden で切り分けられるようにするため (§5.3 の規約 4 を実態に合わせて更新済み) |
+| **9** | [e2e.yml](../../templates/app-monorepo/.github/workflows/e2e.yml) の「結果の要約」ステップ | **2026-08-04 に改訂して実施済み** — **モノレポ化で BE / FE が同一 commit になったため、検証対象は 1 つの SHA で一意に決まる**。`workflow_run` 起動では `workflow_run.head_sha` を「検証対象 commit (BE / FE 共通)」として出し、**H-4 の承認材料として使える**と明示する。nightly / 手動起動では「dev に載っているコードと一致する保証は無い」として**承認材料に使わない**旨を出す。**旧要求 (FE と BE の 2 つの commit を出す / `client_payload.sha` を使う) は撤回** — `repository_dispatch` の廃止に伴い成立しない (2026-08-04 の design-reviewer 指摘 重大 2: 削除済みの `repository_dispatch` を条件にしたままだったため、`workflow_run` 起動でも常に「BE の対象 commit: 不明」と出力され **H-4 の承認材料が構造的に消えていた**) |
+| **10** | [e2e.yml](../../templates/app-monorepo/.github/workflows/e2e.yml) | **nightly 限定の Playwright プロジェクト (E-S1 = Exa の疎通確認) を追加する** (§7.6)。`github.event_name == 'schedule'` のときだけ実行する形にし、dev デプロイ後の実行には含めない (15 分予算を守る) |
+| **11** | [frontend.md](frontend.md) §16.2-1 の表 / 同 §3.3 / 同 §7.2 | **雛形の実装状況と行番号が現ファイルとずれている** (2026-07-30 実測。§9.1.1): ①§16.2-1 の検査 2 「`no-custom-classname` が未設定」→ **設定済み** ([.eslintrc.json.tmpl](../../templates/app-monorepo/frontend/.eslintrc.json.tmpl):31〜38) ②同 検査 7 「`X-Admin-Token` の局所化は未実装」→ **実装済み** (同 :162〜195) ③§3.3 と §7.2 が引用している `.eslintrc.json.tmpl` の行番号を実測値 (§9.1.1 の表) に更新する ④**§8.2 の「testing.md §10 の 5 種に本検査は含まれていない」という記述は解消済み** — 本書 §10 の 6 番として登録した (§9.1.1 の F-C3)。**残る実作業は「npm 依存の追加」「L-F4 のドメイン名展開」「`check-public-paths.sh` の実装」の 3 件**であり、eslint 設定側の未実装はもう無い |
+| **12** | [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の「必須テストの存在検査」ステップ | **2026-07-30 に CI ステップは実施済み** — 「必須テストの存在検査」で `scripts/check-required-tests.sh` を呼び、未実装なら `exit 1`。**残る作業は実装リポでのスクリプト本体の実装** (§10 の #4 / #5 / **#7** の判定規則に従う。**#7 = `repository/` · `controller/` のテストに `t.Skip` が無いこと** — 2026-07-30 の 2 巡目レビュー 中 R-2 で追加。CI のエラーメッセージも 3 検査を列挙する形に更新済み) |
+| ~~**13**~~ | ~~`deploy-backend.yml` の E2E 起動通知~~ | **本項目は消滅 (2026-08-04)** — **app モノレポ化により `e2e.yml` が `on.workflow_run` で `deploy-backend.yml` の完了を直接受ける形になり、クロスリポジトリの `repository_dispatch` を送るステップ自体が不要になった** (§13.1 の T-Q5 の [Answer 2])。`curl` の HTTP ステータス判定・`E2E_DISPATCH_TOKEN` の未設定警告はいずれも**実物に存在しない**。**この行の要求を復活させないこと** — 復活は `operations.md` §4.1 の限定列挙に例外を再導入することを意味する |
 
 ### 13.4 仮定 (違えば本書の判断が変わる)
 

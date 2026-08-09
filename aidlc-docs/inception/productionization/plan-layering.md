@@ -57,8 +57,8 @@ Wave 順に行う**。並列で 12 点を分担すると衝突する。
 | [API/assets.md](../../../docs/design/API/assets.md) | `:108` (D-AS-10) / `:161-162` | 同上 |
 | [API/knowledge.md](../../../docs/design/API/knowledge.md) | `:161` / `:193` | 同上 |
 | [design_memo.md](../../../docs/design/design_memo.md) | `:145` (反映状況 1.) | 「D-A' は実質反映済み」の記述が本増分で無効化される → 反映状況の更新 (**ユーザーの生メモのため追記のみ・要確認**) |
-| `templates/backend-repo/.claude/rules/05-architecture-coding-rules.md` (旧 `CLAUDE.md.tmpl:31-45` + `:47`) | **実施済み (2026-08-03)** — 層説明・エラー規約は本増分どおりに反映済み。**2026-08-03 に `CLAUDE.md.tmpl` から `.claude/rules/05-architecture-coding-rules.md` へ本文を切り出した** (`CLAUDE.md.tmpl` は要点 + 参照ポインタのみに圧縮)。旧懸念 (Service の旧定義・L-2 の禁止依存欠落・gateway/entity 行の欠落・直列図・`fmt.Errorf` 全面禁止) はいずれも解消済み。**実装リポ立ち上げ時はこのファイルが雛形の実体** |
-| `templates/backend-repo/.github/workflows/ci.yml` | golangci-lint ステップ (**実施後の実測値: `:46-49`**。着手時点では `:41-42`) | **`templates/backend-repo/` に `.golangci*` が存在しない**ため既定ルールのみ = 層規約もサイズも検査されない → `.golangci.yml` を新規追加し (depguard **18 規則** + **`dupl` 150 / `cyclop` 15 / `funlen` 150 行・80 ステートメント**) 参照させる |
+| `templates/app-monorepo/backend/.claude/rules/05-architecture-coding-rules.md` (旧 `CLAUDE.md.tmpl:31-45` + `:47`) | **実施済み (2026-08-03)** — 層説明・エラー規約は本増分どおりに反映済み。**2026-08-03 に `CLAUDE.md.tmpl` から `.claude/rules/05-architecture-coding-rules.md` へ本文を切り出した** (`CLAUDE.md.tmpl` は要点 + 参照ポインタのみに圧縮)。旧懸念 (Service の旧定義・L-2 の禁止依存欠落・gateway/entity 行の欠落・直列図・`fmt.Errorf` 全面禁止) はいずれも解消済み。**実装リポ立ち上げ時はこのファイルが雛形の実体** |
+| `templates/app-monorepo/.github/workflows/ci.yml` | golangci-lint ステップ (**実施後の実測値: `:46-49`**。着手時点では `:41-42`) | **`templates/app-monorepo/backend/` に `.golangci*` が存在しない**ため既定ルールのみ = 層規約もサイズも検査されない → `.golangci.yml` を新規追加し (depguard **18 規則** + **`dupl` 150 / `cyclop` 15 / `funlen` 150 行・80 ステートメント**) 参照させる |
 | [plan.md](plan.md) / [requirements.md](requirements.md) | Task-3f / AC-5.1 の行 | 本増分への参照を追記 (AC-5.1 の定義更新の記録) |
 
 > **追随対象の特定方法** (実施済み 2026-07-29):
@@ -113,7 +113,7 @@ Wave 順に行う**。並列で 12 点を分担すると衝突する。
 | **AC-6.11** (エラー型の層間契約) | 境界ごとの返却型の表がある。Controller の HTTP 変換が単一箇所 + `errors.As` と明記。**`fmt.Errorf` は「層境界を越える公開関数の戻り値では禁止・パッケージ内部の `%w` ラップは許可」と明記**され (Q-L1=B)、**CI 検査の対象が層境界の関数の戻り値に限定**されていること。却下案として v2 の全面禁止 (`hassan-v2-backend/CLAUDE.md:43`) と 113 件の違反 (F4) が出典付きで記載 | CI: **層境界パッケージの公開関数の戻り値**に対する `CodedError` 検査 (パッケージ内部の `fmt.Errorf` は検査対象外 = 誤検知を作らない)。UT: ラップされた `CodedError` が Controller で正しいステータスに変換される (F5 の取りこぼし再発防止) |
 | **AC-6.12** (設定値の SSOT) | `config` の置き場と値の列挙 (タイムアウト / リトライ / モデル / 安全弁しきい値 / 生成数) がある。3 重管理の禁止が明記 | UT: しきい値を `config` から読むことを検証。CI: マジックナンバー検査 (`mnd` linter) を対象パスに適用 |
 | **AC-6.13** (監査ログ失敗時の挙動) | **別トランザクションの best-effort + WARN ログとメトリクスの両方が必須**であり、**操作の種類による例外を設けない**ことが明記 (Q-L2=B)。`_ =` 無言破棄の禁止が明記。§5 の O-6 が「回答」になり observability.md §4.5 と矛盾しない | CI: `grep '_ = .*Log('` 相当の検査。UT: 監査ログ書き込み失敗時に **WARN ログとメトリクスの両方**が出て、**本処理は成功する**こと (2 つの期待を同一テストで確認) |
-| **AC-6.14** (依存規則の CI 強制) | D-2 に L-1〜L-6 とツール・違反時の挙動が書かれ、`templates/backend-repo` に `.golangci.yml` が存在して `ci.yml:46-49` (D-2①⑤ ステップ) から使われる。**対象パスが v3 新規ドメインのみ (Q-L3=A) で、除外パスが AC-6.19 の一覧と一致**している | **depguard の全 18 規則それぞれ**について違反サンプルで CI が落ちることを確認 (規則ごとに 1 件。**規則を追加したらこの件数も更新する**)。**必須 3 ケース**: ① `service/theme` → `usecase/asset` (`L1-service-no-upper-layers`。無いと `service/A` → `usecase/B` → `service/B` で L-2 を迂回できる) ② `service/theme` → sqlc 生成パッケージ (`L3-no-sqlc-outside-repository`) ③ `service/theme` → `repository/theme` (`L4-L5-no-concrete-adapters`。**自ドメインでも具体パッケージへの直接依存は禁止** — IF は利用側で定義する)。**併せて `di/` からの同じ import が落ちないことを確認する** (誤検知が無いことの裏取り。`di/**` はどの規則の `files` にも含まれない)。**除外パス (v2 移植分) に同じ違反サンプルを置いて落ちないことも確認** |
+| **AC-6.14** (依存規則の CI 強制) | D-2 に L-1〜L-6 とツール・違反時の挙動が書かれ、`templates/app-monorepo/backend` に `.golangci.yml` が存在して `ci.yml` の「D-2①⑤ golangci-lint」ステップ (ステップ) から使われる。**対象パスが v3 新規ドメインのみ (Q-L3=A) で、除外パスが AC-6.19 の一覧と一致**している | **depguard の全 18 規則それぞれ**について違反サンプルで CI が落ちることを確認 (規則ごとに 1 件。**規則を追加したらこの件数も更新する**)。**必須 3 ケース**: ① `service/theme` → `usecase/asset` (`L1-service-no-upper-layers`。無いと `service/A` → `usecase/B` → `service/B` で L-2 を迂回できる) ② `service/theme` → sqlc 生成パッケージ (`L3-no-sqlc-outside-repository`) ③ `service/theme` → `repository/theme` (`L4-L5-no-concrete-adapters`。**自ドメインでも具体パッケージへの直接依存は禁止** — IF は利用側で定義する)。**併せて `di/` からの同じ import が落ちないことを確認する** (誤検知が無いことの裏取り。`di/**` はどの規則の `files` にも含まれない)。**除外パス (v2 移植分) に同じ違反サンプルを置いて落ちないことも確認** |
 | **AC-6.15** (肥大化の抜け道 + 重複 lint) | 抜け道 5 分類 (entity / gateway / service / usecase 内ファイル分割 / `prompts/`) と「共通 Service 新設禁止」が明記。**`dupl` 150 トークン (主役) / `cyclop` 15 / `funlen` 150 行・80 ステートメント (補助)** が値付きで書かれ、`funlen` を 80 行にしない理由が F15 の実測分布で記載され、雛形の `.golangci.yml` に反映されている | 3 linter が CI で有効。**同一骨格の関数を 2 つ置いて `dupl` が落ちること** / 複雑度 16 の関数で `cyclop` が落ちること / 151 行の関数で `funlen` が落ちることを規則ごとに確認。**85 行の順次呼び出し関数で落ちないこと**も確認 (誤検知しない値であることの裏取り) |
 | **AC-6.16** (LLM 計測点) | 呼び出し単位 = gateway / ターン単位 = `service/conversation.Runner` が明記され、observability.md の O-C (`:44`) と**同じ層名**を指している。**O-C 却下案 (b) が別プロセスのプロキシであり `gateway/` 層とは別物である読み分け**が書かれている。**初期スコープの表 (型と安全弁 = 初期 / 明細 = 第 1 リリース前 / 集計・アラート = v2 併用期間中) がある** | CI: gateway を通らない LLM 呼び出しが存在しないことを検査 (SDK パッケージの import 箇所を 1 パッケージに限定)。UT: **gateway の戻り値が usage 4 カウンタと `stop_reason` を保持すること** / ターン集計と**安全弁の打ち切り** (回数・トークン・時間の 3 条件) |
 | **AC-6.17** (LLM 失敗の区別) | `stop_reason == max_tokens` / JSON パース失敗 / タイムアウト / ツール引数不整合が型またはコードで区別され、握り潰さないことが書かれている | UT: 4 種の失敗をそれぞれ再現し、上位層で区別可能な値が返ること (BE-6 の再発防止) |
@@ -193,7 +193,7 @@ Wave 順に行う**。並列で 12 点を分担すると衝突する。
 - [x] **Task-L28** (design-reviewer 重大 4 → **AC-6.21**): **ツール結果のフィールド契約 (BE-12)** を
       architecture.md に追記 — ハンドラの戻り値型の単一宣言 / 読み手が同じ型定義から読むこと /
       テストが合成 JSON を手書きしないこと / §3.8.4 の 3 者一致検査を**戻り値スキーマへ拡張**。
-      `templates/backend-repo/.github/workflows/ci.yml` の D-6 ステップの説明も追随させる。
+      `templates/app-monorepo/.github/workflows/ci.yml` の D-6 ステップの説明も追随させる。
       **前提: Task-L9** ← `architecture-designer`
 
 ### Wave 4: 横断規約 (Wave 1〜3 と独立に書けるが同一ファイルのため直列)
@@ -243,7 +243,7 @@ Wave 順に行う**。並列で 12 点を分担すると衝突する。
       **前提: Task-L16 / Task-L20 (同一ファイルのため Task-L20 と同一セッションで実施)** ← 起草セッション
 - [x] **Task-L21**: [auth.md](../../../docs/design/auth.md) と [API/](../../../docs/design/API/) 3 ファイルの
       `AgentRunner` / `ToolDispatcher` 参照の追随。**前提: Task-L9** ← 起草セッション
-- [x] **Task-L22**: `templates/backend-repo` の更新 ← 手動。**前提: Task-L8 / Task-L12a / Task-L25**
+- [x] **Task-L22**: `templates/app-monorepo/backend` の更新 ← 手動。**前提: Task-L8 / Task-L12a / Task-L25**
       1. `CLAUDE.md.tmpl:31-45` の層説明を差し替え — **図 (`:34`) に gateway / entity を追加**、
          **Service の定義 (`:41`) を「1 ドメイン (集約) に閉じたビジネスロジック」へ**、
          **禁止依存 (`:45`) に `service`→`service` (L-2) と `service`→他ドメイン `repository` (L-3)・
@@ -319,6 +319,6 @@ Task-L20 / L27 (observability.md) は 1 セッションでまとめ、Task-L21 (
    (`aidlc-docs/reviews/productionization/review-layering.md`)
 6. 実装リポへの引き渡し情報が揃っている: **§3 の「実装リポでの検証」列が、depguard 規則 6 本・
    golangci 設定 (`dupl` / `cyclop` / `funlen`)・tool contract 検査・UT の一覧として
-   `templates/backend-repo` に反映されている**
+   `templates/app-monorepo/backend` に反映されている**
 7. **先送り分 (AC-2.1 の明細永続化 = v3 第 1 リリース前 / AC-2.2 の集計・アラート = v2 併用期間中) が
    引き渡し情報に含まれている** — 実装リポの issue として起票できる粒度で書かれていること

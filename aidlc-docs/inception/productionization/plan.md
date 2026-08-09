@@ -8,12 +8,12 @@
 
 - 設計成果物: `docs/analysis/poc-inventory.md` (済) / `docs/analysis/gap-analysis.md` (済) /
   `docs/design/architecture.md` (骨格) / `docs/design/auth.md` (記述あり) /
-  `docs/design/API/` (全 7 ファイル記述あり。レビュー待ち) /
+  `docs/design/API/` (**全ドメインファイル記述あり**。件数は [API/README.md](../../../docs/design/API/README.md) §3 の総覧が正 = DR-9。レビュー待ち) /
   `docs/design/data-model.md` (**記述あり**) /
   `docs/design/observability.md` (**記述あり**) / `docs/design/operations.md` (**記述あり**) / `docs/design/infrastructure.md` (**記述あり**) /
   `docs/design/llm-migration.md` (**記述あり**) / `docs/design/testing.md` (**記述あり**) / `docs/design/frontend.md` (**記述あり**) /
   `docs/design/API/auth-accounts.md` (**記述あり**)
-- 実装リポ引き渡し物: `templates/` (backend / frontend / infra の 3 セット) (雛形は済。CI ゲートの確定待ち)
+- 実装リポ引き渡し物: `templates/` (**app モノレポ / infra リポの 2 セット** + shared) (雛形は済。CI ゲートの確定待ち)
 - 本番観点: A 全項目 / O 全項目 / D 全項目
 
 ## 受入基準 → 検証方法
@@ -32,7 +32,7 @@
 | AC-2.4 | `docs/design/observability.md` §4.1 の必須フィールド表 | **記述あり** (レビュー未実施) |
 | AC-2.5 | `docs/design/observability.md` §4.5 (v2 の `activity_logs` / `event_logs` 方式を踏襲) | **記述あり** (レビュー未実施) |
 | AC-3.1 | `docs/design/operations.md` に環境・シークレット管理 | **記述あり** (§3 の 3 環境 + §4 の Secrets Manager / SSM 分離。v2 は Secrets Manager 未使用のため新規設計) |
-| AC-3.2 | `templates/backend-repo/.github/workflows/ci.yml` ほか 3 リポ分 + `docs/design/operations.md` の CI ゲート表 | **雛形済み** (確定はレビュー後) |
+| AC-3.2 | `templates/app-monorepo/.github/workflows/ci.yml` ほか 2 リポ分 + `docs/design/operations.md` の CI ゲート表 | **雛形済み** (確定はレビュー後) |
 | AC-3.3 | `docs/design/operations.md` に Agent 発行を含むデプロイ手順 | **記述あり** (§5 の 6 ジョブ + §5.2 の Agent / Environment ライフサイクル + §5.3 のロールバック) |
 | AC-3.4 | `docs/design/data-model.md` にマイグレーション方式・ロールバック | **記述あり** (§6 / §7.4。ツールは **psqldef で確定** = D-4。2026-07-31) |
 | AC-3.5 | `docs/design/operations.md` に移行・段階リリース | **記述あり** (§6 の RL-0〜RL-5 = 全面切替)。**残るのは DM-A2 (データ引き継ぎ範囲。Task-2f 待ち)** |
@@ -43,7 +43,25 @@
 | AC-4.2 | `aidlc-docs/reviews/<feature>/review.md` の存在 (push ゲートが強制) | **達成** — `reviews/productionization/` に 13 本 (最新は 2026-07-31 の `review-auth-accounts.md` / `review-auth-round5.md` / `review-round4.md`) |
 | AC-4.3 | 引き渡し物チェックリスト (`docs/design/architecture.md` §7) | 部分 |
 | AC-5.1 | `docs/design/architecture.md` §3.3 の責務表 (**6 パッケージ層**) + §3.4 の**層配置の判断基準** + §3.5 の**依存規則 L-1〜L-6** + §3.10 の**会話 1 ターンの配置例 (19 ステップ)** | **記述あり**。増分 layering で定義を更新 ([requirements-layering.md](requirements-layering.md) §7)。レビュー: `aidlc-docs/reviews/productionization/review-layering.md` |
-| AC-5.2 | `templates/` (backend / frontend / infra の 3 セット) の CI・pre-commit・エージェント定義が TDD/lint を強制 | **雛形済み** (確定はレビュー後) |
+| AC-5.2 | `templates/` (**app モノレポ / infra リポの 2 セット**) の CI・pre-commit・エージェント定義が TDD/lint を強制 | **雛形済み** (確定はレビュー後) |
+
+### 増分 conversation の受入基準 (AC-CV-*。2026-08-01 追加)
+
+> 定義元: [requirements-conversation.md](requirements-conversation.md) §4。
+> 質問 [questions-conversation.md](questions-conversation.md) の **CV-Q1〜CV-Q13 は全件回答済み** (2026-08-01)。
+> 出力先は `docs/design/API/conversation.md` / `ideas.md` / `plans.md` (**いずれも未作成**)。
+
+| AC | 検証方法 | 状態 |
+|---|---|---|
+| **AC-CV-1.1** / **AC-CV-1.2** / **AC-CV-1.3** | v2 → v3 対応表の**行数照合** — `plans.md` の対応表が [v2-feature-inventory.md](../../../docs/analysis/v2-feature-inventory.md) §2.7 と同じ行数、`ideas.md` が同 §2.5 と同じ行数であること。**「増分 2」「後ろ倒し」「対象外」の grep が 0 件**であること。同書 §5 の #9 / #10 が「解消済み」に更新されていること | **未着手** |
+| **AC-CV-1.4** | `plans.md` に `plans` の `UNIQUE (idea_id)` を維持するか外すかの決定 (採用案 + 却下案 + 理由) が存在すること。「移行時に確認する」の記述が無いこと | **未着手** |
+| **AC-CV-2.1** / **AC-CV-2.2** / **AC-CV-2.3** / **AC-CV-2.4** | `conversation.md` に ①ターンの入口 (`POST /conversations/{session_id}/messages` + 409) ②SSE イベント型の一覧 (`artifact` 単一形 / `progress` 1 種 / `error` = `{code, message}` / `turn_summary`) ③`outcome` 5 値 ④履歴の保存契約 (1 ターン 1 行・`aborted` は別トランザクション) が記述されていること。**実装リポでの検証**: SSE のイベント順序 UT + 並行ターン 409 の Controller テスト | **未着手** |
+| **AC-CV-2.5** / **AC-CV-2.6** / **AC-CV-2.7** / **AC-CV-2.8** | `conversation.md` にテーマ必須 (`theme_id` NOT NULL)・毎ターンの状態注入形式・stage 5 値の導出・セッション CRUD が記述されていること。**`set_theme_name` が tool 一覧に存在しない**ことを grep で確認 | **未着手** |
+| **AC-CV-3.1** / **AC-CV-3.2** / **AC-CV-3.3** / **AC-CV-3.4** / **AC-CV-3.5** | `ideas.md` に `PUT` / `DELETE` / `POST /ideas` と `tags` の書き込み経路・人手編集時の版切り・評価軸の統合表があること。[API/idea-boards.md](../../../docs/design/API/idea-boards.md) §7 が「移設済み」に書き換わり §8.1 の BE-10 がクローズしていること | **未着手** |
+| **AC-CV-4.1** / **AC-CV-4.2** / **AC-CV-4.3** / **AC-CV-4.4** / **AC-CV-4.5** / **AC-CV-4.6** / **AC-CV-4.7** / **AC-CV-4.8** / **AC-CV-4.9** | `plans.md` にタブ単位再生成・版と復元・お気に入り・プロンプト編集・詳細版 7 → 8 タブ写像表・企画書チャット・サムネイル・企画書 CRUD が記述されていること。**実装リポでの検証**: `generate_plan` tool と再生成 REST が同一 UseCase を呼ぶ UT + `source_idea_version_id` の記録 UT | **未着手** |
+| **AC-CV-5.1** / **AC-CV-5.2** / **AC-CV-5.3** / **AC-CV-5.4** / **AC-CV-5.5** / **AC-CV-5.6** / **AC-CV-5.7** / **AC-CV-5.8** / **AC-CV-5.9** | `conversation.md` に tool 一覧の取捨判定・schema 宣言のみの引数・A-6 の 4 点・台帳の書き手/読み手対応・PDF 経路・O-4 / O-2 / D-6 への回答・安全弁の参照があること。**実装リポでの検証**: `scripts/check-tool-contract.sh` の 3 者一致 + 全 tool のテナント越境テスト ([testing.md](../../../docs/design/testing.md)) | **未着手** |
+| **AC-CV-6.1** / **AC-CV-6.2** / **AC-CV-6.3** | 3 ファイルの存在 + [API/README.md](../../../docs/design/API/README.md) §0 の対象外解除 + §3 の 9 ドメイン化。**`make check-endpoint-mapping` が通ること** (検査④の対象集合を 3 ファイルへ拡張済みであること) | **未着手** |
+| **AC-CV-6.4** | [requirements-conversation.md](requirements-conversation.md) §5 の是正要求表に「未対応」が 0 行であること。**Design Freeze の条件** | **未着手** (14 件すべて未対応) |
 
 ## タスクと依存関係
 
@@ -52,12 +70,12 @@
 1. ~~PoC 棚卸し~~ → `docs/analysis/poc-inventory.md`
 2. ~~ギャップ分析~~ → `docs/analysis/gap-analysis.md`
 3. ~~アーキテクチャ骨格~~ → `docs/design/architecture.md` (v0.1)
-4. ~~ハーネス構築~~ → `.claude/` + `scripts/` + `templates/` (backend / frontend / infra の 3 セット)
+4. ~~ハーネス構築~~ → `.claude/` + `scripts/` + `templates/` (**app モノレポ / infra リポの 2 セット**)
 
 ### Phase 1: 分岐の解消 (直列・ここがボトルネック) — **一部完了**
 
 5. **Q-1〜Q-9 の回答取得** ← ユーザー判断。未回答なら推奨案を既定採用として明記して進む
-   - ~~Q-2 (3 リポ分割) / Q-4 (Dify 廃止) / Q-5 (全面切替) / Q-6 (上限なし)~~ → **回答済み・反映済み** (C-9〜C-12)
+   - ~~Q-2 (**[Answer 2] = D。app モノレポ + infra リポの 2 分割**。2026-08-03 に 3 分割から方針転換) / Q-4 (Dify 廃止) / Q-5 (全面切替) / Q-6 (上限なし)~~ → **回答済み・反映済み** (C-9〜C-12)
    - Q-1 (データモデル) / Q-3 (スコープ): **検討中** — 判断材料を questions.md に追記済み。
      Q-1 は **Task-2f (既存データ量) が判断材料**
    - Q-7 (IaC) / Q-8 (フラグ): **解説を追記して再質問中**
@@ -102,7 +120,7 @@ Q-3=A (会話型フローのみ) を前提とした場合:
 ### Phase 3: 設計確定 (Task-2 の検証済み報告に依存)
 
 - [x] **Task-3a** (起草完了 2026-07-30・**レビュー未実施**): `docs/design/data-model.md` (AC-1.2 / AC-3.4 / A-3 / A-4 / DR-3) —
-      設計判断 DM-1〜DM-20・**テーブル 40 (全件に `contract_id`) + 例外 11**・採番と冪等性 (BE-11)・
+      設計判断 DM-1〜DM-20・**テーブル 42 (全件に `contract_id`) + 例外 11**・採番と冪等性 (BE-11)・
       台帳のスキーマ契約 (BE-10 / BE-12)・派生物の無効化 (BE-4)・マイグレーション方式と投入順序。
       **Q-1 の未確定は「データ引き継ぎ範囲」だけ**と切り分け、移行部分のみ `[Answer]` ゲート (DM-A1〜A3)。
       **他文書への是正要求 8 件**を起票 (うち 3 件はメインセッションが即日反映)。旧記述: ← `architecture-designer`。
@@ -172,8 +190,20 @@ Q-3=A (会話型フローのみ) を前提とした場合:
       **起草可能になった (2026-07-31)**: 前提の R-1 = DM-A3 (アカウント基盤二重化は推奨 5 点で確定) と
       DM-A4 (`signup_links` に `contract_id` = B) をユーザーが回答 (`docs/design/data-model.md` §6.5 / §8.1)。
       追加入力: E2E 用の「MFA 無効アカウント」の例外表現 (testing.md T-Q3=B) / 管理者トークン有効期間 7 日 (frontend.md FE-Q8)
-- [ ] **Task-3p** (新規 2026-07-31): **会話型アイデア創出 API の設計** (SSE イベント型 = frontend.md FE-Q1 のブロック解消)。
-      **着手は Task-3i の後** (ユーザー決定 2026-07-31)。スコープ: ①会話・アーティファクトのエンドポイントと
+- [~] **Task-3p** (**要件確定 2026-08-01 → 設計起草は未着手**): **会話型アイデア創出 API の設計**
+      (SSE イベント型 = frontend.md FE-Q1 のブロック解消)。
+      **質問 → 要件のフェーズが完了した**: [questions-conversation.md](questions-conversation.md) の
+      **CV-Q1〜CV-Q13 に 2026-08-01 にユーザーが全件回答**し、[requirements-conversation.md](requirements-conversation.md)
+      (**AC-CV-1.1〜AC-CV-6.4**・確定事項 CV-D1〜CV-D13 + 既定採用 CV-DF1〜CV-DF6・
+      **他文書への是正要求 R-CV-1〜R-CV-14**) を起草した。
+      **最大の決定は CV-Q1=B (推奨 A からの逸脱)** — **v2 の企画書 18 エンドポイントすべてを第 1 リリースで
+      設計・実装する** (併用期間中の機能差ゼロ)。**これにより
+      [llm-migration.md](../../../docs/design/llm-migration.md) §4.2 の優先度判定 (V-8/V-9/V-10/V-11 = 併用期間) と
+      衝突する**ため R-CV-1 として起票済み。**v2 スキーマの実測で受け皿の無い機能を 4 つ検出**
+      (お気に入り / 版履歴のプロンプト / 企画書チャット履歴 / サムネイル URL —
+      requirements-conversation.md §2 の F-CV2〜F-CV6)。
+      **後続タスクは Task-3p-A / -B / -C / -D** (下記)。
+      **旧記述 (起票時のスコープ)**: **着手は Task-3i の後** (ユーザー決定 2026-07-31)。スコープ: ①会話・アーティファクトのエンドポイントと
       SSE イベント型 ②**LM-Q1 の統合設計** (発散後チャット P-3 を P-1 へ統合 — Agent 3 本構成) ③**LM-Q2 の統合設計**
       (v2 のアイデア生成・企画書生成・カスタムリサーチを会話フロー / ナレッジへ統合) ④更新版プロトタイプの新 UI
       (アーティファクトのバージョン管理 = BE-1 対応・発散設計ウィジェット・持ち込み PDF・企画書 8 サブタブ) の API 対応
@@ -182,7 +212,34 @@ Q-3=A (会話型フローのみ) を前提とした場合:
       **4 系統目を作らず既存 3 系統のどれかに寄せる (または共通基盤へ統合する)** こと。D-AS-4 は
       「3 系統になる」ことを理由に専用 API を却下しているため、4 系統目を黙って足すとその判断の根拠が崩れる
       ← `architecture-designer`
-- [x] **Task-3b**: `docs/design/API/` (AC-1.1 / AC-1.4) — 全 7 ファイル記述済み (README = 共通規約 + 総覧の SSOT、
+- [ ] **Task-3p-A** (**次に着手する**): `docs/design/API/conversation.md` の起草 ← `architecture-designer`。
+      会話セッション CRUD・ターン (同期 SSE)・**SSE イベント型**・**custom tool の一覧と契約**・
+      台帳の読み書き・**stage の導出**・A-6 / O-2 / O-4 / D-6 への回答。
+      **本タスクが [requirements-conversation.md](requirements-conversation.md) §6.1 の共有前提 1〜4 を確定させる**
+      ため、3p-B / 3p-C はこれの完了を待つ。対応 AC: **AC-CV-2.1 / AC-CV-2.2 / AC-CV-2.3 / AC-CV-2.4 / AC-CV-2.5 / AC-CV-2.6 / AC-CV-2.7 / AC-CV-2.8 /
+      AC-CV-5.1 / AC-CV-5.2 / AC-CV-5.3 / AC-CV-5.4 / AC-CV-5.5 / AC-CV-5.6 / AC-CV-5.7 / AC-CV-5.8 / AC-CV-5.9**
+- [ ] **Task-3p-B**: `docs/design/API/ideas.md` の起草 ← `architecture-designer`。
+      アイデアの生成 (会話経由) / 人手の CRUD (REST) / `tags` の書き込み / 版と復元 / 評価軸の統合 /
+      **v2 アイデア 13 本の対応表**。**[API/idea-boards.md](../../../docs/design/API/idea-boards.md) §7 の
+      参照系 3 本の移設を同じ差分で行う**。対応 AC: **AC-CV-1.2 / AC-CV-3.1 / AC-CV-3.2 / AC-CV-3.3 / AC-CV-3.4 / AC-CV-3.5**。
+      **調査を含む**: 評価軸の統合 (LM-R6) は推測で埋めず、v2 (`hassan-v2-backend/usecase/idea/evaluate_ideas.go`) と
+      PoC (P-5) を突き合わせてから書く
+- [ ] **Task-3p-C**: `docs/design/API/plans.md` の起草 ← `architecture-designer`。
+      **本増分で最も大きい** — CV-Q1=B により **v2 の企画書 18 本すべて**を受ける。
+      8 タブの生成・タブ単位再生成・版と復元・お気に入り・版履歴のプロンプト編集・
+      詳細版 7 セクション → 8 タブの写像・企画書チャット・サムネイル・企画書 CRUD。
+      対応 AC: **AC-CV-1.1 / AC-CV-1.4 / AC-CV-4.1 / AC-CV-4.2 / AC-CV-4.3 / AC-CV-4.4 / AC-CV-4.5 /
+      AC-CV-4.6 / AC-CV-4.7 / AC-CV-4.8 / AC-CV-4.9**。
+      **3p-B と並列可能** (別ファイル・別ドメイン)
+- [ ] **Task-3p-D** (**直列必須・1 セッションに集約**): 是正要求 **R-CV-1〜R-CV-14** の消化と
+      `scripts/check-endpoint-mapping.sh` の拡張 ← メインセッション。
+      **`data-model.md` に 5 件集中している** (R-CV-3 / 4 / 5 / 6 / 7) ため 1 差分にまとめる —
+      **テーブル追加は `make check-table-counts` の期待値まで連動する** (DR-9。手順は
+      [API/idea-boards.md](../../../docs/design/API/idea-boards.md) §8.2 の 15 箇所リスト)。
+      対応 AC: **AC-CV-1.3 / AC-CV-6.1 / AC-CV-6.2 / AC-CV-6.3 / AC-CV-6.4**
+- [ ] **Task-3p-R**: 3p-A 〜 3p-D の差分全体を **1 セッションの `design-reviewer`** でレビュー
+      (別セッション。分割起草しても集約する)
+- [x] **Task-3b**: `docs/design/API/` (AC-1.1 / AC-1.4) — **当時の 7 ファイル**を記述済み (**その後 `conversation.md` / `ideas.md` / `plans.md` が増えている**。現在の一覧と本数は [API/README.md](../../../docs/design/API/README.md) §3 の総覧が正) (README = 共通規約 + 総覧の SSOT、
       themes / assets / knowledge / idea-boards / news / settings。計 73 エンドポイント。2026-07-29)。レビュー未実施。
       **注 (2026-07-30)**: **認証・アカウント基盤の約 30 エンドポイントは本タスクの範囲外** — Task-3i が担う
       (D-ST-1' による方針反転。`docs/design/API/README.md` §3 の注記)。**Phase 3 の完了条件には Task-3i を含む**
@@ -240,7 +297,7 @@ Q-3=A (会話型フローのみ) を前提とした場合:
 - [ ] **旧記述 (Task-3l の当初定義)**: FE の構造設計
       (ディレクトリ規約 / 状態管理 / **SSE 共通クライアント** / デザイントークン / orval 生成型の扱い /
       プロトタイプの設計入力としての扱い / FE-1〜FE-7 を構造で潰す方針)。
-      **3 リポのうち frontend だけ設計書が無い** (雛形 `templates/frontend-repo/CLAUDE.md.tmpl` に規約の断片のみ) ← `architecture-designer`
+      **backend / frontend / infra のうち frontend だけ設計書が無い** (雛形 `templates/app-monorepo/frontend/CLAUDE.md.tmpl` に規約の断片のみ) ← `architecture-designer`
 - [ ] **Task-3g**: `docs/design/architecture.md` の §4 §6 を確定に更新 ← メインセッション
 - [x] **Task-3n** (完了 2026-07-30): **プロトタイプ更新の設計反映** — `docs/prototype/hassan_agent_prototype_v2.html` が
       更新版 (15,022 行) に差し替わったため、①正準名へのリネーム (リンク切れ 2 件の解消) ②全設計文書の
@@ -290,6 +347,7 @@ Q-3=A (会話型フローのみ) を前提とした場合:
 |---|---|---|
 | Phase 2 | Task-2a / 2b / 2c / 2d / 2e (5 並列) + 2f (手動) | 参照対象が別リポ・別ドメインで衝突しない |
 | Phase 3 | (3a → 3b) と (**3a の R-1 → 3i**) と 3c と 3d と 3e と 3h の 6 系列 | 3b は 3a のデータ構造に依存。**3i は 3a の R-1 (アカウント基盤の二重化) の結論に依存**。3f/3g は他タスクの結果を統合するため最後 |
+| Phase 3 (増分 conversation) | **Task-3p-B と Task-3p-C の 2 並列** (別ファイル・別ドメイン) | **3p-A が先** — SSE イベント型 / tool 一覧 / stage / 版の共通規則という**4 つの共有前提を 3p-A が確定させる** ([requirements-conversation.md](requirements-conversation.md) §6.1)。**3p-D は最後に 1 セッション** — 是正要求が `data-model.md` に 5 件集中しており、件数の連動 (DR-9) が中間状態でずれるため分割できない |
 | Phase 4 | なし | レビューは差分全体を 1 セッションで集約する |
 
 ## 完了の定義 (Design Freeze)

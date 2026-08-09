@@ -47,4 +47,4 @@
 ## エージェント定義
 
 `.claude/agents/` を参照。実装リポ用の `go-developer` / `react-developer` / `code-reviewer` は
-`templates/backend-repo/.claude/agents/` · `templates/frontend-repo/.claude/agents/` にある (このリポジトリでは使わない)。
+`templates/app-monorepo/backend/.claude/agents/` · `templates/app-monorepo/frontend/.claude/agents/` にある (このリポジトリでは使わない)。

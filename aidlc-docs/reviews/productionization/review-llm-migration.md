@@ -12,7 +12,7 @@
 - **整合確認のために読んだ (レビュー対象外・未編集)**: `docs/analysis/poc-prompt-inventory.md` /
   `docs/analysis/v2-llm-inventory.md` / `docs/analysis/dify-inventory.md` / `docs/design/architecture.md` /
   `docs/design/observability.md` / `docs/design/operations.md` / `docs/design/API/knowledge.md` ·
-  `API/README.md` · `API/settings.md` · `API/themes.md` / `templates/backend-repo/CLAUDE.md.tmpl` /
+  `API/README.md` · `API/settings.md` · `API/themes.md` / `templates/app-monorepo/backend/CLAUDE.md.tmpl` /
   `aidlc-docs/inception/productionization/plan.md`
 - **件数**: **重大 1 件 / 中 5 件 / 軽微 4 件**
 - **判定**: **Freeze 不可**。重大 1 件は「生きているコードを廃止対象として引き渡す」種類であり、
@@ -183,7 +183,7 @@ $ make check-traceability
 
 ### 中 5. §3 が判定線の SSOT と呼んでいる `CLAUDE.md.tmpl` 側に、§3 の「3 つの読み方」が無い
 
-- 該当: `docs/design/llm-migration.md:124`-`:126` / `templates/backend-repo/CLAUDE.md.tmpl:296`-`:301`
+- 該当: `docs/design/llm-migration.md:124`-`:126` / `templates/app-monorepo/backend/CLAUDE.md.tmpl:296`-`:301`
 - 本書は「`CLAUDE.md.tmpl` の『LLM の使い分け』表と D-B' が判定線の SSOT。本節はそれを適用手順に
   具体化するだけで判定線を変えない」と書いている。しかし tmpl の表は
   **「ツールを使う / 複数ターン回る / 出力が次の入力を決める → 1 つでも当てはまれば Agent」の 3 行だけ**で、
@@ -311,7 +311,7 @@ $ make check-traceability
 - **重大 1** は §4.3 の X-5 の**対象列を根拠列に合わせる**修正で閉じる (本書内で完結。数行)。
   ただし「生きている型をどこへ移すか」の 1 行を足さないと同じ誤読が再発する。
 - **中 1 / 中 2 / 中 5** は**他文書への起票**を伴う (observability.md §4.2 / §9.1 の新しい `[Answer]` /
-  `templates/backend-repo/CLAUDE.md.tmpl`)。`operations.md` §10.2 の OP-F1〜F4 と同じ形式で
+  `templates/app-monorepo/backend/CLAUDE.md.tmpl`)。`operations.md` §10.2 の OP-F1〜F4 と同じ形式で
   §10 に要求表を作るのが本リポジトリの既存作法と揃う。
 - **中 3 / 中 4** は本書内で閉じる (§6.3 への相互参照 / §4.3 の 2 群への分割 + 転記先 2 ファイルの修正)。
 - 修正後の再レビューは**本書の §4.3・§5.1・§6.3・§10 と、起票先文書の差分**を対象にすれば足る。
@@ -332,7 +332,7 @@ feature `productionization` 全体の Freeze 判定は他の設計成果物の�
 | 中 2: C-7 (埋め込み) と LM-D の両立が未記載 | §4.3 に注記を追加し、**LM-Q6 として §9.1 に起票** (Anthropic の埋め込み有無 / 候補 / 影響範囲 / RAG を第 1 リリースから外す選択肢)。暫定既定 = 「無ければ RAG を第 1 リリースから外す」(3 番目のプロバイダを増やさない) |
 | 中 3: §6.3 と `agents.yaml` の関係が未接続 | §6.3 に「**`prompts/agents.yaml` が実体の SSOT・本節の 4 本はその初期値**」「§4 の表の増減と `agents.yaml` を同一 PR で更新」「一致は `check-tool-contract.sh` で機械担保」を追記 |
 | 中 4: 「廃止 11 件」の粒度混在と他文書への転記 | §4.3 を **(1) 機能の廃止 6 件 (X-1〜X-5・X-8) / (2) 資産・命名の整理 5 件 (X-6・X-7・X-9〜X-11)** の 2 群に分離。X-10 はリネームとして (2) へ。**`plan.md` と `aidlc-state.md` の転記も同時に修正** |
-| 中 5: `CLAUDE.md.tmpl` に §3 の 3 つの読み方が無い | `templates/backend-repo/CLAUDE.md.tmpl` の「LLM の使い分け」節に **誤りやすい 3 形の判定表** (固定パイプライン / 分類→分岐 / 履歴だけの chat) を追記し、機能ごとの確定判定は llm-migration.md §3 / §4 が SSOT と明記 |
+| 中 5: `CLAUDE.md.tmpl` に §3 の 3 つの読み方が無い | `templates/app-monorepo/backend/CLAUDE.md.tmpl` の「LLM の使い分け」節に **誤りやすい 3 形の判定表** (固定パイプライン / 分類→分岐 / 履歴だけの chat) を追記し、機能ごとの確定判定は llm-migration.md §3 / §4 が SSOT と明記 |
 | 軽微 4 件 | (別途対応。Freeze の阻害要因ではない) |
 
 検証: `make doc-lint` エラー 0 (警告は意図的な `[Answer]` のみ。LM-Q6 追加で 1 件増) /
@@ -351,7 +351,7 @@ feature `productionization` 全体の Freeze 判定は他の設計成果物の�
 |---|---|
 | `docs/design/llm-migration.md` | §1.3 f / §4.1 (P-2 / P-12) / **§4.3 全体 (2 群分離・X-5・2 つの注記)** / §5.3 / §6.3 / §7.1 / §8.1 / §9.1 / §10 |
 | `docs/design/observability.md` | §4.2 (`route_kind` / 必須フィールド) / §4.4.1 / §4.6 の AL-4 / §5 の O-7 / O-H (`:49`) |
-| `templates/backend-repo/CLAUDE.md.tmpl` | 「LLM の使い分け」節 (`:296`-`:311`) |
+| `templates/app-monorepo/backend/CLAUDE.md.tmpl` | 「LLM の使い分け」節 (`:296`-`:311`) |
 | `docs/design/API/knowledge.md` | KN-Q2 (`:217`) |
 | `docs/design/API/settings.md` | `:186` / `:199` (llm-migration への参照) |
 | `aidlc-docs/inception/productionization/plan.md` | `:124` (Task-3h の成果記述) |
@@ -460,7 +460,7 @@ $ make check-traceability
 |---|---|
 | `docs/design/llm-migration.md` | **重大ゼロ → Freeze 可**。新規 軽微 1 / 2 は引き渡しの読みやすさの問題で、Freeze の阻害要因ではない。未確定 (LM-Q1〜LM-Q6) は `[Answer]` として起票済みで、影響範囲も本文にある |
 | `docs/design/observability.md` (本書由来の変更分) | **重大ゼロ**。**新規 中 1 を反映してから Freeze する** (`external_search` を載せる決定と必須フィールド・単価テーブルの整合。3 行程度) |
-| `templates/backend-repo/CLAUDE.md.tmpl` / `docs/design/API/knowledge.md` / `docs/design/API/settings.md` | **Freeze 可** |
+| `templates/app-monorepo/backend/CLAUDE.md.tmpl` / `docs/design/API/knowledge.md` / `docs/design/API/settings.md` | **Freeze 可** |
 | `aidlc-docs/inception/productionization/plan.md` / `aidlc-docs/aidlc-state.md` | **Freeze 可** (転記が本書と一致) |
 
 feature `productionization` 全体の Freeze は、operations / infrastructure 側の残り 2 件

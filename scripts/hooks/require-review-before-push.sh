@@ -75,7 +75,14 @@ unmentioned=""
 while IFS= read -r pf; do
   [[ -z "$pf" ]] && continue
   total=$((total + 1))
-  if printf '%s' "$review_content" | grep -qF "$pf"; then
+  # ⚠️ ここを `printf '%s' "$review_content" | grep -qF "$pf"` と書いてはいけない (2026-08-09 是正)。
+  # `set -o pipefail` (19 行目) と `grep -q` の早期終了が組み合わさると、grep が最初のヒットで
+  # exit した瞬間に printf が SIGPIPE で死に、**パイプライン全体の終了ステータスが 141 になる**。
+  # 結果、**ヒットしているのに if が偽**になり、review_content がパイプバッファ (64KB) を超えた
+  # 時点から「どの review*.md も言及していない」と判定して**常にブロック**していた。
+  # (review_content 実測 680KB / 設計成果物 119 件すべてが誤って未言及扱いになっていた)
+  # here-string ならパイプラインを作らないので pipefail の影響を受けない。
+  if grep -qF -- "$pf" <<< "$review_content"; then
     mentioned=$((mentioned + 1))
   else
     unmentioned="${unmentioned}${pf}

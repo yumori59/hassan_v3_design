@@ -117,20 +117,21 @@ v3 の対応先は [../design/API/assets.md](../design/API/assets.md)。
 
 ### 2.5 アイデア (`/ideas` / `/idea-hassans`)
 
-v3 の参照系は [../design/API/idea-boards.md](../design/API/idea-boards.md) §7、生成系は
-**会話型アイデア創出 API の設計 (Task-3p。未着手)** が受ける。
+v3 の対応先は [../design/API/ideas.md](../design/API/ideas.md) (参照・作成・更新・版・評価) と
+[../design/API/conversation.md](../design/API/conversation.md) (会話セッションと生成の入口)。**2026-08-02 に起草済み**。
+**参照系 4 本は `idea-boards.md` §7 から `ideas.md` へ移設した**。
 
 | v2 エンドポイント | 行 | v2 が搭載していた機能 | v3 の対応 | 状態 |
 |---|---|---|---|---|
 | `GET /ideas` | `:122` | アイデア一覧 | 同名 (参照専用) | **引き継ぐ** |
 | `GET /ideas/:id` | `:121` | アイデア取得 | 同名 | **引き継ぐ** |
 | `PUT /ideas/:id/star` | `:128` | スター評価 | 同名 | **引き継ぐ** |
-| **`GET /ideas/csv`** | `:127` | **アイデア一覧の CSV エクスポート** (16 列・UTF-8 BOM + CRLF) | 同名 (**idea-boards.md §2.4**。2026-07-31 に C-16 で復活) | **引き継ぐ** |
+| **`GET /ideas/csv`** | `:127` | **アイデア一覧の CSV エクスポート** (16 列・UTF-8 BOM + CRLF) | 同名 (**[../design/API/ideas.md](../design/API/ideas.md) §2.6**。2026-07-31 に C-16 で復活し、2026-08-02 に `idea-boards.md` §2.4 から移設) | **引き継ぐ** |
 | `POST /ideas/generate` | `:123` | アイデアの発散生成 | 会話型フローへ統合 (llm-migration V-1) | **統合** |
-| `POST /ideas/generate/my-idea` | `:124` | 自分のアイデアの登録・生成 | 同 (V-2) | **統合** |
-| `POST /ideas/generate/my-idea/draft` | `:125` | 自分のアイデアの下書き生成 | 同 (V-3) | **統合** |
-| `POST /ideas/evaluate` | `:126` | アイデアの再評価 | 同 (V-6) | **統合** |
-| `POST /idea-hassans` | `:144` | 発散セッションの作成 | `conversation_sessions` (Task-3p) | **統合** |
+| `POST /ideas/generate/my-idea` | `:124` | 自分のアイデアの登録・生成 | 同 (**V-3**) | **統合** |
+| `POST /ideas/generate/my-idea/draft` | `:125` | 自分のアイデアの下書き生成 | 同 (**V-3**。`ExecuteDraft` は同じ UseCase — `hassan-v2-backend/usecase/idea/create_my_idea.go:207`) | **統合** |
+| `POST /ideas/evaluate` | `:126` | アイデアの再評価 | **P-5 へ統合** (**V-2**) | **統合** |
+| `POST /idea-hassans` | `:144` | 発散セッションの作成 | [../design/API/conversation.md](../design/API/conversation.md) §1 (`POST /conversations`) | **統合** |
 | `GET /idea-hassans` | `:146` | 発散セッション一覧 | 同 | **統合** |
 | `GET /idea-hassans/:id` | `:145` | 発散セッション取得 | 同 | **統合** |
 | `PUT /idea-hassans/:hassan_id` | `:147` | 発散セッションの更新 | 同 | **統合** |
@@ -156,12 +157,13 @@ v3 の対応先は [../design/API/idea-boards.md](../design/API/idea-boards.md)�
 
 ### 2.7 企画書 (`/business-plans` / `/business-plans/detailed`)
 
-**v3 の対応先は未設計** (Task-3p = 会話型アイデア創出 API の設計が受ける)。
-**本節が「企画書に何があったか」の唯一の一覧**なので、Task-3p の設計入力として使う。
+v3 の対応先は [../design/API/plans.md](../design/API/plans.md) (**2026-08-02 起草済み**。同書 §3 が本節の 18 行と 1:1 で対応する)。
+**本節が「企画書に何があったか」の唯一の一覧**であり、`plans.md` §3 の対応表がその受け先の SSOT。
+**ユーザー決定 CV-Q1=B により 18 本すべてが第 1 リリース対象**である (「増分 2」「後ろ倒し」は 0 行)。
 
 | v2 エンドポイント | 行 | v2 が搭載していた機能 | 状態 |
 |---|---|---|---|
-| `POST /business-plans/generate` | `:151` | 企画書の生成 (同期) | **統合** (会話フロー / 企画書タブ) |
+| `POST /business-plans/generate` | `:151` | 企画書の生成 (**SSE ストリーム**。`hassan-v2-backend/controller/business_plan.go:242` の `streamChannelAsSSE`。**2026-08-02 訂正** — 旧記述「同期」は誤り) | **統合** (会話フロー / 企画書タブ) |
 | `POST /business-plans/jobs/start` | `:152` | 企画書生成ジョブの開始 (非同期) | **統合** |
 | `GET /business-plans/jobs/:job_id` | `:153` | ジョブ状態の取得 | **統合** |
 | `GET /business-plans/jobs/:job_id/stream` | `:154` | **ジョブ進捗の SSE ストリーム** | **統合** (SSE は v3 の共通機構へ) |
@@ -272,12 +274,14 @@ v3 の対応先は [../design/API/idea-boards.md](../design/API/idea-boards.md)�
 | 6 | **会社情報の LLM 生成** | `:94` | 会社情報の入力補助が無くなる |
 | 7 | ~~**最近使ったアセットの一覧**~~ | `:113` | **解消済み (2026-08-01)**: [../design/API/assets.md](../design/API/assets.md) §3.3 の `GET /assets/recent` (D-AS-18) |
 | 8 | ~~アセットの一括作成・一括削除~~ | `:109` / `:112` | **解消済み (2026-08-01)**: 同 §3.3 の `POST/DELETE /assets/bulk` + `POST /asset-imports` (D-AS-14〜17。AS-Q3 のクローズ撤回) |
-| 9 | **企画書のお気に入り** | `:163` / `:164` | `business_plan_favorites` に相当する v3 テーブルが無い |
-| 10 | 企画書の版履歴のプロンプト編集 | `:157` | 版履歴の編集操作が設計に無い |
+| 9 | ~~**企画書のお気に入り**~~ | `:163` / `:164` | **解消済み (2026-08-02)**: [../design/API/plans.md](../design/API/plans.md) §9 の `POST/DELETE /plans/{plan_id}/favorite`。受け皿は [../design/data-model.md](../design/data-model.md) §4.6 の **`plan_favorites`** (新設) |
+| 10 | ~~企画書の版履歴のプロンプト編集~~ | `:157` | **解消済み (2026-08-02)**: [../design/API/plans.md](../design/API/plans.md) §5.1 の `PUT /plans/{plan_id}/tabs/{tab_id}/versions/{ver_no}/instruction`。受け皿は [../design/data-model.md](../design/data-model.md) §4.6 の **`plan_tab_versions.instruction`** 列 |
 
 **1〜5 は社内管理者機能**であり、`auth.md` §6.2 の「対象外」という 2026-07-30 の決定に含まれる。
-**6・9・10 は一般ユーザー向け機能**で、対象外とした明示的な判断が見つからない (= 設計の抜け落ちの可能性)。
-**7・8 は 2026-08-01 に解消済み** ([../design/API/assets.md](../design/API/assets.md) §3.3 で仕様化)。
+**残る未解決は 6 (会社情報の LLM 生成) の 1 件のみ** — 一般ユーザー向け機能でありながら、対象外とした明示的な判断が見つからない (= 設計の抜け落ちの可能性)。
+**7・8 は 2026-08-01 に解消済み** ([../design/API/assets.md](../design/API/assets.md) §3.3 で仕様化)、**9・10 は 2026-08-02 に解消済み** ([../design/API/plans.md](../design/API/plans.md) §5.1 / §9 で仕様化)。
+
+> **C-16 の完了条件 (本節の「対象外 (要確認)」が空になること) までの残**: **#1〜#5 (社内管理者機能。承認済みの対象外だが例外表に未登録)** と **#6** の計 6 件。
 
 ---
 

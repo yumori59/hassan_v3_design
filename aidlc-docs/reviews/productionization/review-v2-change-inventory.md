@@ -25,7 +25,7 @@
 | docs/analysis/gap-analysis.md | ヘッダ追記 (前セッション作業・軽微) | 参照のみ |
 | docs/design/README.md | 新規 (設計書の索引。前セッション作業) | 索引のみ (設計判断を含まない) |
 | aidlc-docs/inception/productionization/requirements.md | C-16 追記 (前セッション作業) | 本レビューが C-16 承認済み例外表を照合に使用 |
-| templates/README.md / templates/backend-repo/CLAUDE.md.tmpl / templates/frontend-repo/CLAUDE.md.tmpl / templates/backend-repo/.github/ISSUE_TEMPLATE/task.yml / templates/frontend-repo/.github/ISSUE_TEMPLATE/task.yml / templates/shared/.claude/rules/03-model-escalation.md | 前セッションの軽微修正 (文言・リンク) | **本レビューの対象外** (設計判断を含まない軽微差分。`make check-workflow-shell` 52 ブロック通過で機械検証のみ) |
+| templates/README.md / templates/app-monorepo/backend/CLAUDE.md.tmpl / templates/app-monorepo/frontend/CLAUDE.md.tmpl / templates/app-monorepo/.github/ISSUE_TEMPLATE/task-backend.yml / templates/app-monorepo/.github/ISSUE_TEMPLATE/task-frontend.yml / templates/shared/.claude/rules/03-model-escalation.md | 前セッションの軽微修正 (文言・リンク) | **本レビューの対象外** (設計判断を含まない軽微差分。`make check-workflow-shell` 52 ブロック通過で機械検証のみ) |
 
 ## 2. 指摘と対応状況
 

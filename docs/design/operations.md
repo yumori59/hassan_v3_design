@@ -13,8 +13,8 @@
 | 事項 | SSOT |
 |---|---|
 | 人間の承認点 (H-1〜H-5)・承認機構 (GitHub environment / ブランチ保護 / deny 設定)・破壊的マイグレーションの**機械判定の定義** | [templates/shared/.claude/rules/04-human-checkpoints.md](../../templates/shared/.claude/rules/04-human-checkpoints.md) |
-| デプロイパイプラインの実体 (6 ジョブ・承認位置・出力契約) | [templates/backend-repo/.github/workflows/deploy.yml](../../templates/backend-repo/.github/workflows/deploy.yml) |
-| CI ゲートの内容 (D-2) とループ上の位置 | [templates/shared/.claude/rules/01-construction-loop.md](../../templates/shared/.claude/rules/01-construction-loop.md) §7 + [templates/backend-repo/.github/workflows/ci.yml](../../templates/backend-repo/.github/workflows/ci.yml) |
+| デプロイパイプラインの実体 (6 ジョブ・承認位置・出力契約) | [templates/app-monorepo/.github/workflows/deploy-backend.yml](../../templates/app-monorepo/.github/workflows/deploy-backend.yml) |
+| CI ゲートの内容 (D-2) とループ上の位置 | [templates/shared/.claude/rules/01-construction-loop.md](../../templates/shared/.claude/rules/01-construction-loop.md) §7 + [templates/app-monorepo/.github/workflows/ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) |
 | 層配置・設定値の SSOT 規約 (`config` パッケージ)・シークレット注入方式の決定 (D-5) | [architecture.md](architecture.md) §3.9② / §5 の D-5 行 |
 | アラートの監視対象としきい値 (AL-1〜AL-7)・ログ/計測の項目 | [observability.md](observability.md) §4.4 / §4.6。**ただし重大度の分類・環境差・SNS トピックの本数は本書 §7.5 が SSOT** (同節に記述が無いため本書で決める) |
 | JWT 署名鍵の固有事情 (新規発行・複数鍵ローテーション) | [auth.md](auth.md) §6.8 |
@@ -50,14 +50,14 @@ PoC 側: `claude_managed_agents/internal/config/dotenv.go` の `WriteEnv` は固
 | # | 論点 | 採用案 | 却下案と理由 |
 |---|---|---|---|
 | OP-A | 環境の数と FE/BE の対応 | **local / dev / prod の 3 環境** (ユーザー指定)。FE は **Vercel の 1 プロジェクト**で `Development` / `Preview` / `Production` の 3 スコープを使い、**Preview = dev / Production = prod** に対応させる (§3.2) | (a) `main` を Vercel の Production Branch にする: H-4 (本番昇格を人間の操作にする) が消える — 04 §2.4 の確定に反する。(b) dev 用に別 Vercel プロジェクトを作る: ビルド設定と環境変数が二重管理になり、`production` ブランチ保護 (04 §4.1) との対応も二重化する。Preview スコープで同じ分離が得られる。(c) Vercel の Custom Environments を追加する: 設定要素が増えるだけで、3 環境では Preview / Production の 2 スコープで表現できる |
-| OP-B | 設定値の置き場 | **5 分類に固定する**: ①**コード内定数** (環境で変わらない値) ②**ECS タスク定義の `environment`** (非秘密で環境ごとに変わる値。Terraform / ecspresso が管理) ③**Secrets Manager** (秘密。起動時に解決) ④**SSM Parameter Store で実行中に読み替える値** (非秘密で**再デプロイなしに変えたい**値) ⑤**SSM Parameter Store に置くが起動時に 1 回だけ解決する値** (**Agent ID / Environment ID**。版履歴を切り戻し手段に使う)。読み出しは `config` パッケージのみ ([architecture.md](architecture.md) §3.9②) | (a) `.env` をイメージに焼く (v2 方式): イメージを取得できる範囲すべてに秘密が渡り、dev/prod の分離も失われる。(b) すべてを Secrets Manager に入れる: 非秘密値の変更にも秘密の変更手順 (承認・監査) が掛かり、運用が重くなる。(c) すべてを ECS の `environment` に入れる: 秘密がタスク定義とコンソールの表示に残る。(d) **⑤ を作らず Agent ID / Environment ID を ④ (実行中に読み替える) に置く**: `apply_agent` は `release` より前に走るため、**稼働中の旧コードのタスクが最大 60 秒後に新 Agent を掴み「旧コード + 新 tool schema」という組み合わせが必ず発生する** (prod では H-3 承認から H-4 承認までの待ち時間ぶん継続する)。BE-8 (新しい引数が黙って捨てられる) / BE-10 (台帳の前提チェックが常に失敗する) の窓を設計自身が作ることになる |
+| OP-B | 設定値の置き場 | **5 分類に固定する**: ①**コード内定数** (環境で変わらない値) ②**非秘密の環境値** — **インフラ由来は ECS タスク定義の `environment`** (ecspresso が管理)、**アプリ由来は `backend/env/<env>.env`** (git 管理・**非秘密のみ**・イメージに同梱。**ユーザー決定 2026-08-02**。§3.3 の②) ③**Secrets Manager** (秘密。起動時に解決) ④**SSM Parameter Store で実行中に読み替える値** (非秘密で**再デプロイなしに変えたい**値) ⑤**SSM Parameter Store に置くが起動時に 1 回だけ解決する値** (**Agent ID / Environment ID**。版履歴を切り戻し手段に使う)。読み出しは `config` パッケージのみ ([architecture.md](architecture.md) §3.9②) | (a) **秘密を含む** `.env` をイメージに焼く (v2 方式): イメージを取得できる範囲すべてに秘密が渡り、dev/prod の分離も失われる — **v3 が env ファイルに許すのは②のアプリ由来 (非秘密) のみ**で、キー集合は CI が `config` の②定義と照合する (§3.3)。(b) すべてを Secrets Manager に入れる: 非秘密値の変更にも秘密の変更手順 (承認・監査) が掛かり、運用が重くなる。(c) すべてを ECS の `environment` に入れる: 秘密がタスク定義とコンソールの表示に残る。(d) **⑤ を作らず Agent ID / Environment ID を ④ (実行中に読み替える) に置く**: `apply_agent` は `release` より前に走るため、**稼働中の旧コードのタスクが最大 60 秒後に新 Agent を掴み「旧コード + 新 tool schema」という組み合わせが必ず発生する** (prod では H-3 承認から H-4 承認までの待ち時間ぶん継続する)。BE-8 (新しい引数が黙って捨てられる) / BE-10 (台帳の前提チェックが常に失敗する) の窓を設計自身が作ることになる。(e) **アプリ由来の非秘密値もタスク定義の `environment` に置く** (2026-08-02 まで採用): 値の変更が ecspresso のタスク定義テンプレート (JSON) の差分になり読みづらく、`.env.local` (OP-D) と形式が揃わない。**非秘密のアプリ由来値を env ファイルに統一するユーザー決定 (2026-08-02) で env ファイル方式へ変更した** (変更手順・反映タイミングは `backend/` を触る PR → デプロイのままで変わらない) |
 | OP-C | シークレットの粒度 | **用途単位で 1 シークレット** (`/hassan-v3/<env>/db/url` `.../auth/jwt-key` `.../anthropic/api-key` …) | (a) 環境ごとに 1 つの JSON シークレットへまとめる: 参照は減るが、**IAM を用途別に絞れず**、1 つのローテーションが全参照者を巻き込む。JWT 鍵 ([auth.md](auth.md) §6.8) と LLM キーは漏洩時の影響が別物なので分ける |
 | OP-D | ローカル開発の値 | **開発者が手で作る `.env.local` (git 管理外) に dev 相当の値を置く**。**prod の値は誰のローカルにも置かない** (04 §3.3 と同じ線) | (a) Secrets Manager から取得するスクリプトを配る: 開発者全員に AWS 認証情報が必要になり、退職時の失効漏れが「秘密の失効漏れ」になる。(b) PoC の `WriteEnv` 方式でプログラムが `.env` を書き換える: BE-3 (キー脱落) が再発し、`DATABASE_URL` の消失が静かなデータ喪失につながる |
 | OP-E | Managed Agent ID と **Environment ID** の保管 | **SSM Parameter Store** (`/hassan-v3/<env>/agent/<name>/id` / `/hassan-v3/<env>/anthropic/environment-id` / `/hassan-v3/<env>/agent/<name>/source-hash`)。**バージョン履歴を旧 ID への切り戻し手段として使う** (§5.3)。**反映は次のタスク起動時** (§3.3 の⑤) | (a) Secrets Manager: Agent ID / Environment ID は秘密ではなく、版の扱いが `AWSCURRENT` / `AWSPREVIOUS` の 2 段に限られる。(b) リポジトリにコミットする (PoC の `.env` 相当): 環境ごとに値が違うため衝突し、`main` へのデプロイ用コミットが復活する (C-14 で廃止した運用)。**PoC は `AGENT_ID` と `ENVIRONMENT_ID` を対で `.env` に置いており** (`claude_managed_agents/internal/config/config_test.go:37`)、**Environment ID が未設定なら実行時にエラーを返す必須設定である** (`claude_managed_agents/cmd/devui/domain_discovery.go:453`) — したがって Agent ID だけを管理対象にすると必須設定が引き渡しから落ちる |
-| OP-F | デプロイの起動方法 | **BE = `deploy.yml`** (dev は `main` への push で自動 / prod は `workflow_dispatch` + `main` 限定 + environment 承認)。**FE = Vercel の Git 連携** (`main` → Preview 自動 / `production` → Production)。**infra = 人間が `terraform apply`** | (a) FE も GitHub Actions から Vercel CLI で deploy する: Vercel の Promote / Instant Rollback (§5.3) を捨てることになり、**最短のロールバック手段が失われる**。(b) infra の `apply` を CI に持たせる: `replace` が RDS / ECS の作り直しになる経路を機械に任せることになる (04 §1.1 の注記) |
+| OP-F | デプロイの起動方法 | **BE = `deploy-backend.yml`** (dev は `main` への push で自動 / prod は `workflow_dispatch` + `main` 限定 + environment 承認)。**FE = Vercel の Git 連携** (`main` → Preview 自動 / `production` → Production)。**infra = 人間が `terraform apply`** | (a) FE も GitHub Actions から Vercel CLI で deploy する: Vercel の Promote / Instant Rollback (§5.3) を捨てることになり、**最短のロールバック手段が失われる**。(b) infra の `apply` を CI に持たせる: `replace` が RDS / ECS の作り直しになる経路を機械に任せることになる (04 §1.1 の注記) |
 | OP-G | ロールバックの第一手段 | **前のバージョンへ戻す操作**を第一手段にする: BE = `ecspresso rollback` / FE = Vercel の前デプロイを Promote / Agent = SSM の前バージョンの ID に戻す / DB = 非破壊は戻さない・破壊的はスナップショット復元 (04 §2.2) | (a) `git revert` + 再デプロイを第一手段にする: ビルド時間ぶん障害が延びる。revert は**戻した後の是正手段**として使う。(b) `deploymentCircuitBreaker` の自動戻しだけに頼る (v2 の実態): ヘルスチェックが通る種類の不具合 (誤ったレスポンス・越境) では発火しない |
 | OP-H | 環境戦略 (ブランチ運用) | **trunk-based + 環境変数フラグ** (questions.md Q-8 の推奨案 A。**暫定既定 — Q-8 は未回答**。§7.1) | (a) release ブランチ運用 (B): cherry-pick 漏れとマージ衝突が恒常化する。(b) 環境ごとにブランチを固定 (C): dev ブランチと `main` の差分が育ち、「dev で検証済み」の意味が薄れる。**回答が A 以外になった場合、§7.1〜§7.3 を差し替える** |
-| OP-I | フラグの実装形態 | **環境変数のみ** (BE = ECS タスク定義の `environment` → `config`、FE = Vercel の環境変数)。**判定の正は BE** (フラグ OFF のエンドポイントは 404)。FE は導線を隠すだけ。**フラグを API で配らない** | (a) `GET /features` のような API で配る: API 契約 ([API/README.md](API/README.md) の 6 ドメイン — 本数は同書 §3 が正) に**第 1 リリースまでの一時的な仕組み**を載せることになり、削除時に破壊的変更になる。(b) `feature_flags` テーブル (DB) で持つ: アカウント単位の限定公開が要るときの方式だが、C-11 (全面切替) では要求が無い。**必要になった時点で移行する** (移行の契機: 特定アカウントだけに機能を出す要求が発生したとき) |
+| OP-I | フラグの実装形態 | **環境変数のみ** (BE = `backend/env/<env>.env` (§3.3 の②) → `config`、FE = Vercel の環境変数)。**判定の正は BE** (フラグ OFF のエンドポイントは 404)。FE は導線を隠すだけ。**フラグを API で配らない** | (a) `GET /features` のような API で配る: API 契約 ([API/README.md](API/README.md) の 6 ドメイン — 本数は同書 §3 が正) に**第 1 リリースまでの一時的な仕組み**を載せることになり、削除時に破壊的変更になる。(b) `feature_flags` テーブル (DB) で持つ: アカウント単位の限定公開が要るときの方式だが、C-11 (全面切替) では要求が無い。**必要になった時点で移行する** (移行の契機: 特定アカウントだけに機能を出す要求が発生したとき) |
 | OP-J | DB マイグレーションの自動適用範囲 | **非破壊 × dev のみ自動**。破壊的変更は environment 承認 (04 §2.2 が判定と承認先の SSOT)。加えて **破壊的変更は「2 段階リリース (拡張 → 縮小)」を必須**とする (§7.4) | (a) 全て手動承認: dev への継続デプロイ (C-15) が人間律速になり、1 日に複数回の検証が回らない。(b) 全て自動適用: dev の検証データ (会話ログ・生成物) が消えると受入確認そのものができない (04 §1.1 の注記と同じ線引き)。(c) アプリ起動時に自動適用 (PoC 方式): ECS の複数タスク起動時に同時適用が競合する |
 
 ## 3. 環境 (D-1 / AC-3.1)
@@ -103,7 +103,7 @@ PoC 側: `claude_managed_agents/internal/config/dotenv.go` の `WriteEnv` は固
   (dev に本番データを置かない理由の 1 つ。§10.4 の仮定)。
   Preview の URL が変動する場合の CORS 許可の扱いは [infrastructure.md](infrastructure.md) §5.3 の確認事項
 - **秘密情報を `NEXT_PUBLIC_*` に置かない** (ブラウザバンドルに載る。
-  [templates/frontend-repo/CLAUDE.md.tmpl](../../templates/frontend-repo/CLAUDE.md.tmpl) の Vercel 節)。
+  [templates/app-monorepo/frontend/CLAUDE.md.tmpl](../../templates/app-monorepo/frontend/CLAUDE.md.tmpl) の Vercel 節)。
   FE が必要とする秘密 (存在する場合) は Server Actions / Route Handler 側の環境変数に置く
 - **infra リポは環境の概念を `envs/<env>` で持つ**。**Vercel の設定は Terraform 管理外**
   ([infrastructure.md](infrastructure.md) §7 の X-5。理由: H-4 の承認機構が Vercel 側の Promote 権限と
@@ -115,7 +115,7 @@ PoC 側: `claude_managed_agents/internal/config/dotenv.go` の `WriteEnv` は固
 | 分類 | 置き場 | 変更手順 | 反映のタイミング | 例 |
 |---|---|---|---|---|
 | ① コード内定数 | Go のコード (`config` パッケージ) | PR → マージ → デプロイ | デプロイ時 | HTTP / LLM のタイムアウト、リトライ回数、`MaxTokens`、生成数の既定と上限 (BE-2) |
-| ② 非秘密の環境値 | **ECS タスク定義の `environment`** (backend リポの `stacks/<env>/` にある ecspresso のタスク定義テンプレート) | **値の出所で手順が分かれる**: **インフラ由来の値** (RDS ホスト名・S3 バケット名・ロググループ名) は Terraform の出力を ecspresso が tfstate から解決するため **infra の PR → `apply`** / **アプリ由来の値** (`APP_ENV`・既定モデル名・**フィーチャーフラグ**) は **backend の PR → デプロイ**のみ | デプロイ時 | `APP_ENV`、RDS のホスト名 (インフラ由来)、S3 バケット名 (インフラ由来)、**フィーチャーフラグ** (アプリ由来。§7.2)、用途別の既定モデル名 (アプリ由来) |
+| ② 非秘密の環境値 | **値の出所で置き場が分かれる** (2026-08-02 のユーザー決定): **インフラ由来の値**は **ECS タスク定義の `environment`** (`backend/stacks/<env>/` にある ecspresso のタスク定義テンプレート。Terraform の出力を tfstate から解決) / **アプリ由来の値**は **`backend/env/<env>.env`** (git 管理・**非秘密のみ**・イメージに同梱。起動時に `APP_ENV` でファイルを選択して `config` が読む) | **インフラ由来** (RDS ホスト名・S3 バケット名・ロググループ名) は **infra の PR → `apply`** / **アプリ由来** (既定モデル名・**フィーチャーフラグ**) は **`backend/` を触る PR → デプロイ**のみ | デプロイ時 | `APP_ENV` (**タスク定義側に残す唯一のアプリ由来値** — env ファイルの選択キーのため)、RDS のホスト名 (インフラ由来)、S3 バケット名 (インフラ由来)、**フィーチャーフラグ** (アプリ由来。§7.2)、用途別の既定モデル名 (アプリ由来) |
 | ③ 秘密 | **Secrets Manager** (ARN をタスク定義の `secrets` で注入。[architecture.md](architecture.md) §5 の D-5) | §4.2 の手順 | **次のタスク起動時** (= デプロイまたはタスク置換) | `DATABASE_URL`、JWT 署名鍵、Anthropic / Exa / Resend / MicroCMS の API キー |
 | ④ 再デプロイなしに変えたい非秘密値 | **SSM Parameter Store** (`/hassan-v3/<env>/...`) | パラメータ更新のみ (デプロイ不要) | **最大 60 秒** (`config` が TTL 60 秒でキャッシュし再取得する) | **暴走の安全弁のしきい値** ([observability.md](observability.md) §4.4 — 「再デプロイなしで変更できる形にする」への回答)、**単価テーブルの版** (同 O-H)、非同期ジョブの失効しきい値 |
 | ⑤ **起動時に 1 回だけ解決する非秘密値** (版履歴を切り戻し手段に使う) | **SSM Parameter Store** (`/hassan-v3/<env>/agent/<name>/id` / `/hassan-v3/<env>/anthropic/environment-id`) | `apply_agent` (CI) がパラメータの新バージョンを書く (§5.2) | **次のタスク起動時**。**プロセスは起動時に読んだ値を保持し続け、実行中は再取得しない** | **Agent ID** / **Environment ID** (OP-E)。同じパス階層に置く**発行元ハッシュの記録** (`.../agent/<name>/source-hash`) は CI だけが読み書きし、アプリは読まない |
@@ -132,6 +132,14 @@ PoC 側: `claude_managed_agents/internal/config/dotenv.go` の `WriteEnv` は固
   台帳の前提チェックが常に失敗する (BE-10)。**この 2 つは ⑤ に置き、タスク置換と同時に切り替える** (§5.2 / §5.3)
 - FE が必要とする上限値 (生成数など) は **API レスポンスに含めて配る** (BE-2 の再発防止。
   [architecture.md](architecture.md) §3.9②)。Vercel の環境変数に**同じ値を二重に持たせない**
+- **② のアプリ由来 env ファイルの再発防止ガード (F-6 / BE-3 を構造で潰す)**:
+  - **`env/<env>.env` に置けるキー集合を、`config` の②アプリ由来定義と PR CI で照合する**
+    (未知のキー・③④⑤に分類済みのキーが env ファイルに現れたら CI 失敗)。
+    v2 の失敗 (§1 の 3) は「env ファイルという形式」ではなく**「秘密が同じファイルに同居したこと」**にある
+  - **アプリは env ファイルを読むだけ**。プログラムによる書き換えを禁止する (BE-3 の `WriteEnv` を再演しない)
+  - **読み込みは既存のプロセス環境変数を上書きしない** — ECS が注入する `secrets` (③) /
+    `environment` (②インフラ由来・`APP_ENV`) が常に優先される
+  - 副次効果: `.env.local` (OP-D) と同形式になり、ローカルと dev/prod の設定差分を 1 つの形式で読める
 
 ## 4. シークレット管理 (D-5 / AC-3.1)
 
@@ -145,8 +153,9 @@ PoC 側: `claude_managed_agents/internal/config/dotenv.go` の `WriteEnv` は固
 |---|---|---|
 | **ECS のアプリ** | Secrets Manager → タスク定義の `secrets` で環境変数として注入 (値はタスク起動時に解決) | タスク実行ロール (`ecsTaskExecutionRole` 相当) に**当該シークレットの ARN のみ**を許可 |
 | **ECS のアプリ (④ の可変値 / ⑤ の起動時解決値)** | SSM Parameter Store を SDK で読む (④ は実行中に再取得 / ⑤ は起動時に 1 回) | タスクロールに `/hassan-v3/<env>/*` の読み取りを許可 |
-| **CI (`deploy.yml`)** | **OIDC で AWS ロールを引き受け、値は AWS 側から取る**。GitHub 側に持つのは下記の限定列挙のみ (5 つの environment に紐づく environment secret / variable として登録。environment の一覧は 04 §4.2) | OIDC。長期アクセスキーを置かない (v2 は長期キー運用) |
-| **運用者 (障害対応)** | **AWS 権限を持つのは、GitHub の `prod*` environment の承認者に設定された者に限る**。ロールバックも AWS コンソール / CLI ではなく **CI の `rollback.yml` (workflow_dispatch)** から起動する (§5.3) | OIDC (CI 経由)。**個人に長期の AWS 認証情報を配らない** |
+| **CI (`deploy-backend.yml`)** | **OIDC で AWS ロールを引き受け、値は AWS 側から取る**。GitHub 側に持つのは下記の限定列挙のみ (**environment に紐づく** environment secret / variable として登録。**environment の一覧と本数は 04 §4.2 が正** — ここに件数を転記しない = DR-9) | OIDC。長期アクセスキーを置かない (v2 は長期キー運用) |
+| **CI (`e2e.yml`)** | **専用 environment `dev-e2e` の OIDC ロール**で Secrets Manager から E2E 用アカウントの資格情報を取る。**権限は read のみ** | OIDC。**`dev` と分ける** — モノレポでは `sub` クレームが environment で決まるため、共有すると E2E が dev のデプロイ用ロールを引き受けられる ([infrastructure.md](infrastructure.md) §4.5。2026-08-05 追加) |
+| **運用者 (障害対応)** | **AWS 権限を持つのは、GitHub の `prod*` environment の承認者に設定された者に限る**。ロールバックも AWS コンソール / CLI ではなく **CI の `rollback-backend.yml` (workflow_dispatch)** から起動する (§5.3) | OIDC (CI 経由)。**個人に長期の AWS 認証情報を配らない** |
 | **開発者 (local)** | 手で作る `.env.local` (git 管理外) | AWS 認証情報を配らない (OP-D) |
 
 **CI が GitHub environment secret / variable として保持してよい値 (限定列挙。これ以外を置かない)**:
@@ -155,7 +164,7 @@ PoC 側: `claude_managed_agents/internal/config/dotenv.go` の `WriteEnv` は固
 |---|---|---|
 | **AWS の IAM ロール ARN** (`deploy` / `migration` 用。環境ごとに別ロール) | OIDC でロールを引き受けるための宛先であり、それ自体では何もできない。環境ごとに値が違うため environment に紐づける | variable でよい (秘密ではない) |
 | **AWS リージョン / ECR リポジトリ名 / ECS クラスタ名 / ecspresso の設定パス** | デプロイ先の識別子。秘密ではない | variable |
-| **`E2E_DISPATCH_TOKEN`** (backend → frontend リポへの `repository_dispatch` 送信用。**唯一の例外** — 2026-07-31 のユーザー回答 = [testing.md](testing.md) §13.1 T-Q5 の案 A) | E2E を「dev デプロイ完了」で自動起動するために必要で、AWS 側から取得できる値ではない。**dev environment のみ・frontend リポの dispatch 権限のみに絞った fine-grained トークン**に限定する | secret (**例外はこの 1 件だけ**。増やす場合は本表への追記 + レビューを必須とする) |
+| ~~**`E2E_DISPATCH_TOKEN`**~~ (**2026-08-03 に廃止**) | **例外は現在ゼロ件**。3 リポ構成では E2E の起動に backend → frontend リポのクロスリポジトリ `repository_dispatch` が必要で、そのトークンが唯一の例外だった (2026-07-31 のユーザー回答 = [testing.md](testing.md) §13.1 T-Q5 の案 A)。**app モノレポ化 ([architecture.md](architecture.md) §3.11) で frontend が同一リポジトリになり、`e2e.yml` は `on.workflow_run` で `deploy-backend.yml` の完了を直接受けられるようになった** ため不要になった (同 T-Q5 の [Answer 2]) | — (**GitHub 側に置く値は IAM ロール ARN と非秘密の識別子のみ = 例外なし**に戻った。新たに例外が必要になったら本表への追記 + レビューを必須とする) |
 
 - **置かない値 (実行時に AWS から取得する)**: **DB 接続情報** (`DATABASE_URL`) /
   **Anthropic API キー** / **Agent ID・Environment ID**。
@@ -176,7 +185,7 @@ PoC 側: `claude_managed_agents/internal/config/dotenv.go` の `WriteEnv` は固
 
 | 操作 | 手順 | 実行者 |
 |---|---|---|
-| **新規のシークレットを追加する** | ①infra リポで Secrets Manager のリソースを作る PR (**値は入れない**。`ignore_changes` で値を Terraform 管理外にする) → ②人間が `apply` → ③人間が AWS コンソール / CLI で値を投入 → ④backend リポで `config` の項目とタスク定義の `secrets` を追加する PR → ⑤デプロイ | infra PR + 人間の `apply` + backend PR |
+| **新規のシークレットを追加する** | ①infra リポで Secrets Manager のリソースを作る PR (**値は入れない**。`ignore_changes` で値を Terraform 管理外にする) → ②人間が `apply` → ③人間が AWS コンソール / CLI で値を投入 → ④app モノレポで `backend/` の `config` の項目とタスク定義の `secrets` を追加する PR → ⑤デプロイ | infra PR + 人間の `apply` + app PR |
 | **値を変更する** | Secrets Manager の値を更新 → **タスクを置き換える** (`ecspresso deploy` または `ecspresso refresh` 相当の再デプロイ)。**値の更新だけでは稼働中タスクに反映されない** | 人間 (prod は H-4 に相当する判断) |
 | **削除する** | ④の逆順 (コードの参照を消してデプロイ → シークレットを削除)。**参照が残った状態で削除するとタスクが起動しなくなる** | backend PR → infra PR |
 
@@ -236,11 +245,12 @@ v2 は設定が 51 キーに達した時点で秘密と非秘密が同じ `.env`
 > 本節が回答する ID: **D-3** / 対応 AC: **AC-3.3**
 > 承認点 (H-2 / H-3 / H-4) の定義・確認観点・機構は
 > [04-human-checkpoints.md](../../templates/shared/.claude/rules/04-human-checkpoints.md) が SSOT。
-> ジョブ構成の実体は [deploy.yml](../../templates/backend-repo/.github/workflows/deploy.yml)。
+> ジョブ構成の実体は [deploy-backend.yml](../../templates/app-monorepo/.github/workflows/deploy-backend.yml)。
+> **リポジトリ構成は app モノレポ + infra リポの 2 分割** ([architecture.md](architecture.md) §3.11 が SSOT)。
 
-### 5.1 リポジトリごとの手順
+### 5.1 サブツリー / リポジトリごとの手順
 
-**BE (backend リポ)** — `deploy.yml` の 6 ジョブ。**この順序を変えない**:
+**BE (app モノレポの `backend/`)** — `deploy-backend.yml` の 6 ジョブ。**この順序を変えない**:
 
 ```
 build (イメージ) → plan_migration → apply_migration (H-2) → plan_agent → apply_agent (H-3) → release (H-4)
@@ -260,7 +270,7 @@ build (イメージ) → plan_migration → apply_migration (H-2) → plan_agent
 | `apply_migration` (H-2) | **ECS RunTask** (マイグレーション実行専用タスク定義。VPC 内 private subnet) | **①RunTask 起動 → ②完了待ち (タスクの `lastStatus=STOPPED` をポーリング) → ③終了コードの判定 → ④CloudWatch Logs の取得**。接続情報は**タスク定義の `secrets`** で Secrets Manager から注入する |
 | `plan_agent` | GitHub ランナー | **SSM の発行元ハッシュ記録の読み取りのみ** (Anthropic API を呼ばない) |
 | `apply_agent` (H-3) | GitHub ランナー | Anthropic API (インターネット経由) + SSM への書き込み。**API キーは OIDC ロールで Secrets Manager から取得する** (§4.1。GitHub 側に置かない) |
-| `release` (H-4) | GitHub ランナー | `ecspresso deploy` (ECS API) |
+| `release` (H-4) | GitHub ランナー | **`ecspresso verify` (app ↔ infra の契約の実行時検証。下記) → `ecspresso deploy`** (ECS API) |
 
 - **`apply_migration` を GitHub ランナーから直接 DB に接続する形で実装しない**。RDS は private subnet に
   あり ([infrastructure.md](infrastructure.md) INF-F)、到達させるには **RDS をパブリックアクセス可にする**
@@ -271,8 +281,24 @@ build (イメージ) → plan_migration → apply_migration (H-2) → plan_agent
   依存させない**。マイグレーションの所要が 10 分を超え得るため、**ポーリング間隔と上限をワークフロー側の
   変数で明示する** (既定値 1800 秒。超過時はジョブを失敗させ、タスクの状態をログに出す)
 
-**FE (frontend リポ)**: `main` への push で Preview (dev 相当)。本番は `main` → `production` の PR を
+**`release` の前に `ecspresso verify` を必須で通す (2026-08-05 追加)**:
+ecspresso の定義は **tfstate から クラスタ名 / subnet ID / SG ID / ターゲットグループ ARN /
+シークレット ARN を解決する** ([infrastructure.md](infrastructure.md) §4.2)。
+**これは app と infra に跨る契約で、どちらのリポの CI も静的には照合できない**
+([architecture.md](architecture.md) §3.11.4)。`api/openapi.yaml` を MR-3 が守るのと違い、
+この契約には静的検査が置けないため、**デプロイ直前の実行時検証で受ける**。
+
+- **`verify` の失敗は `deploy` を止める**。最頻の原因は **infra の PR がマージ済みだが `apply` 未実施**
+  (§6.3 の「`apply` 済みが app の着手条件」が守られていない状態)
+- 失敗時は**疑う順序 4 点**をログに出す (①apply 漏れ ②ARN の作り直し ③tfstate の参照先変更
+  ④tfstate 読み取り権限の欠落)。**app 側のコードを見ても原因は分からない**種類の失敗だから
+- **要確認**: `verify` が 4 種のうちどれをどこまで検出するかは未検証。
+  立ち上げ時に dev で故障注入して確かめる ([architecture.md](architecture.md) §3.11.4)
+
+**FE (app モノレポの `frontend/`)**: `main` への push で Preview (dev 相当)。本番は `main` → `production` の PR を
 マージし、**人間が Promote する** (H-4)。ビルドとデプロイは Vercel が行う (GitHub Actions からは起動しない。OP-F)。
+**Vercel プロジェクトの Root Directory は `frontend`** で、**`frontend/` `api/` に差分が無い push ではビルドしない**
+(§5.1.1 の MR-2)。
 
 **infra (infra リポ)**: PR で `terraform plan` を CI が出し、**dev / prod とも人間が `apply` する**
 (実行主体の表は [infrastructure.md](infrastructure.md) §4.4)。
@@ -280,9 +306,74 @@ build (イメージ) → plan_migration → apply_migration (H-2) → plan_agent
 ([templates/infra-repo/CLAUDE.md.tmpl](../../templates/infra-repo/CLAUDE.md.tmpl) の絶対ルール 2)。
 **適用結果の要約を PR にコメントする**ことが記録手段 (04 §5)。
 
-**3 リポの依存順序**: `infra → backend → frontend`
-([templates/README.md](../../templates/README.md))。infra の出力 (RDS エンドポイント / ECS クラスタ名 /
-Secrets の ARN) が backend の入力、backend の OpenAPI が frontend の入力。
+**依存順序は `infra → app` の 2 段** ([templates/README.md](../../templates/README.md))。
+infra の出力 (RDS エンドポイント / ECS クラスタ名 / Secrets の ARN) が app の入力。
+**BE→FE の順序 (backend の OpenAPI が frontend の入力) はリポ内に閉じ、`api/openapi.yaml` を介した
+§5.1.1 の MR-3 の検査が担保する** (リポを跨いだ受け渡しではなくなった)。
+
+### 5.1.1 モノレポの CI / Vercel の出し分け (MR-1 / MR-2 / MR-3 の実体)
+
+> 機構の定義と「なぜ必要か」は [architecture.md](architecture.md) §3.11.2 が SSOT。
+> **本節は「どのワークフローがどう実装するか」だけを持つ** (MR-1〜MR-6 の一覧を複製しない)。
+
+**MR-1 (path filter + gate ジョブ) — `ci.yml`**:
+
+**ジョブは 6 本** (`ci.yml` の実物が正。ジョブ名はここで数えず実物を見る —
+`make check-monorepo-ci` の①が「job 集合 == `gate` の `needs` == `gate` 内の判定名」を機械照合する):
+
+| ジョブ | 起動条件 | 内容 |
+|---|---|---|
+| `changes` | 常に | path filter で `backend` (`backend/**`) / `frontend` (`frontend/**`) / `api` (`api/**`) / **`meta` (`.github/**` `scripts/**` `.claude/**`)** のフラグを出す |
+| `backend` | `changes.backend \|\| changes.api` | **`working-directory: backend`** で `D-2①`〜`D-2⑨` と UT / lint を実行する |
+| `frontend` | `changes.frontend \|\| changes.api` | **`working-directory: frontend`** で型チェック / lint (L-F1〜L-F6) / UT を実行する |
+| `contract` | `changes.backend \|\| changes.frontend \|\| changes.api` | MR-3 の再生成漏れ検査 (下記) |
+| **`meta`** | `changes.meta` | **機構ファイル自身の検査** — `scripts/` の `bash -n` と `actionlint`。**2026-08-04 に追加** (design-reviewer 指摘 中 1: `.github/**`・`scripts/**`・`.claude/**` は**どのサブツリージョブの対象でもなかった**ため、**CI 定義や pre-commit を壊す PR が全ジョブ skip で `gate` 緑**になっていた) |
+| **`gate`** | **`if: always()`** | `needs` の各 `result` が `success` または `skipped` のときだけ成功する。**ブランチ保護の必須ステータスチェックに指定するのはこのジョブ 1 本のみ** |
+
+- **`api/**` の変更は backend / frontend の両方をトリガーする** (契約変更は両側の検証を要する)
+- **個別ジョブを必須チェックに指定しない** — skip されたジョブは status を返さないため、
+  ブランチ保護が pending のまま止まり PR がマージ不能になる (H-1 の前提が壊れる)
+- `gate` が `skipped` を成功扱いにする条件を**書き忘れると逆に常に落ちる**ため、
+  **雛形の導入直後に「backend だけの PR」「frontend だけの PR」「両方の PR」の 3 通りで挙動を確認する**
+- **`on` は `push: branches: [main]` + `pull_request`** にする (2026-08-04 に是正)。
+  `push: branches: ["**"]` と併用すると、**同一 SHA に基準の違う `gate` チェックランが 2 つ**生まれ、
+  ブランチ保護がどちらを見るかが不定になる
+- **`deploy-backend.yml` の `on.push.paths` は `ci.yml` の path filter の部分集合にする**
+  (ワークフロー定義自身の変更を除く)。**CI が見ていない変更でデプロイが走る**状態を避けるため。
+  `make check-monorepo-ci` の⑤が機械照合する
+
+**MR-2 (Vercel の出し分け)** — GitHub Actions ではなく **Vercel プロジェクト側の設定**で行う (OP-F のとおり
+ビルド起動は Vercel が持つ):
+
+- **Root Directory** = `frontend`
+- **Ignored Build Step** = `frontend/` と `api/` の差分の有無で判定するコマンド (差分なし → ビルドしない)
+- **この 2 つは雛形で自動化できない人手設定**なので、立ち上げチェックリスト
+  ([04-human-checkpoints.md](../../templates/shared/.claude/rules/04-human-checkpoints.md) §4) に入れる
+
+**MR-3 (OpenAPI 契約の再生成漏れ検査) — `ci.yml` の `contract` ジョブ**:
+
+```
+make -C backend docs                              → api/openapi.yaml を生成
+scripts/check-regen.sh api/openapi.yaml           → 契約に反映されていない PR を落とす
+(frontend の型生成)                                 → frontend/src/generated を生成
+scripts/check-regen.sh frontend/src/generated     → FE の型が古い PR を落とす
+```
+
+⚠️ **裸の `git diff --exit-code` を使わない**。`git diff` は**未追跡ファイルを見ない**ため、
+**`api/openapi.yaml` の初回生成** (雛形の `api/` は `.gitkeep` のみ = **初回 PR が必ず素通り**) と
+**orval / sqlc が新規に吐くファイル**が検出されず、**「エンドポイント追加」という最頻の変更で
+MR-3 が空振りする** (2026-08-04 の design-reviewer 指摘 重大 1)。
+`scripts/check-regen.sh` が `git status --porcelain --untracked-files=all` で **追加 (`??`) / 変更 (` M`) / 削除 (` D`) の 3 種すべて**を見る (**インデックスを触らない**)。
+⚠️ **`git add --intent-to-add` + `git diff` 方式は採らない** — `git add` が**削除をインデックスに
+ステージする**ため `git diff` が差分ゼロになり、**削除を検出できない**うえ
+**ローカル実行で意図しない削除が次の commit に混入する** (2026-08-05 に実測。2 巡目の重大 R2-1)。
+**設計リポの `scripts/check-monorepo-ci.sh` の検査④が、雛形と設計文書の両方について
+「裸の `git diff --exit-code` が復活していないこと」を機械検査する** (禁止の宣言だけにしない)。
+
+- **`api/openapi.yaml` と `frontend/src/generated` は生成物であり手編集を禁止する**
+  (`api/` は `.gitattributes` で `linguist-generated` を付け、レビュー差分から畳む)
+- **この検査が MR-1 の path filter で skip される条件を作らない** — `contract` ジョブは
+  backend / frontend / api のどれが変わっても走らせる (片側だけの変更でも契約はずれ得る)
 
 ### 5.2 Managed Agent の発行・更新をどこで行うか (AC-3.3 / D-6)
 
@@ -367,20 +458,20 @@ delete は**参照するセッションが無い場合のみ**。→ §5.3 で�
 
 | 対象 | 第一手段 | 実行経路 (誰がどこから) | 所要 | 前提・注意 |
 |---|---|---|---|---|
-| **BE (ECS)** | `ecspresso rollback --config=stacks/<env>/ecspresso.yml --wait-until=service-stable` | **backend リポの `rollback.yml` (`workflow_dispatch`)** を **`prod*` environment の承認者が起動する**。prod は `environment: prod` の承認を通す (dev は承認なし)。**個人の AWS 認証情報では実行しない** (§4.1 の運用者行) | 数分 | 直前のタスク定義に戻す。`deploy.yml` の失敗時ステップは**この workflow の起動先とコマンドを出力する** |
+| **BE (ECS)** | `ecspresso rollback --config=backend/stacks/<env>/ecspresso.yml --wait-until=service-stable` (**ジョブは repo ルートで動くため `backend/` 接頭辞を付ける**) | **`rollback-backend.yml` (`workflow_dispatch`)** を **`prod*` environment の承認者が起動する**。prod は `environment: prod` の承認を通す (dev は承認なし)。**個人の AWS 認証情報では実行しない** (§4.1 の運用者行) | 数分 | 直前のタスク定義に戻す。`deploy-backend.yml` の失敗時ステップは**この workflow の起動先とコマンドを出力する** |
 | **FE (Vercel)** | 前の Production デプロイを **Promote** (Instant Rollback) | **Vercel の Promote 権限を持つ者** (04 §4.4 で限定した者) が Vercel の画面から実行 | 即時 | ビルドをやり直さない。これが OP-F で Vercel の Git 連携を残す理由 |
-| **Managed Agent** | SSM の Agent ID を**前バージョンの値に戻す** → **BE のタスクを置換する** (`rollback.yml` の入力で「Agent の切り戻しを含む」を選ぶ) | 同上 (`rollback.yml`) | 数分 | **Agent ID は §3.3 の⑤ (起動時に 1 回解決) なので、SSM を戻すだけでは稼働中タスクに反映されない**。タスク置換が必須。旧 Agent は削除しない (§5.2)。**Environment を変更していた場合は Environment ID も同じ手順で戻す** |
+| **Managed Agent** | SSM の Agent ID を**前バージョンの値に戻す** → **BE のタスクを置換する** (`rollback-backend.yml` の入力で「Agent の切り戻しを含む」を選ぶ) | 同上 (`rollback-backend.yml`) | 数分 | **Agent ID は §3.3 の⑤ (起動時に 1 回解決) なので、SSM を戻すだけでは稼働中タスクに反映されない**。タスク置換が必須。旧 Agent は削除しない (§5.2)。**Environment を変更していた場合は Environment ID も同じ手順で戻す** |
 | **DB (非破壊)** | **戻さない**。旧イメージが新スキーマで動くことが非破壊の定義 (§7.4) | — (操作しない) | — | 逆方向のマイグレーションを本番で走らせない |
 | **DB (破壊的)** | **RDS スナップショットから復元** (承認コメントに記録したスナップショット ID。04 §2.2) | **承認者が AWS コンソール / CLI で実行** (復元はワークフロー化しない — 復元先の指定と切り替えに人間の判断が要るため) | 十数分〜 | 復元中はサービス停止。**破壊的変更を「戻せる」と扱わない** |
 | **infra** | 変更を戻す PR → `plan` を読んで `apply` | **人間が `apply`** ([infrastructure.md](infrastructure.md) §4.4) | 変更次第 | **`terraform apply` の巻き戻しは新たな変更**である。RDS の `replace` は戻せない |
 
-**`rollback.yml` に要求する形** (実体は backend リポで実装する。§9 の引き渡し 7):
+**`rollback-backend.yml` に要求する形** (実体は app モノレポで実装する。§9 の引き渡し 7):
 
 - 入力: ①対象環境 (`dev` / `prod`) ②戻す対象 (`service` / `service+agent`) ③理由 (自由記述。ジョブサマリに残す)
 - `environment`: prod を選んだ場合は `prod` (承認者必須)。**dev は承認なしで即実行**
 - 実行内容: `ecspresso rollback` (+ 指定時は SSM の Agent ID / Environment ID を前バージョンへ戻して
   タスクを置換) → **完了後にサービスが `service-stable` になったことを出力する**
-- **`deploy.yml` の失敗時ステップは「`rollback.yml` を起動せよ」と出力するだけにする** (自動起動しない)。
+- **`deploy-backend.yml` の失敗時ステップは「`rollback-backend.yml` を起動せよ」と出力するだけにする** (自動起動しない)。
   自動で戻すと、原因が DB 側にある場合にアプリだけが戻り、状態の組み合わせが増える
 
 **戻す順序は適用順序の逆**: `release` → `apply_agent` → `apply_migration`。
@@ -391,12 +482,20 @@ delete は**参照するセッションが無い場合のみ**。→ §5.3 で�
 
 | 変更の種類 | 順序 | 根拠 |
 |---|---|---|
-| **後方互換な追加・変更** | **BE を先に本番へ出す** → FE を Promote | FE が新 API を呼ぶ時点で BE 側に存在している必要がある |
-| **破壊的変更** | **3 段**: ①BE で新旧併存 → ②FE 切替 → ③BE で旧を削除 | issue の切り方とマージ順序は [02-issue-granularity.md](../../templates/shared/.claude/rules/02-issue-granularity.md) §2.2.1 が SSOT |
+| **後方互換な追加・変更** | **BE を先に本番へ出す** → FE を Promote。**1 PR に同梱してよい** | FE が新 API を呼ぶ時点で BE 側に存在している必要がある。本番反映の順序はデプロイ経路が別 (ECS / Vercel Promote) なので保たれる |
+| **破壊的変更** | **3 段**: ①BE で新旧併存 → ②FE 切替 → ③BE で旧を削除。**①②③ を別 PR に分ける (MR-6)** | issue の切り方とマージ順序は [02-issue-granularity.md](../../templates/shared/.claude/rules/02-issue-granularity.md) §2.2.1 が SSOT |
 | **FE のみ / infra のみ** | 制約なし | — |
 
 **③ (旧 IF の削除) を本番で行う条件**: ②の FE が **`production` に Promote 済み**であること。
 `main` へのマージ (= Preview 反映) だけでは、稼働中の本番 FE が旧 IF を使い続けている。
+
+**モノレポ化で新たに要る規約 (MR-6)**: **破壊的変更の ①②③ を 1 PR に同梱することを禁止する**。
+3 リポ構成では「FE と BE が別リポ = 別 PR」であることが順序を無償で担保していたが、
+**モノレポでは 1 PR で FE/BE を同時にマージできてしまう** ([architecture.md](architecture.md) §3.11.2 の MR-6)。
+担保は 2 段: ①`02-issue-granularity.md` §2.2.1 の規約 ②PR テンプレートで
+「この PR は破壊的 API 変更を含むか / 含むなら 3 段のどれか」を宣言させる。
+**後方互換な変更は同梱してよい** — 禁止するのは破壊的変更に限る (すべての FE/BE 跨ぎを分けると
+モノレポ化の利得そのものを失う)。
 
 ## 6. 全面切替 (AC-3.5 / C-11 / C-15)
 
@@ -429,8 +528,8 @@ delete は**参照するセッションが無い場合のみ**。→ §5.3 で�
 
 | 段階 ID | 内容 | 完了条件 (**すべて満たすまで次へ進まない**) | 承認 |
 |---|---|---|---|
-| **RL-0** | **dev 基盤の先行構築** (infra リポ) | ①`terraform plan` の差分ゼロ ②出力値 (RDS エンドポイント / ECS クラスタ名 / Secrets ARN) が取得できる ③backend の空実装が dev へデプロイでき、ヘルスチェックが通る ④04 §4 の立ち上げチェックリスト (ブランチ保護 / environment / ラベル) が 3 リポで完了 | 人間の `apply` |
-| **RL-1** | **dev への継続デプロイと受入確認** (開発期間の全体) | ①第 1 リリース対象の全 AC が dev で確認済み ②**LLM 呼び出し明細が dev で記録されている** ([architecture.md](architecture.md) §3.8.3 の「第 1 リリース前」要件) ③-a **AL-1〜AL-7 の全件が dev で「アラーム状態へ遷移する」ことを試験済み** (CloudWatch アラームの状態遷移で確認。**dev は AL-6 以外を通知しない** (§7.5) ため、通知の到達ではなく**アラーム自体の発火**を確認する) ③-b **dev の通知経路 1 本 (AL-6 → dev の SNS トピック → Slack) の到達を試験済み** ④`rollback.yml` を dev で 1 回実行して戻ることを確認済み (§5.3) | H-1 のみ |
+| **RL-0** | **dev 基盤の先行構築** (infra リポ) | ①`terraform plan` の差分ゼロ ②出力値 (RDS エンドポイント / ECS クラスタ名 / Secrets ARN) が取得できる ③backend の空実装が dev へデプロイでき、ヘルスチェックが通る ④04 §4 の立ち上げチェックリスト (ブランチ保護 / environment / ラベル / **`gate` 必須チェック / Vercel の Root Directory・Ignored Build Step / CODEOWNERS**) が 2 リポで完了 | 人間の `apply` |
+| **RL-1** | **dev への継続デプロイと受入確認** (開発期間の全体) | ①第 1 リリース対象の全 AC が dev で確認済み ②**LLM 呼び出し明細が dev で記録されている** ([architecture.md](architecture.md) §3.8.3 の「第 1 リリース前」要件) ③-a **AL-1〜AL-7 の全件が dev で「アラーム状態へ遷移する」ことを試験済み** (CloudWatch アラームの状態遷移で確認。**dev は AL-6 以外を通知しない** (§7.5) ため、通知の到達ではなく**アラーム自体の発火**を確認する) ③-b **dev の通知経路 1 本 (AL-6 → dev の SNS トピック → Slack) の到達を試験済み** ④`rollback-backend.yml` を dev で 1 回実行して戻ることを確認済み (§5.3) | H-1 のみ |
 | **RL-2** | **prod 基盤の構築** ([infrastructure.md](infrastructure.md) §6.2 が手順の SSOT) | ①`envs/prod` と `envs/dev` の差分が**変数のみ**であることを `plan` で確認 ②§4.5 の棚卸し表の全行に prod の値が投入済み (**Environment ID を含む**) + **dev に開発者専用 Agent (`dev-<ユーザー名>-` 接頭辞) が残っていないことを確認** (§4.4) ③`prod-db` / `prod-agent` / `prod` の承認者が設定済み ④**prod の Agent を発行済み** (`apply_agent` を prod で 1 回通す) ⑤RDS のバックアップ保持と削除保護が prod の値 ([infrastructure.md](infrastructure.md) §5.2) で有効 ⑥**prod の通知経路の到達試験**: `alerts-critical` と `alerts-warning` の各トピックへテスト通知を送り、**critical は Slack とメールの両方に、warning は Slack に届くことを確認**する (§7.5。**prod の 2 トピックとメール購読は dev に存在しないため、本番で初めて使われることを避ける**) ⑦**prod の初期スキーマを投入済み** (2026-07-30 追加。`apply_migration` を **`release` を伴わずに 1 回単独で起動**し、`prod-db` の承認を通す。手順の SSOT は [data-model.md](data-model.md) §6.3)。**RL-3 の §6.3 ②データ移送はテーブルが存在する前提**なので、初期投入をここで終える — §7.4 の「リリースより前に適用」は**差分適用の規則**であり、初期投入はその特例である | 人間の `apply` + H-3 + **H-2** |
 | **RL-3** | **本番リリース (v3 の公開)** | §6.3 の手順を完了し、①スモーク (認証 → 会話 1 ターン → 生成物の保存 → 再取得) が prod で成功 ②5xx 率と LLM 失敗率が AL-1 / AL-2 のしきい値未満で **24 時間経過** ③LLM 明細が prod に記録されている | H-2 / H-3 / H-4 |
 | **RL-4** | **v2 併用期間 (機能単位の移送)** | ドメイン単位に: ①v3 に同等機能がある ②(該当時) データ移送が完了し写像できなかった件数が 0 ③v2 側の当該機能への**新規アクセスが 0 件**であることをアクセスログで確認 ④[architecture.md](architecture.md) §3.5.2 の対象パス表に移植ドメインを追記済み ⑤**gateway を通らない LLM 呼び出しが残っていない** (O-2 の移植受入条件) | ドメインごとに H-4 |
@@ -462,7 +561,7 @@ C-15 が「インフラ先行」と言っているのは **dev への継続デ�
 ```
 ① 事前確認   … §6.1 の RL-2 完了条件 + 進行中の SSE セッション数 (メトリクス) が 0
 ② データ移送 … (該当時) v2 → v3 の一方向コピー + 写像 0 件の確認 (§6.2)
-③ BE         … deploy.yml を prod で手動起動 (H-2 → H-3 → H-4)
+③ BE         … deploy-backend.yml を prod で手動起動 (H-2 → H-3 → H-4)
 ④ スモーク   … 認証 → 会話 1 ターン → 生成物の保存 → 再取得
              （v3 のホスト名に対して実施。この時点で v2 は無変更のまま稼働）
 ⑤ FE         … main → production の PR をマージし Promote (H-4)
@@ -515,6 +614,7 @@ RL-3 の公開前に、**v2 との差分のうちユーザーに見えるもの*
 | 2 | **memo のスコープ変更** (同じアイデアの memo がボードごとに独立する) | [API/idea-boards.md](API/idea-boards.md) §4 M-2 / IB-Q10 |
 | 3 | 切り戻し時の制約 (v3 公開後のパスワード変更等は v2 に戻らない) | [data-model.md](data-model.md) §6.5 の 5 |
 | 4 | データ引き継ぎ範囲の確定後に「引き継がないもの」があれば追記 (DM-A2 待ち) | [data-model.md](data-model.md) §6.2 の項目 7 |
+| 5 | **アイデア CSV エクスポートの列ずれ修正** (2026-08-02 追加) — **v2 の CSV はヘッダ 16 列に対しデータが 15 値**で、`価値提案` 列以降が 1 つ左にずれ **`作成日` 列が常に空**だった (`hassan-v2-backend/usecase/idea/get_ideas_csv.go` の ヘッダ列挙とデータ行の列挙が不一致。`encoding/csv` は列数不一致を検査しないため無言で出ていた)。**v3 は修正するため、切替後は `価値提案` 列と `作成日` 列の中身が変わる** — v2 の CSV を取り込む集計を持つ利用者に影響する | [API/ideas.md](API/ideas.md) §2.6 / D-IDA-11 |
 
 ### 6.4 切り戻し (RL-3 の失敗時)
 
@@ -572,19 +672,26 @@ RL-3 の公開前に、**v2 との差分のうちユーザーに見えるもの*
 |---|---|---|
 | `feature/*` (`<type>/<issue番号>-<slug>`) | 作業ブランチ。壊れてよい | なし (エージェントが push 可) |
 | **`main`** | **常時リリース可能**。dev へ継続デプロイ | 直接 push 禁止 / 必須レビュー 1 / 必須ステータスチェック (04 §4.1) |
-| **`production`** (frontend のみ) | Vercel の Production Branch | `main` からの PR のみ / 必須レビュー 1 (04 §4.1 の最後の項目) |
+| **`production`** (**用途は frontend のみ。実体は app モノレポのブランチ**) | Vercel の Production Branch | `main` からの PR のみ / 必須レビュー 1 (04 §4.1 の最後の項目) |
 
-- **backend / infra に `production` ブランチを作らない**。BE の本番は「`main` の特定コミットを
-  手動起動でデプロイする」形であり、ブランチで表現しない (FE は Vercel の仕組みが
-  Production Branch を要求するため例外)
+- **`production` は app モノレポのブランチなので、必然的に `backend/` サブツリーを含む**
+  (2 リポ構成の帰結。3 リポ時代は FE リポだけのブランチだった = DR-10 の 7 例目)。
+  **`production` の `backend/` はどこにもデプロイされない** — BE の本番は
+  「`main` の特定コミットを `workflow_dispatch` で手動デプロイする」形が唯一の経路であり、
+  **`production` の head は BE の本番状態を表さない**。したがって:
+  - **`production` から作業ブランチを切らない** (`main` が唯一の分岐元)
+  - 「BE の本番に何が載っているか」は**ブランチでは分からない** — `ecspresso status` /
+    デプロイ実行履歴で確認する (§5.3 のロールバック手順が同じ情報源を使う)
+- **infra リポに `production` ブランチを作らない**。infra は `apply` が人手ゲートであり、
+  ブランチで本番状態を表現しない
 - リリースブランチを持たない代償は **`main` に未完成機能が入り得る**ことで、これを §7.2 のフラグで塞ぐ
 
 ### 7.2 フィーチャーフラグ (OP-I)
 
 | 項目 | 確定値 |
 |---|---|
-| **実装** | 環境変数のみ。BE = ECS タスク定義の `environment` (§3.3 の②) を `config` が読む。FE = Vercel の環境変数 |
-| **値の置き場 (確定)** | **backend リポの `stacks/<env>/` にある ecspresso のタスク定義テンプレート**に直接書く。**infra リポの `envs/<env>` の変数にしない** — 理由: フラグの切替を**通常の PR + dev への継続デプロイ**で回したい (infra の変数にすると infra PR + 人間の `apply` が必要になり、リードタイムが別物になる)。また [infrastructure.md](infrastructure.md) §4.1 は「Terraform 側で ECS サービスとタスク定義のリソースを一切定義しない」と決めているため、`environment` の所有者は ecspresso である。**却下案**: ①infra の変数にする — 上記のリードタイムと所有者の二重化。②SSM (§3.3 の④) に置いて再デプロイなしに切り替える — 「未完成機能を prod で無効にする」用途では**コードとフラグが同時に切り替わる**必要があり、④ の判定基準 (§3.3) を満たさない |
+| **実装** | 環境変数のみ。BE = `backend/env/<env>.env` (§3.3 の②) を `config` が読む。FE = Vercel の環境変数 |
+| **値の置き場 (確定)** | **`backend/env/<env>.env`** に書く (**2026-08-02 変更** — 従来は `stacks/<env>/` のタスク定義テンプレート。§3.3 の②のユーザー決定に伴う移動)。**infra リポの `envs/<env>` の変数にしない** — 理由: フラグの切替を**通常の PR + dev への継続デプロイ**で回したい (infra の変数にすると infra PR + 人間の `apply` が必要になり、リードタイムが別物になる)。**却下案**: ①infra の変数にする — 上記のリードタイムと所有者の二重化。②SSM (§3.3 の④) に置いて再デプロイなしに切り替える — 「未完成機能を prod で無効にする」用途では**コードとフラグが同時に切り替わる**必要があり、④ の判定基準 (§3.3) を満たさない。③`stacks/<env>/` のタスク定義テンプレートに書く (2026-08-02 まで採用) — アプリ由来の非秘密値を env ファイルへ統一する決定 (§3.3 の②) に伴い移動。リードタイムは同じ (app の PR → デプロイ) |
 | **命名** | `FEATURE_<機能名>` (真偽値。既定は **false** = 未定義なら無効) |
 | **判定の正** | **BE**。フラグ OFF のエンドポイントは **404** を返す (経路が存在しないのと同じ扱い。403 は「権限が無い」の意味なので使わない。[auth.md](auth.md) §6.6 の判定規則と整合) |
 | **FE の役割** | **導線を隠すだけ**。FE のフラグが古くても、BE が 404 を返すため機能は露出しない |
@@ -629,7 +736,7 @@ RL-3 の公開前に、**v2 との差分のうちユーザーに見えるもの*
 
 **共通の前提 (すべての変更に適用)**:
 
-1. **マイグレーションはアプリのリリースより前に適用される** (`deploy.yml` の
+1. **マイグレーションはアプリのリリースより前に適用される** (`deploy-backend.yml` の
    `apply_migration` → `release`)。したがって **「旧イメージが新スキーマで動く」ことが全変更の必要条件**である。
    これを満たさない変更は、必ず上表の 2 段階 / 3 段階に分解する。
    **適用は ECS RunTask で VPC 内から行う** (§5.1 の実行場所表 / [infrastructure.md](infrastructure.md) INF-H)
@@ -642,7 +749,7 @@ RL-3 の公開前に、**v2 との差分のうちユーザーに見えるもの*
 
 **マイグレーションツールの選定 (D-4)** — psqldef (v2 が使用。宣言的で逆方向の SQL を持たない) か
 golang-migrate (PoC が使用。up/down のバージョン管理) か。
-`deploy.yml` の `plan_migration` / `apply_migration` の**コマンド実体は選定までプレースホルダ**である
+`deploy-backend.yml` の `plan_migration` / `apply_migration` の**コマンド実体は選定までプレースホルダ**である
 (承認が挟まる位置と**実行経路 (ECS RunTask) は方式に依存しないため既に確定している** — §5.1)。
 **選定が §7.4 に与える影響**: 表の「戻し方」列で「制約を外す」「①は戻さない」と書いた操作を
 **逆方向のマイグレーションとして記述できるか**が変わる (psqldef なら宣言を戻す形になり、
@@ -699,12 +806,12 @@ golang-migrate (PoC が使用。up/down のバージョン管理) か。
 | ID | 状態 | 回答 / 先送り先 |
 |---|---|---|
 | **D-1 環境** | **回答** | §3。local / dev / prod の 3 環境。**FE (Vercel の Preview / Production) と BE (AWS の dev / prod) の対応表は §3.2**。設定値の持ち方は §3.3 の 5 分類 (コード内定数 / ECS `environment` / Secrets Manager / SSM で実行中に読み替える値 / SSM で起動時に 1 回解決する値) |
-| **D-3 デプロイ手順** | **回答** | §5。BE = `deploy.yml` の 6 ジョブ (dev 自動 / prod 手動 + 承認)。**`apply_migration` は ECS RunTask で VPC 内から実行する** (§5.1 の実行場所表)、FE = Vercel、infra = 人間の `apply`。**ロールバックは §5.3** (`rollback.yml` から `ecspresso rollback` / Vercel の Promote / Agent ID の前バージョン + タスク置換 / DB は原則戻さない)。**戻す順序は適用順序の逆**。API 変更時の順序は §5.4 |
+| **D-3 デプロイ手順** | **回答** | §5。BE = `deploy-backend.yml` の 6 ジョブ (dev 自動 / prod 手動 + 承認)。**`apply_migration` は ECS RunTask で VPC 内から実行する** (§5.1 の実行場所表)、FE = Vercel、infra = 人間の `apply`。**ロールバックは §5.3** (`rollback-backend.yml` から `ecspresso rollback` / Vercel の Promote / Agent ID の前バージョン + タスク置換 / DB は原則戻さない)。**戻す順序は適用順序の逆**。API 変更時の順序は §5.4 |
 | **D-5 シークレット** | **回答** | §4。Secrets Manager (秘密) と SSM Parameter Store (非秘密) を分ける。**用途単位で 1 シークレット**。**CI が GitHub environment secret / variable に持ってよい値は §4.1 の限定列挙のみ** (DB 接続情報 / API キー / Agent ID・Environment ID は置かず、OIDC ロール経由で AWS から取得する)。登録・変更・ローテーション・ローカル開発の手順は §4.2〜§4.4。**PoC の `WriteEnv` (BE-3) と v2 の `.env` 焼き込みは不採用** (§4.1) |
 | **D-7 段階リリース** | **回答** | §6 (段階と完了条件 RL-0〜RL-5) + §7.3 (未リリース変更を prod に出さない 4 段の仕組み)。**フラグは環境変数のみ・判定の正は BE** (§7.2) |
 | **D-4 マイグレーション** | **部分 (本書の担当分は回答)** | **自動適用範囲は §7.4 で確定** (dev の非破壊のみ自動 / 破壊的は 2〜3 段階に分解)。**ツール選定は未確定** (§7.5 の `[Answer]`)。方式・後方互換・ロールバック手順の全体 (AC-3.4) は `docs/design/data-model.md` |
-| **D-2 CI ゲート** | **参照 (本書は SSOT ではない)** | [01-construction-loop.md](../../templates/shared/.claude/rules/01-construction-loop.md) §7 + [architecture.md](architecture.md) §5 の D-2 + [ci.yml](../../templates/backend-repo/.github/workflows/ci.yml)。本書は**デプロイ側のゲート**のみを扱う |
-| **D-6 Agent ライフサイクル** | **参照 + 運用手順を追加** | 機構は [04-human-checkpoints.md](../../templates/shared/.claude/rules/04-human-checkpoints.md) §2.3 と [deploy.yml](../../templates/backend-repo/.github/workflows/deploy.yml)。**本書が追加するのは §5.2 の運用**: ①**Agent ID と Environment ID** の保管先 = SSM のバージョン履歴 (§3.3 の⑤。**起動時に 1 回解決し実行中は読み替えない**) ②再発行トリガは `prompts/agents.yaml` の列挙 (`prompts/` 全体ではない) ③開発者ローカルからの発行時に dev の共有 ID を上書きしない (§4.4 に ID の置き場と削除責任) ④切り戻しは SSM の前バージョン + **タスク置換** (§5.3) ⑤**dev / prod で Environment は分ける (2026-07-30 確定。複数作成可を一次ソースで確認)** — 加えて **Environment の設定は不変として扱い、変更は新規作成 + ID 差し替え + 旧を archive** (Anthropic 側に設定の版履歴が無いため。§5.2 の含意 2) |
+| **D-2 CI ゲート** | **参照 (本書は SSOT ではない)** | [01-construction-loop.md](../../templates/shared/.claude/rules/01-construction-loop.md) §7 + [architecture.md](architecture.md) §5 の D-2 + [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml)。本書は**デプロイ側のゲート**のみを扱う |
+| **D-6 Agent ライフサイクル** | **参照 + 運用手順を追加** | 機構は [04-human-checkpoints.md](../../templates/shared/.claude/rules/04-human-checkpoints.md) §2.3 と [deploy-backend.yml](../../templates/app-monorepo/.github/workflows/deploy-backend.yml)。**本書が追加するのは §5.2 の運用**: ①**Agent ID と Environment ID** の保管先 = SSM のバージョン履歴 (§3.3 の⑤。**起動時に 1 回解決し実行中は読み替えない**) ②再発行トリガは `prompts/agents.yaml` の列挙 (`prompts/` 全体ではない) ③開発者ローカルからの発行時に dev の共有 ID を上書きしない (§4.4 に ID の置き場と削除責任) ④切り戻しは SSM の前バージョン + **タスク置換** (§5.3) ⑤**dev / prod で Environment は分ける (2026-07-30 確定。複数作成可を一次ソースで確認)** — 加えて **Environment の設定は不変として扱い、変更は新規作成 + ID 差し替え + 旧を archive** (Anthropic 側に設定の版履歴が無いため。§5.2 の含意 2) |
 | **D-8 IaC の管理範囲** | **対象外 (参照)** | [infrastructure.md](infrastructure.md) §4 / §7 が SSOT。**本書と一致していることを確認した点**: ①Secrets の値は Terraform 管理外 (同 §7 の X-2 = 本書 §4.2) ②`envs/dev` / `envs/prod` の差分は変数のみ (同 §5.1 = 本書 §3.1) ③SSM に Agent ID を版付きで置き CI が書く (同 §3.4 = 本書 OP-E / §5.2) ④apply は dev も人間 (同 §4.4 = 本書 §5.1) |
 | **O-7 アラート** | **部分** | 通知の**形と環境差** (prod = 2 トピック / critical は Slack + メール、dev = 1 トピック・AL-6 のみ通知) を §7.5 で確定 — **本書がこの決定の SSOT**。**宛先の値は未確定** (`[Answer]`)。監視対象としきい値は [observability.md](observability.md) §4.6 |
 | **A 領域 (A-1〜A-7)** | **対象外** | 本書は運用設計であり、認証・テナント境界の設計は [auth.md](auth.md) が SSOT。ただし**運用上の接点**は本書で扱った: JWT 鍵のローテーション手順 (§4.3)・prod の接続情報をローカルに置かない (§4.4) |
@@ -712,7 +819,7 @@ golang-migrate (PoC が使用。up/down のバージョン管理) か。
 
 ## 9. 実装リポへの引き渡し
 
-**infra リポ** (最初に着手。他 2 リポの前提。**モジュール構成と要素一覧は
+**infra リポ** (最初に着手。app モノレポの前提。**モジュール構成と要素一覧は
 [infrastructure.md](infrastructure.md) §3 / §10.1 が SSOT**。ここには**本書由来の要求だけ**を挙げる):
 
 1. **SSM Parameter Store のパス階層を `/hassan-v3/<env>/...` に固定する** (§3.3 の④・⑤ / §4.1)。
@@ -727,19 +834,21 @@ golang-migrate (PoC が使用。up/down のバージョン管理) か。
    タスク実行ロール・タスクロール) / `logs:GetLogEvents` を与える** (§5.1 の RunTask 経路)。
    **`apply_agent` が使うロールに `secretsmanager:GetSecretValue` (`/hassan-v3/<env>/anthropic/api-key` のみ) と
    `ssm:PutParameter` を与える** (§4.1 の限定列挙により CI は API キーを GitHub 側に持たない)。
-   **`rollback.yml` の切り戻しに `ssm:GetParameter` と `ssm:GetParameterHistory` も必要**
+   **`rollback-backend.yml` の切り戻しに `ssm:GetParameter` と `ssm:GetParameterHistory` も必要**
    (`/hassan-v3/<env>/agent/*` と `.../anthropic/environment-id`)。**これが無いと ① が `AccessDenied` で失敗する**
 4. **prod の SNS トピックを 2 本 (`alerts-critical` / `alerts-warning`)、dev は 1 本作る。
    critical にはメール購読を付ける** (§7.5 が決定の SSOT。[infrastructure.md](infrastructure.md) §3.5 が要素一覧)
 
-**backend リポ**:
+**app モノレポ (`backend/`)**:
 
 1. `config` パッケージが §3.3 の 5 分類を読む (④ は **TTL 60 秒で再取得し、値の変更を info ログに出す** /
    **⑤ (Agent ID・Environment ID) は起動時に 1 回だけ解決し、実行中は再取得しない**)
 2. 必須項目が未設定なら**起動を失敗させる** (BE-5。§4.4)。**`Environment ID` を必須項目に含める**
    (PoC は未設定時に実行時エラーを返していた — OP-E の出典)
-3. `.env.example` (キー名のみ) の配置と `.dockerignore` への `env*` / `.env*` / `*.pem` の追加 (§4.1)
-4. `deploy.yml` のプレースホルダを埋める (ECR リポジトリ名 / IAM ロール ARN / `stacks/<env>/ecspresso.yml` /
+3. `.env.example` (キー名のみ) の配置と `.dockerignore` への `.env*` / `*.pem` の追加 (§4.1)。
+   **`env/<env>.env` (②のアプリ由来・非秘密のみ) はイメージに同梱するため除外しない** (§3.3 の②)。
+   **env ファイルのキー集合を `config` の②アプリ由来定義と照合する CI 検査を持つ** (§3.3 の再発防止ガード)
+4. `deploy-backend.yml` のプレースホルダを埋める (ECR リポジトリ名 / IAM ロール ARN / `stacks/<env>/ecspresso.yml` /
    **マイグレーション実行タスク定義名・クラスタ名・subnet / SG・ロググループ名**)。
    **`plan_migration` / `apply_migration` のコマンド実体はツール選定 (§7.5) まで未実装のまま**にする。
    **RunTask の起動・完了待ち・ログ取得の構造は雛形側で確定済み**なので、この構造を壊さずにコマンドだけを埋める
@@ -747,17 +856,17 @@ golang-migrate (PoC が使用。up/down のバージョン管理) か。
    Secrets Manager から注入。[infrastructure.md](infrastructure.md) §3.2)
 6. Agent 発行コマンド (`apply_agent` から呼ぶ。**Agent ID と Environment ID の両方を扱う**) と
    `scripts/check-tool-contract.sh` (§5.2。**`prompts/agents.yaml` の列挙と実発行対象の一致検査を含める**)
-7. **`rollback.yml` (`workflow_dispatch`)** — **雛形は `templates/backend-repo/.github/workflows/rollback.yml`
+7. **`rollback-backend.yml` (`workflow_dispatch`)** — **雛形は `templates/app-monorepo/.github/workflows/rollback-backend.yml`
    に作成済み** (2026-07-30)。**新規に書き直さずコピーして使う** — 雛形には次の安全機構が入っており、
    再実装すると失われる: ①`scripts/rollback-agent.sh` が未実装なら `exit 1` (無言で「戻した」と報告しない)
    ②`②'` で「① 成功・② 失敗」の中途状態だけを警告 ③`③` で SSM の現在値とバージョンを出力。
    **実装リポで用意するのは `scripts/rollback-agent.sh`** (SSM の版履歴から旧値へ書き戻す)
-8. **フィーチャーフラグは `stacks/<env>/` のタスク定義テンプレートに書く** (infra の変数にしない。§7.2)
+8. **フィーチャーフラグは `env/<env>.env` に書く** (infra の変数にしない。§7.2。2026-08-02 変更 — 従来はタスク定義テンプレート)
 9. **アクティブな SSE 接続数のメトリクス** — prod デプロイ前の確認に使う。
    **定義の SSOT は [observability.md](observability.md) §4.4.1** (2026-07-30 に追記済み。
    `sse.active_connections` / ゲージ / EMF / 30 秒)。本書 §6.3 はリリース判断での使い方のみを定める
 
-**frontend リポ**:
+**app モノレポ (`frontend/`)**:
 
 1. Vercel の Production Branch を `production` に変更し、`main` は Preview (§3.2 / 04 §4.4)
 2. 環境変数を `Preview` = dev の BE / `Production` = prod の BE に登録する。
@@ -768,19 +877,22 @@ golang-migrate (PoC が使用。up/down のバージョン管理) か。
 
 | 対象 | 状態 | 内容 |
 |---|---|---|
-| [deploy.yml](../../templates/backend-repo/.github/workflows/deploy.yml) の `apply_migration` | **是正済み** | GitHub ランナーから `secrets.DATABASE_URL` で直接 DB に接続する形を廃止し、**ECS RunTask の起動 → 完了待ち → 終了コード判定 → CloudWatch Logs の取得**に置き換えた (§5.1)。コマンド実体のみプレースホルダ |
-| [deploy.yml](../../templates/backend-repo/.github/workflows/deploy.yml) の `apply_agent` | **是正済み** | `secrets.ANTHROPIC_API_KEY` の参照を廃止し、**OIDC ロール + Secrets Manager からの取得**に置き換えた (§4.1)。SSM への書き込み対象に **Environment ID** を追加 |
+| [deploy-backend.yml](../../templates/app-monorepo/.github/workflows/deploy-backend.yml) の `apply_migration` | **是正済み** | GitHub ランナーから `secrets.DATABASE_URL` で直接 DB に接続する形を廃止し、**ECS RunTask の起動 → 完了待ち → 終了コード判定 → CloudWatch Logs の取得**に置き換えた (§5.1)。コマンド実体のみプレースホルダ |
+| [deploy-backend.yml](../../templates/app-monorepo/.github/workflows/deploy-backend.yml) の `apply_agent` | **是正済み** | `secrets.ANTHROPIC_API_KEY` の参照を廃止し、**OIDC ロール + Secrets Manager からの取得**に置き換えた (§4.1)。SSM への書き込み対象に **Environment ID** を追加 |
 | [04-human-checkpoints.md](../../templates/shared/.claude/rules/04-human-checkpoints.md) §4.2 の「保持するシークレット」列 | **是正済み** | DB 接続情報 / Anthropic API キー / Agent ID を GitHub environment secret として保持する記述を、**§4.1 の限定列挙 (ロール ARN 等) に置き換えた**。**environment の一覧・承認者設定・Deployment branches の仕組みは変更していない** (04 が SSOT のまま) |
 | 同 §2.6 の H-3 行「二重化」列 | **是正済み** (2026-07-30。OP-F3 解消) | 「prod の Anthropic API キーは Secrets Manager が唯一の所在。`apply_agent` は environment `prod-agent` の OIDC ロールで `secretsmanager:GetSecretValue` して取得する (GitHub secret には置かない)」へ差し替えた |
-| `rollback.yml` の雛形 | **作成済み** (2026-07-30。OP-F4 解消) | `templates/backend-repo/.github/workflows/rollback.yml`。§5.3 の要求どおり入力 3 種・prod は environment 承認・Agent 切り戻しはタスク置換とセット。**`scripts/rollback-agent.sh` (SSM の版履歴から旧値へ戻す) は実装リポで用意する** — 未実装ならジョブが `exit 1` で落ちる (無言のスキップにしない) |
+| `rollback-backend.yml` の雛形 | **作成済み** (2026-07-30。OP-F4 解消) | `templates/app-monorepo/.github/workflows/rollback-backend.yml`。§5.3 の要求どおり入力 3 種・prod は environment 承認・Agent 切り戻しはタスク置換とセット。**`scripts/rollback-agent.sh` (SSM の版履歴から旧値へ戻す) は実装リポで用意する** — 未実装ならジョブが `exit 1` で落ちる (無言のスキップにしない) |
 
 **参照すべき v2 既存実装** (踏襲する部分 / しない部分を明示):
 
 - 踏襲: `hassan-v2-backend/stacks/prod/ecspresso.yml` (ecspresso の設定の形) /
   `hassan-v2-backend/.github/workflows/prod-deploy.yml` (prod を手動起動にする形)
+- **部分踏襲**: `hassan-v2-backend/di/provider.go:83-94` (環境名で env ファイルを選択して読み込む形) —
+  **②のアプリ由来 (非秘密) に限って踏襲する** (§3.3。2026-08-02 のユーザー決定)。
+  **秘密を同じ env ファイルに置くことは踏襲しない** (秘密はタスク定義の `secrets` 注入。§4.1)
 - **踏襲しない**: `hassan-v2-backend/.github/workflows/dev-deploy.yml:35-45` (image タグを `main` に
-  コミットする経路) / `hassan-v2-backend/di/provider.go:83-94` (`GO_ENV` で `.env` を読み込む方式) /
-  `hassan-v2-backend/stacks/ecs.Dockerfile` + `hassan-v2-backend/.dockerignore` (`.env` の焼き込み)
+  コミットする経路) /
+  `hassan-v2-backend/stacks/ecs.Dockerfile` + `hassan-v2-backend/.dockerignore` (**秘密を含む** `.env` の焼き込み)
 
 ## 10. 残課題 / 要確認
 
@@ -807,13 +919,13 @@ golang-migrate (PoC が使用。up/down のバージョン管理) か。
 | OP-F1 | [observability.md](observability.md) §4.3 または §4.4 | **「アクティブな SSE 接続数」メトリクスを計測項目として追加する** (名前 `sse.active_connections` / 単位 = 接続数のゲージ / 出力元 = アプリからの EMF / 出力間隔 30 秒)。**計測項目の SSOT は同書**であり、本書 §6.3 の暫定定義は追記までのつなぎである。追記されない場合、§6.3 の「起動前に SSE セッション数を確認する」手順が実行不能になり「利用の少ない時間帯に行う」に退行する | §6.3 |
 | OP-F2 | [observability.md](observability.md) §4.6 | **「重大度の分類・環境差・トピックの本数は `operations.md` §7.5 が SSOT」の相互参照を 1 行加える** (同節にはしきい値と通知先しか無く、本書がそれを前提にしていることが同書側から辿れない)。しきい値の改訂で分類が変わる場合は本書 §7.5 も同時に直す | §7.5 |
 | OP-F3 | [templates/shared/.claude/rules/04-human-checkpoints.md](../../templates/shared/.claude/rules/04-human-checkpoints.md) §2.6 の H-3 行「二重化」列 | 「prod の Anthropic API キーを CI の environment secret に限定して置く」を **「prod の Anthropic API キーは Secrets Manager に置き、CI は OIDC ロールで取得する (GitHub 側に置かない)」** へ差し替える (§4.1 の限定列挙と矛盾している。§4.2 の表は是正済み) | §4.1 / §9 |
-| OP-F4 | `templates/backend-repo/.github/workflows/` | **`rollback.yml` の雛形を追加する** (§5.3 の「`rollback.yml` に要求する形」)。現状は雛形が無く、OP-G の第一手段を起動する経路が引き渡し物に含まれていない | §5.3 / §9 |
+| OP-F4 | `templates/app-monorepo/.github/workflows/` | **`rollback-backend.yml` の雛形を追加する** (§5.3 の「`rollback-backend.yml` に要求する形」)。現状は雛形が無く、OP-G の第一手段を起動する経路が引き渡し物に含まれていない | §5.3 / §9 |
 
 > **OP-F1〜F4 は 2026-07-30 に解消済み** (メインセッションが対応):
 > OP-F1 → [observability.md](observability.md) §4.4.1 に `sse.active_connections` を計測項目として追加 (本書 §6.3 の暫定定義は同節への参照に置き換わる) /
 > OP-F2 → 同 §4.6 冒頭に「重大度分類・環境差・通知経路は本書 §7.5 が SSOT」の相互参照を追加 /
 > OP-F3 → `04-human-checkpoints.md` §2.6 の H-3 行を「Secrets Manager が唯一の所在。CI は OIDC で取得」へ差し替え /
-> OP-F4 → `templates/backend-repo/.github/workflows/rollback.yml` を新規作成 (§5.3 の要求仕様どおり。入力 3 種・prod は environment 承認・Agent 切り戻しはタスク置換とセット)。
+> OP-F4 → `templates/app-monorepo/.github/workflows/rollback-backend.yml` を新規作成 (§5.3 の要求仕様どおり。入力 3 種・prod は environment 承認・Agent 切り戻しはタスク置換とセット)。
 
 ### 10.3 他の設計文書から本書に先送りされていた項目の処理
 

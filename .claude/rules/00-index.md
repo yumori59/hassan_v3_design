@@ -3,7 +3,7 @@
 このディレクトリは Claude Code 用の運用ルール。リポジトリルートの `../../CLAUDE.md` から索引される。
 
 **このリポジトリは設計ドキュメント専用**。製品コードは置かず、本番実装は別リポジトリで行う
-(引き渡し物 = `docs/design/` の設計 + `aidlc-docs/inception/` の要件・計画 + `templates/` (backend / frontend / infra の 3 セット) のハーネス雛形)。
+(引き渡し物 = `docs/design/` の設計 + `aidlc-docs/inception/` の要件・計画 + `templates/` (**app モノレポ / infra リポの 2 セット** + shared) のハーネス雛形)。
 
 ## ファイル一覧
 

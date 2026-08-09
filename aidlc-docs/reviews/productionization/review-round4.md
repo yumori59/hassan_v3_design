@@ -36,12 +36,12 @@
 | パス | mtime |
 |---|---|
 | `docs/design/testing.md` | 08:47:35 (`:101` の 6 種 → 7 種) |
-| `templates/backend-repo/.github/workflows/ci.yml` | 08:47:39 (`:102` のコメント → #4/#5/#7) |
+| `templates/app-monorepo/.github/workflows/ci.yml` | 08:47:39 (`:102` のコメント → #4/#5/#7) |
 | `docs/design/frontend.md` | 08:48:04 (§8.2 / §16.2-1 の登録済み表記) |
 
 ### 0.3 参照した (変更はないが照合に使った) 成果物
 
-- `templates/frontend-repo/.github/workflows/ci.yml` (存在検査の実体。行範囲の実測)
+- `templates/app-monorepo/.github/workflows/ci.yml` (存在検査の実体。行範囲の実測)
 - `docs/design/operations.md` / `docs/design/llm-migration.md` (3 巡目 中 1 / 中 2 の反映状況)
 - `README.md` / `.claude/rules/07-quality-protocols.md` (`make check` の構成を語る記述)
 - `docs/design/API/README.md` (3 巡目 重大 3 のエンドポイント総数)
@@ -135,9 +135,9 @@ aidlc-docs/aidlc-state.md:39,40 : 2026-07-30 の日付付き履歴行 (当時の
 |---|---|---|---|
 | 1 ★ | 機能テーブル **40 件 / 個人 32 / 契約 8**、`idea_tags` は 20 番 (`data-model.md:313`・`:339`・`:361`) | 同書 §4.1.1 の表を**スクリプトとは別の awk で独立に計数** (行 314〜360) | **一致** (40 / 32 / 8。`idea_tags` は `| 20 |` で個人・両方の所有者列) |
 | 2 ★ | 検査①の除外リスト = **(a) 6 件 + 2 件 = 8 件**、例外は計 **11** (`data-model.md:195`・`:363`・`:1061`) | 同書 §4.1.2 の (a)(b) 表を実数え ((a) は `admin_accounts` / `admin_auth_roles` が 1 行 2 テーブル) | **一致** ((a) 6 / (b) 5 / 計 11 / 除外 8) |
-| 3 ★ | `templates/backend-repo/.github/workflows/ci.yml:102` のコメントが **#4 / #5 / #7** (3 巡目 中 6 の反映) | 同ファイル `:102`〜`:113` | **一致** (コメントとエラーメッセージが 3 検査で揃った) |
-| 4 | 存在検査 #6 の実体は frontend `ci.yml`**:58〜71** (`testing.md:650` / `:667`) | `templates/frontend-repo/.github/workflows/ci.yml` :58 が `- name: 検査 1 …`、:71 が `exit $missing`、**:72 は空行** | **一致** (`testing.md` 側が正。`frontend.md` 側の `58-72` はずれ = 軽微 1) |
-| 5 | `TestMain` の穴の根拠 = CI が常に `DATABASE_URL` を設定 (`testing.md:651` の `ci.yml:73`〜`74`) | `templates/backend-repo/.github/workflows/ci.yml:73` = `env:`、`:74` = `DATABASE_URL: postgres://…` | **一致** |
+| 3 ★ | `templates/app-monorepo/.github/workflows/ci.yml:102` のコメントが **#4 / #5 / #7** (3 巡目 中 6 の反映) | 同ファイル `:102`〜`:113` | **一致** (コメントとエラーメッセージが 3 検査で揃った) |
+| 4 | 存在検査 #6 の実体は frontend `ci.yml`**:58〜71** (`testing.md:650` / `:667`) | `templates/app-monorepo/.github/workflows/ci.yml` :58 が `- name: 検査 1 …`、:71 が `exit $missing`、**:72 は空行** | **一致** (`testing.md` 側が正。`frontend.md` 側の `58-72` はずれ = 軽微 1) |
+| 5 | `TestMain` の穴の根拠 = CI が常に `DATABASE_URL` を設定 (`testing.md:651` の `ci.yml:73`〜`74`) | `templates/app-monorepo/.github/workflows/ci.yml:73` = `env:`、`:74` = `DATABASE_URL: postgres://…` | **一致** |
 | 6 | v2 `ideas` の列位置 (`idea-boards.md:342`・`:405`・`:406` / `data-model.md:961`) | `hassan-v2-backend/db/schema.sql` :155 `concept` / :156 `target_market` / :157 `customer` / :158 `issue` / :159 `solution` / :160 `market_size` / :161 `cagr` | **`data-model.md:961` の `concept`=:155 は一致**。`idea-boards.md` の 3 箇所は**ずれたまま** (3 巡目 中 3 が未反映) |
 | 7 | `signup_links` は v2 で所有者列を持たず 5 列 (`data-model.md` §4.1.2 (b) の `schema.sql:342`) | `hassan-v2-backend/db/schema.sql:342`〜`:348` = `id uuid` / `email` / `expired_at` / `created_at` / `updated_at` | **一致** (DM-A4=B の前提が成立) |
 | 8 | PoC は `ENVIRONMENT_ID` 未設定でエラー (`operations.md:325` の `domain_discovery.go:453`) | `claude_managed_agents/cmd/devui/domain_discovery.go:453` = `ENVIRONMENT_ID が .env に未設定です` | **一致** |
@@ -377,7 +377,7 @@ pre-commit の目的 (手元で落とす) が失われる。
 ## 5. 軽微 (Nice to Have)
 
 1. **`docs/design/frontend.md` の `ci.yml:58-72` が 2 箇所残っている** (3 巡目 軽微 1 の未反映)。
-   実測は `templates/frontend-repo/.github/workflows/ci.yml:58`〜**`:71`** (`:72` は空行)。
+   実測は `templates/app-monorepo/.github/workflows/ci.yml:58`〜**`:71`** (`:72` は空行)。
    該当は `frontend.md:632` (§8.2 の「実体」) と §16.2-1 の表の検査 3 行。
    `docs/design/testing.md:650` / `:667` は `:58〜71` で正しいので、**同じ機構を指す 4 箇所のうち 2 箇所だけがずれている**。
 2. **`aidlc-docs/aidlc-state.md` に本増分の記録が無い**。`check-table-counts` の grep ヒットは 0 件で、

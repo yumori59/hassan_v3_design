@@ -44,15 +44,15 @@
 
 | メソッド | パス | 概要 | スコープ | 主なリクエスト / レスポンス項目 (暫定) | 固有ステータス | LLM | SSE | 増分 |
 |---|---|---|---|---|---|---|---|---|
-| GET | `/themes` | 一覧 | 個人 / 契約 | Q: `scope` (`mine`\|`contract`, 既定 `mine`。**`contract` は増分 1 から有効** — C-16。§3.2) / `keyword` / `limit` / `offset` / `sort` (`updated_at`\|`created_at`\|`name`) — **`status` クエリは持たない** (TH-Q6=a) | 200 / **400** (増分 1 で `scope=contract`) | — | — | 1 |
-| GET | `/themes/stats` | 集計サマリ | 個人 / 契約 (**`contract` は増分 1 から有効**) | Q: `scope` / `keyword` — R: `{theme_count, idea_count, business_plan_count, knowledge_count}` (**TH-Q6=a で確定。ステータス別件数は返さない**) | 200 / **400** (増分 1 で `scope=contract`) | — | — | 1 |
+| GET | `/themes` | 一覧 | 個人 / 契約 | Q: `scope` (`mine`\|`contract`, 既定 `mine`。**`contract` は増分 1 から有効** — C-16。§3.2) / `keyword` / `limit` / `offset` / `sort` (`updated_at`\|`created_at`\|`name`) — **`status` クエリは持たない** (TH-Q6=a) | 200 / **400** (`scope` の値域外) | — | — | 1 |
+| GET | `/themes/stats` | 集計サマリ | 個人 / 契約 (**`contract` は増分 1 から有効**) | Q: `scope` / `keyword` — R: `{theme_count, idea_count, business_plan_count, knowledge_count}` (**TH-Q6=a で確定。ステータス別件数は返さない**) | 200 / **400** (`scope` の値域外) | — | — | 1 |
 | POST | `/themes` | 作成 | 個人 | B: `name` (必須) / `mission` / `hex` / `icon` / `primary_asset_id` (null 可) — R: `Theme` (**TH-Q7=a: `subtitle`/`purpose` は `mission` に統合**) | **201** / **409** (同一アカウント内の名前重複) | — | — | 1 |
 | GET | `/themes/{theme_id}` | 取得 | 個人 / 契約 (§3.2) | R: `Theme` (+ `idea_count` / `business_plan_count` / `knowledge_count`) | 200 / 404 | — | — | 1 |
 | PUT | `/themes/{theme_id}` | 更新 | 個人 | B: `name` / `mission` / `hex` / `icon` / `primary_asset_id` — R: `Theme` | 200 / 404 / **409** (名前重複) | — | — | 1 |
 | DELETE | `/themes/{theme_id}` | 削除 | 個人 | — | **204** / 404 | — | — | 1 |
 | GET | `/themes/{theme_id}/members` | メンバー一覧 | 契約 | R: `{items:[{account_id, name, icon_url}]}` (**`role` は持たない** — メンバーの権限差は未確定 (TH-Q5)。持たせる場合は `PUT` 側と対で追加する = BE-10) | 200 / 404 | — | — | **2** |
 | PUT | `/themes/{theme_id}/members` | メンバー置換 | 契約 | B: `{account_ids:[...]}` (**自契約のアカウントのみ許可**) — R: `{items:[Member]}` | 200 / 404 / **400** (契約外のアカウント ID) | — | — | **2** |
-| PUT | `/themes/{theme_id}/visibility` | 可視性変更 | 個人 | B: `{visibility: "private"\|"contract"}` — R: `Theme` | 200 / 404 | — | — | **2** |
+| PUT | `/themes/{theme_id}/visibility` | 可視性変更 | 個人 | B: `{visibility: "private"\|"contract"}` — R: `Theme` | 200 / 404 | — | — | **1** |
 
 Q = クエリパラメータ / B = リクエストボディ / R = レスポンス。
 
@@ -91,7 +91,7 @@ C-16 により v2 の `POST /sharing-settings` の操作を落とせない — [
 
 | # | 論点 | 採用案 | 却下案と理由 |
 |---|---|---|---|
-| D-TH-1 | 一覧の所有者絞り込み | **`scope=mine\|contract` の列挙値**。`account_id` パラメータを持たない ([README.md](README.md) D-API-8)。**`contract` の有効化は増分 2** (§3.2 / [README.md](README.md) D-API-8') | (a) v2 の `account_id` クエリ踏襲 (`hassan-v2-backend/controller/theme.go:46-53`): **v2 のテーマ一覧は契約一致を検証していない** (`hassan-v2-backend/usecase/theme/list_themes.go:56-62` は `GetAccountByID` の存在確認のみで、当該クエリは `SELECT * FROM accounts WHERE id = $1` — `hassan-v2-backend/db/queries/account.sql:1-2`)。同じ入力形を持ち込むと同じ検証漏れを招く。アセット側には契約一致検証がある (`hassan-v2-backend/usecase/asset/list_assets.go:60-66`) という**非対称が現に存在する**ことが、パラメータ設計で防ぐ根拠 |
+| D-TH-1 | 一覧の所有者絞り込み | **`scope=mine\|contract` の列挙値**。`account_id` パラメータを持たない ([README.md](README.md) D-API-8)。**`contract` は増分 1 から有効** (§3.2 / [README.md](README.md) D-API-8'。**2026-08-02 に「増分 2」から改訂** — C-16 により v2 の `POST /sharing-settings` でできていた共有の切り替えを落とせないため) | (a) v2 の `account_id` クエリ踏襲 (`hassan-v2-backend/controller/theme.go:46-53`): **v2 のテーマ一覧は契約一致を検証していない** (`hassan-v2-backend/usecase/theme/list_themes.go:56-62` は `GetAccountByID` の存在確認のみで、当該クエリは `SELECT * FROM accounts WHERE id = $1` — `hassan-v2-backend/db/queries/account.sql:1-2`)。同じ入力形を持ち込むと同じ検証漏れを招く。アセット側には契約一致検証がある (`hassan-v2-backend/usecase/asset/list_assets.go:60-66`) という**非対称が現に存在する**ことが、パラメータ設計で防ぐ根拠 |
 | D-TH-2 | 集計値の返し方 | **サーバが `GET /themes/stats` で返す** (FE 算出にしない)。**指標は「テーマ数 / アイデア数 / 企画書数 / ナレッジ数」の 4 種で確定** (TH-Q6=a。2026-07-30 のプロトタイプ更新の統計カード — `renderTmStats` `:10738-10810` — に一致させた) | (a) FE 側で算出 (プロトタイプ方式 — `_tmCounts()` `:10729-10736`): ページネーション (`limit=50`) と両立しない。1 ページ分しか数えられず、件数が実データと食い違う。(b) 一覧レスポンスに件数を同梱: タブ切替のたびに一覧を再取得する必要があり、絞り込みと循環する |
 | D-TH-3 | 可視性の値域 | **`private` (作成者のみ) と `contract` (契約内) の 2 値**。プロトタイプの `team` を `contract` に写像し、**`open` は採らない**。**既定は `private`** で、`scope=contract` の判定条件になる (§3.2) | (a) プロトタイプの 3 値 (`private`/`team`/`open`) をそのまま採用: **`open` の公開先が未定義**。契約外への公開はテナント境界を越えるため、要件が確認されないまま実装者が解釈するとデータ漏洩の形で現れる (DR-7)。`open` が必要になった場合は [../auth.md](../auth.md) A-7 の共有設計と同時に決める。(b) v2 の `sharing_settings` (カテゴリ単位の ON/OFF) をそのまま使う: テーマ 1 件ごとの可視性を表現できない |
 | D-TH-4 | ステージ・進捗の扱い | **テーマ API は `stage` / `progress` を返さない** (TH-Q6=a で確定。2026-07-30 の更新版プロトタイプは一覧にステージ・進捗を表示しない — §1.1)。ステージの概念自体は会話型アイデア創出の設計 (SSOT) が持ち、テーマ画面で再び必要になったら**派生値の読み取り専用**として再導入する (当初案) | (a) テーマに `stage` / `progress` カラムを持たせ、クライアントが更新する: 会話フローの進行と二重管理になり、どちらが正か決まらない (BE-10 の「読む側と書く側の対応」が壊れる形)。(b) 当初案 (派生値を返す): 表示する画面が更新版プロトタイプに存在しなくなったため、消費者のいないフィールドになる |
@@ -164,7 +164,7 @@ v2 では**契約内の他人のテーマが見えるかを `sharing_settings` (
 |---|---|---|---|
 | TH-Q1 | **エクスポート** | **再オープン → 決着 (2026-07-31 ユーザー回答 = 「csv はあったほうが良い」)**。**v2 の `GET /ideas/csv` (`hassan-v2-backend/router/router.go:127`) を v3 に引き継ぐ** — C-16 ([../../aidlc-docs/inception/productionization/requirements.md](../../../aidlc-docs/inception/productionization/requirements.md))。**2026-07-30 のクローズは撤回した**: 根拠が「更新版プロトタイプのヘッダにボタンが無い」ことだけで、**プロトタイプは設計入力であって仕様ではない** (DR-7) / v2 に実装が実在する。**エクスポートの対象はテーマ一覧ではなくアイデア一覧** (v2 と同じ) で、仕様は [idea-boards.md](idea-boards.md) §2.4 が SSOT (`GET /ideas/csv`)。**本書側の残作業は FE のボタン配置のみ** ([../frontend.md](../frontend.md) への是正要求 = [../auth.md](../auth.md) §10.4 R-12) | **決着済み** |
 | TH-Q2 | **可視性 `open` の公開先** | ウィザードに 3 番目の選択肢として存在する (`TW_VISIBILITY` `:11122-11126`) が、公開先の説明がない | 要件確認 (D-TH-3 で暫定的に不採用) |
-| TH-Q3 | **ステージの段数** | **テーマ API の論点としてはクローズ (2026-07-30)**: TH-Q6=a により**テーマ API は stage/progress を返さない** (D-TH-4)。ステージ定義そのものは会話型アイデア創出の設計 (SSOT) に残る課題 | 会話型アイデア創出の設計 |
+| TH-Q3 | **ステージの段数** | **完全にクローズ (2026-08-01)**。①テーマ API の論点としては 2026-07-30 にクローズ済み (TH-Q6=a により**テーマ API は stage/progress を返さない** = D-TH-4) ②残っていたステージ定義の SSOT は **[conversation.md](conversation.md) §2.3 が確定**した — **`stage` は PoC と同じ 5 値** (`asset` → `market` → `match` → `ideation` → `plan_draft`) を**台帳から `entity/conversation` の純粋関数で導出**する。**会話の `stage` を他ドメインへ配らない**方針も同節が定めており、D-TH-4 (テーマは返さない) と整合する | **クローズ済み** ([conversation.md](conversation.md) §2.3 が SSOT) |
 | TH-Q4 | **テーマ削除時の配下データ** | **更新版に物理削除の確認モーダルあり** (`openDeleteThemeModal` `:11831-11883`。「チャット履歴・アーティファクト・バージョン履歴が全て失われる」と警告)。リネーム UI もある (`renameThemeById` `:11598-11613`) | data-model 設計 (D-TH-7 / TH-Q8 と連動。アイデア・企画書・ボードアイテムの参照をどうするか) |
 | TH-Q5 | **メンバーの権限差** | ウィザードでメンバーを選ぶだけで、権限の区別が無い (`TW_MEMBERS` `:11115-11120`) | 増分 2 の要件確認 ([../auth.md](../auth.md) §9 Q-A2 と連動) |
 

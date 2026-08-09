@@ -61,6 +61,55 @@ PoC と v2 の双方に themes / assets / ideas / 企画書 が存在する (ギ
 
 [Answer]:A
 
+[Answer 2]: (2026-08-03) **方針転換 — A を撤回し、D を採用する** (ユーザー決定)。
+
+- **D. app モノレポ 1 つ (`backend/` + `frontend/` + `api/`) + infra リポ 1 つ = 計 2 リポジトリ**
+
+**採用理由 (3 点)**:
+
+1. **モノレポの利得は「BE→FE の契約ドリフトが 1 PR / 1 CI で検出できる」ことに集中しており、その契約 (OpenAPI) は
+   A のままでは穴が残っていた** — 出力先が設計で確定しておらず、リポ間の受け渡し方法も未設計だった
+   (**旧版** `templates/backend-repo/STRUCTURE.md` §5 の
+   「OpenAPI 定義の出力先は設計で確定していないため、ディレクトリを作っていない」= コミット `0448a12` 時点。
+   **現行の [../../../templates/app-monorepo/backend/STRUCTURE.md](../../../templates/app-monorepo/backend/STRUCTURE.md)
+   は本判断の結果として「OpenAPI 定義の出力先 (2026-08-03 に確定)」に書き換わっており、当該文字列は無い** —
+   方針転換の根拠は**転換前の状態**なので、現行ファイルを引用すると正反対に読める)。
+   FE/BE 同居 + `api/openapi.yaml` を契約の SSOT にすることで、再生成漏れを CI の必須チェックで機械的に閉じられる
+2. **1 機能の変更が 3 リポに跨るとき PR が 3 本になる代償** ([../../../templates/README.md](../../../templates/README.md)
+   の「3 分割の代償」) のうち、**FE/BE 跨ぎの分が消える**。順序の担保が人手 (issue の依存欄 + 横断完了判定) から
+   1 PR の CI に移る
+3. **infra だけは分離を維持する** — 理由は 2 点。
+   ①**ライフサイクルの非対称性**: **infra は「PR マージ ≠ 反映」** (`apply` が人手ゲートで、
+   `apply` 済みが app の着手条件。[../../../docs/design/infrastructure.md](../../../docs/design/infrastructure.md) §6.3 / §4.4) だが、
+   app は PR マージで dev へ自動デプロイされる。同居させると「マージしたが未 apply の infra 変更」と
+   「マージ = 反映済みの app 変更」が同一の `main` と同一の `gate` に混ざり、着手条件を PR 単位で表現できない。
+   ②**AWS の変更権限を分けたい**: モノレポでは**書き込み権限をサブツリー単位で分けられない**
+   (旧 A の却下案 (b) が挙げた「AWS 変更権限を分けにくい」がそのまま生きる)。
+
+   > **⚠️ 訂正 (2026-08-05。design-reviewer 指摘 D-1)**: 当初ここに
+   > 「**app と infra の間にはコード上の契約が無く (受け渡しは SSM / Secrets Manager 経由)、
+   > 同居しても検査が増えない**」と書いたが、**これは誤りだった**。
+   > `infrastructure.md` §4.2 のとおり **ecspresso が tfstate からクラスタ名 / subnet ID / SG ID /
+   > ターゲットグループ ARN / シークレット ARN を解決する契約が実在する**。
+   > **「契約が無い」と書かれた契約には誰も検査を設計しない**ため、
+   > この契約は [../../../docs/design/architecture.md](../../../docs/design/architecture.md) §3.11.4 の
+   > 残課題として起こし直した (対処 = `ecspresso verify` をデプロイ前に必須化)。
+   > **なお分離の判断そのものは①②で成立するため、結論は変わらない**
+
+**却下した案**:
+
+- **A (backend / frontend / infra の 3 分割。旧回答)**: 上記 1・2 の理由で撤回。
+  OpenAPI の受け渡しを新規に設計する必要があり、その設計コストがモノレポ化のコストを上回らない
+- **B (backend / frontend / infra を全部 1 リポ)**: 上記 3 の理由で却下。`apply` の人手ゲートと
+  app の CI を同居させる設計を追加で作り込む必要がある
+- **C (backend + infra を 1 リポ、frontend を別リポ。旧推奨)**: BE→FE の契約がリポを跨いだままなので、
+  モノレポ化の主目的 (利得 1) を満たさない
+
+**旧 A の却下理由 (「CI の条件分岐と Vercel のビルド対象指定が増える」) は事実として残るため、
+省略ではなく機構として明示設計で受ける** — **MR-1〜MR-6 の 6 機構**と「サブツリー自己完結」原則が実体。
+**SSOT は [../../../docs/design/architecture.md](../../../docs/design/architecture.md) §3.11**
+(本節に機構表を複製しない)。
+
 ---
 
 ## Q-3. 移植スコープ (第 1 増分)

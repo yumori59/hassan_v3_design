@@ -1,0 +1,232 @@
+name: E2E
+
+# app モノレポ雛形 — **E2E (Playwright) の実行機構** (`frontend/` サブツリーのテストを実行する)。
+# <...> のプレースホルダを実構成に合わせて置換する。
+#
+# 設計の SSOT: 設計リポ hassan_v3 `docs/design/testing.md` §7 (T-J / T-K)。
+#   - **PR では回さない** — E2E はデプロイ済みのコードに対してしか回せないため、
+#     PR 時点のコードは dev に存在しない (原理的に不可能)。PR では I 段 (統合) が同じ縦串を担保する
+#   - **`main` マージ後の dev デプロイ完了 + nightly** に回す
+#   - **何もブロックしない (赤は通知)**。ただし **E2E が赤のまま prod デプロイ (H-4) を進めない** —
+#     最新の結果を H-4 の承認材料に含める (`.claude/rules/04-human-checkpoints.md` §1.1)
+#   - **retries は 1 回まで** (CI のみ)。リトライで隠れるフレークは仕様の非決定性を示すため隠さない
+#
+# 前提 (これが無いと E2E は成立しない):
+#   - dev 環境に FE / BE がデプロイ済みであること
+#   - E2E 用のテストアカウントと TOTP シークレットが Secrets として登録されていること
+#     (所在は設計リポ `docs/design/operations.md` §4.1 が SSOT。**prod の資格情報は使わない**)
+
+on:
+  # ① main マージ後の dev デプロイ完了をトリガーにする。
+  #    **モノレポでは `workflow_run` が唯一成立する経路** (2026-08-03。D-I の方針転換):
+  #    3 リポ構成では frontend が別リポだったため BE 側からクロスリポジトリの
+  #    `repository_dispatch` を打つ必要があり、そのための `E2E_DISPATCH_TOKEN` が
+  #    「GitHub 側に置く唯一のシークレット例外」だった (operations.md §4.1)。
+  #    同一リポジトリになったのでトークンは不要になった。
+  #    ⚠️ `repository_dispatch` を `GITHUB_TOKEN` で打つ形にはできない —
+  #    GitHub は `GITHUB_TOKEN` 起因のイベントで新しい実行を起動しない (無限ループ防止)。
+  #
+  #    FE 自体の dev デプロイは Vercel が行い GitHub Actions からは完了を知れないため、
+  #    **BE の dev デプロイ完了を「dev が新しくなった」の代理シグナルとして使う**
+  #    (FE のみの変更では BE のデプロイが走らないため、その場合は nightly (②) が拾う)。
+  workflow_run:
+    workflows: [Deploy]        # deploy-backend.yml の `name:`。**リネームしたらここも直す**
+    types: [completed]
+
+  # ② nightly (dev の状態を毎日確認する)
+  schedule:
+    - cron: '0 18 * * *'        # UTC 18:00 = JST 03:00
+
+  # ③ 手動実行 (赤の切り分け時の 1 回だけの再実行を含む)
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 実行理由 (再実行の場合は「フレークの切り分け」等。retries とは別に 1 回まで)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write             # OIDC で AWS ロールを引き受ける (E2E 資格情報を Secrets Manager から取るため)
+
+# 同じ dev 環境に対して E2E を同時に走らせない (テストデータが互いを壊す)。
+concurrency:
+  group: e2e-dev
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    name: Playwright (dev)
+    runs-on: ubuntu-latest
+    # **workflow_run 起動時は「成功した dev デプロイ」だけを受ける**。
+    # `workflow_run.event == 'push'` が dev 継続デプロイ / `workflow_dispatch` が prod なので、
+    # これを外すと **prod デプロイでも E2E が dev に対して走る**。
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    # **専用 environment `dev-e2e` を使う** (2026-08-05 に変更。design-reviewer 指摘 D-4)。
+    # モノレポでは backend のデプロイと E2E が同一リポジトリのため、
+    # **`environment: dev` を共有すると OIDC の `sub` クレームが同一になり、
+    # E2E のワークフローが dev のデプロイ用ロール (ECR push / ecspresso) を引き受けられる**。
+    # 3 リポ構成では `repo:` クレームで分離できていた担保が消えている
+    # (設計: hassan_v3 `docs/design/infrastructure.md` §4.5)。
+    # `dev-e2e` に承認者は設定しない (自動実行のまま)。付与する権限は
+    # **Secrets Manager の read のみ** (E2E 用アカウントの資格情報)。
+    environment: dev-e2e
+    timeout-minutes: 30         # 設計上の全体目安 15 分 + 余裕 (testing.md §3 の E 段)
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # workflow_run 起動では既定の ref が「デフォルトブランチの最新」になるため、
+          # **デプロイされた commit を明示的に checkout する** (テストとデプロイ対象のずれを防ぐ)
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          # アクションの入力は working-directory の影響を受けないためルートからのパスで書く
+          node-version-file: frontend/.node-version
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: install
+        run: npm ci
+
+      - name: Playwright ブラウザの導入
+        run: npx playwright install --with-deps chromium
+
+      # E2E の資格情報は **Secrets Manager が唯一の所在** (hassan_v3 docs/design/testing.md §7.3 /
+      # operations.md §4.1 の限定列挙)。**GitHub environment secret にパスワードや TOTP シークレットを置かない**。
+      - name: AWS 認証 (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # 要求権限: secretsmanager:GetSecretValue (/hassan-v3/dev/e2e/* のみ)
+          role-to-assume: ${{ vars.E2E_AWS_ROLE_ARN }}
+          aws-region: <リージョン>
+
+      - name: E2E 資格情報の取得 (Secrets Manager)
+        id: creds
+        run: |
+          set -euo pipefail
+          SECRET_ID="/hassan-v3/dev/e2e/account"
+          JSON=$(aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text)
+          # 値はログに出さない。GITHUB_ENV へ書いて後続ステップへ渡す (mask も付ける)
+          for K in email password totp_secret; do
+            V=$(printf '%s' "$JSON" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s);process.stdout.write(String(o[process.argv[1]]??""))})' "$K")
+            if [ -z "$V" ]; then
+              echo "::error::$SECRET_ID に $K がありません"
+              exit 1
+            fi
+            echo "::add-mask::$V"
+            case "$K" in
+              email) echo "E2E_ACCOUNT_EMAIL=$V" >> "$GITHUB_ENV" ;;
+              password) echo "E2E_ACCOUNT_PASSWORD=$V" >> "$GITHUB_ENV" ;;
+              totp_secret) echo "E2E_TOTP_SECRET=$V" >> "$GITHUB_ENV" ;;
+            esac
+          done
+
+      - name: E2E 実行 (dev 環境に対して)
+        run: <npx playwright test>
+        env:
+          # 対象は dev の FE。**prod を指さないこと** (本番データを汚さない — testing.md §8.4)
+          E2E_BASE_URL: <https://dev.example.com>
+          # 資格情報は前ステップが GITHUB_ENV へ設定済み。**TOTP は実行時に生成する**
+          # (固定コードでは MFA の経路が本番と別物になる。v2 の e2e/auth.setup.ts は
+          #  固定コードを環境変数で渡しており、TOTP として成立していない)
+
+      # **データが無いときに test.skip で自分をスキップして緑にしない** (v2 の実例:
+      # e2e/idea/idea-history-edit.spec.ts が対象データを見つけられないと skip して緑になる)。
+      # スキップされたテストがあれば「担保できていない」ことを可視化する。
+      - name: スキップされたテストの検出 (緑の見せかけを防ぐ)
+        if: always()
+        run: |
+          set -euo pipefail
+          # 実構成のパスに置換する (reporter に json を追加しておく)
+          REPORT="playwright-report/results.json"
+          # **レポートが無いのを緑にしない** — 「テストが 1 件も動いていない」状態を通してしまうため
+          if [ ! -f "$REPORT" ]; then
+            echo "::error::JSON レポート ($REPORT) がありません。" \
+                 "playwright.config の reporter に json を追加し、出力先を本ステップと一致させてください" \
+                 "(レポート欠損を緑にすると『0 件実行で成功』が通る)"
+            exit 1
+          fi
+          # **JSON は node で構文解析する** — grep のパターン一致に頼らない
+          # (Playwright の出力は `"status": "skipped"` のように空白を含み、
+          #  さらに grep -o は無マッチで終了コード 1 を返すため set -e 下では正常系が落ちる)
+          node -e '
+            const fs = require("fs");
+            const r = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            let total = 0, skipped = 0;
+            const names = [];
+            const walk = (s) => {
+              (s.suites || []).forEach(walk);
+              (s.specs || []).forEach((sp) =>
+                (sp.tests || []).forEach((t) =>
+                  (t.results || [{ status: t.status }]).forEach((res) => {
+                    total++;
+                    if ((res.status || t.status) === "skipped") { skipped++; names.push(sp.title); }
+                  })));
+            };
+            (r.suites || []).forEach(walk);
+            console.log(`total=${total} skipped=${skipped}`);
+            if (total === 0) {
+              console.log("::error::E2E が 1 件も実行されていません (0 件実行で緑にしない)");
+              process.exit(1);
+            }
+            if (skipped > 0) {
+              console.log(`::error::スキップされた E2E が ${skipped} 件あります: ${names.join(", ")}. ` +
+                "データ不足で自分をスキップする書き方 (test.skip) は緑の見せかけになるため、" +
+                "テストデータの用意 (docs/design/testing.md §8) を実装してください");
+              process.exit(1);
+            }
+          ' "$REPORT"
+
+      - name: レポートの保存 (赤の切り分けに使う)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          # **アクションの `path:` は `defaults.run.working-directory` に従わない** —
+          # ルートからのパスで書く (置換時に `frontend/` を落とすとレポートが空になる)
+          path: |
+            frontend/<playwright-report/>
+            frontend/<test-results/>
+          retention-days: 14
+
+      - name: 結果の要約 (H-4 の承認材料になる)
+        if: always()
+        env:
+          # **モノレポでは BE と FE が同一 commit** なので、検証対象は 1 つの SHA で一意に決まる
+          # (3 リポ構成では E2E が frontend リポで走り `github.sha` が FE 側だったため、
+          #  BE 側 commit を `client_payload.sha` で別途運んでいた — その分岐は不要になった)。
+          # `workflow_run` 起動時の `github.sha` は**デフォルトブランチの最新**であり
+          # checkout した ref とは別物になるため、**`head_sha` を使う**。
+          TARGET_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          {
+            echo "## E2E (dev)"
+            echo "- 起動理由: ${{ github.event_name }} ${{ inputs.reason }}"
+            if [ "${{ github.event_name }}" = "workflow_run" ]; then
+              # dev デプロイ完了を受けた実行 = **H-4 の承認材料として使える唯一の形**
+              echo "- 検証対象 commit (BE / FE 共通): \`${TARGET_SHA}\`"
+              echo "  (dev デプロイ完了 \`${{ github.event.workflow_run.name }}\` #${{ github.event.workflow_run.run_number }} を受けて起動)"
+              echo "- **H-4 の承認材料として使える**"
+            else
+              # nightly / 手動実行は「どの commit が dev に載っているか」を特定できない
+              echo "- 検証対象 commit: **不明** (${{ github.event_name }} 起動のため)。"
+              echo "  チェックアウトした ref は \`${TARGET_SHA}\` だが、**dev に載っているコードと一致する保証は無い**"
+              echo "  **この結果は H-4 の承認材料に使わない** (dev の継続監視用。testing.md §7.4)"
+            fi
+            echo "- 結果: ${{ job.status }}"
+            echo ""
+            echo "**赤だった場合の切り分け順序** (testing.md §7.4):"
+            echo "1. observability の LLM 失敗分類 (F-1〜F-5) の発生率を見る"
+            echo "2. 同じ commit で **1 回だけ** 再実行する"
+            echo "3. 再実行も赤なら回帰として扱う (フレーク扱いで緑にしない)"
+            echo ""
+            echo "**この結果が赤のまま prod デプロイ (H-4) を承認しない**"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -23,25 +23,25 @@
 - `templates/shared/.claude/rules/02-issue-granularity.md`
 - `templates/shared/.claude/rules/03-model-escalation.md`
 - `templates/shared/.claude/rules/04-human-checkpoints.md`
-- `templates/backend-repo/.github/ISSUE_TEMPLATE/task.yml`
-- `templates/frontend-repo/.github/ISSUE_TEMPLATE/task.yml`
+- `templates/app-monorepo/.github/ISSUE_TEMPLATE/task-backend.yml`
+- `templates/app-monorepo/.github/ISSUE_TEMPLATE/task-frontend.yml`
 - `templates/infra-repo/.github/ISSUE_TEMPLATE/task.yml`
-- `templates/backend-repo/.github/pull_request_template.md`
-- `templates/frontend-repo/.github/pull_request_template.md`
+- `templates/app-monorepo/.github/pull_request_template.md`
+- `templates/app-monorepo/.github/pull_request_template.md`
 - `templates/infra-repo/.github/pull_request_template.md`
 - `templates/infra-repo/.claude/agents/infra-reviewer.md`
 
 更新:
 
-- `templates/backend-repo/.github/workflows/deploy.yml`
-- `templates/backend-repo/CLAUDE.md.tmpl`
-- `templates/frontend-repo/CLAUDE.md.tmpl`
+- `templates/app-monorepo/.github/workflows/deploy-backend.yml`
+- `templates/app-monorepo/backend/CLAUDE.md.tmpl`
+- `templates/app-monorepo/frontend/CLAUDE.md.tmpl`
 - `templates/infra-repo/CLAUDE.md.tmpl`
 - `templates/README.md`
-- `templates/backend-repo/.claude/agents/go-developer.md`
-- `templates/backend-repo/.claude/agents/code-reviewer.md`
-- `templates/frontend-repo/.claude/agents/react-developer.md`
-- `templates/frontend-repo/.claude/agents/frontend-reviewer.md`
+- `templates/app-monorepo/backend/.claude/agents/go-developer.md`
+- `templates/app-monorepo/backend/.claude/agents/code-reviewer.md`
+- `templates/app-monorepo/frontend/.claude/agents/react-developer.md`
+- `templates/app-monorepo/frontend/.claude/agents/frontend-reviewer.md`
 - `templates/infra-repo/.claude/agents/infra-engineer.md`
 
 整合確認のために読んだ要件・計画 (指摘対象を含む):
@@ -50,9 +50,9 @@
 - `aidlc-docs/inception/construction-workflow/requirements.md`
 - `aidlc-docs/inception/construction-workflow/plan.md`
 
-参照のみ (指摘なし): `templates/backend-repo/.github/workflows/ci.yml` /
-`templates/frontend-repo/.github/workflows/ci.yml` / `templates/infra-repo/.github/workflows/ci.yml` /
-`templates/backend-repo/scripts/hooks/pre-commit` /
+参照のみ (指摘なし): `templates/app-monorepo/.github/workflows/ci.yml` /
+`templates/app-monorepo/.github/workflows/ci.yml` / `templates/infra-repo/.github/workflows/ci.yml` /
+`templates/app-monorepo/scripts/hooks/pre-commit` /
 `aidlc-docs/inception/productionization/requirements-layering.md` / `docs/design/architecture.md`
 
 ---
@@ -90,12 +90,12 @@ $ make check-traceability
 YAML パース (ruby -ryaml):
 
 ```
-OK   templates/backend-repo/.github/ISSUE_TEMPLATE/task.yml required=5 types=markdown,input,dropdown,textarea,dropdown,textarea,textarea,input,textarea,dropdown
-OK   templates/frontend-repo/.github/ISSUE_TEMPLATE/task.yml required=5 ...
+OK   templates/app-monorepo/.github/ISSUE_TEMPLATE/task-backend.yml required=5 types=markdown,input,dropdown,textarea,dropdown,textarea,textarea,input,textarea,dropdown
+OK   templates/app-monorepo/.github/ISSUE_TEMPLATE/task-frontend.yml required=5 ...
 OK   templates/infra-repo/.github/ISSUE_TEMPLATE/task.yml required=5 ...
-OK   templates/backend-repo/.github/workflows/deploy.yml jobs=build,plan_migration,apply_migration,plan_agent,apply_agent,release
-OK   templates/backend-repo/.github/workflows/ci.yml jobs=go
-OK   templates/frontend-repo/.github/workflows/ci.yml jobs=frontend
+OK   templates/app-monorepo/.github/workflows/deploy-backend.yml jobs=build,plan_migration,apply_migration,plan_agent,apply_agent,release
+OK   templates/app-monorepo/.github/workflows/ci.yml jobs=go
+OK   templates/app-monorepo/.github/workflows/ci.yml jobs=frontend
 OK   templates/infra-repo/.github/workflows/ci.yml jobs=validate,plan
 ```
 
@@ -115,8 +115,8 @@ H-1..H-5 / I-1..I-3 / M-1..M-4 / S-1..S-10 / T-1..T-3 / V-1..V-10
 | # | 主張 | 照合先 | 結果 |
 |---|---|---|---|
 | 1 | ブランチ保護の必須チェック名 (04 §4.1: backend `build / vet / test / lint` / frontend `tsc / test / build / lint` / infra `fmt / validate / lint` と `plan (dev)`) | `templates/*/.github/workflows/ci.yml` の `name:` | **一致** (backend:15 / frontend:15 / infra:20,47)。設定可能な形になっている |
-| 2 | 01 §7 の pre-commit の内容 (build + vet + 変更パッケージ test はブロック、生成物・OpenAPI・Agent は警告) | `templates/backend-repo/scripts/hooks/pre-commit:15-62` | **一致** (`exit 1` は build/vet/test のみ、生成物・OpenAPI・Agent は `echo` のみ) |
-| 3 | 01 §7.1 の「A-1 / A-4 / D-6 の検査は未実装なら CI が落ちる」 | `templates/backend-repo/.github/workflows/ci.yml:70-99` | **一致** (3 ステップとも `exit 1`) |
+| 2 | 01 §7 の pre-commit の内容 (build + vet + 変更パッケージ test はブロック、生成物・OpenAPI・Agent は警告) | `templates/app-monorepo/scripts/hooks/pre-commit:15-62` | **一致** (`exit 1` は build/vet/test のみ、生成物・OpenAPI・Agent は `echo` のみ) |
+| 3 | 01 §7.1 の「A-1 / A-4 / D-6 の検査は未実装なら CI が落ちる」 | `templates/app-monorepo/.github/workflows/ci.yml:70-99` | **一致** (3 ステップとも `exit 1`) |
 | 4 | 02 §2.2 の依存方向の出典「`templates/README.md` の『リポジトリ間の依存 (立ち上げ順序)』節」 | `templates/README.md:47-55` | **実在・節名一致** |
 | 5 | 03 §1 の既定モデル表 (`infra-engineer` = opus 例外 / `infra-reviewer` = opus) | 各 frontmatter `model:` | **一致** (`infra-engineer.md:5` opus / `infra-reviewer.md:5` opus / `go-developer.md:5` sonnet / `code-reviewer.md:5` opus) |
 | 6 | 01 §2.3 の AC-ID → Go テスト名変換 (`AC-4.2` → `AC4_2`) と `-run` 照合 | `tr -d '-' \| tr '.' '_'` を実行、`go-developer.md:29` のテスト名規約 | **整合** (`TestXxx_AC1_2_<Scenario>` と一致。`-run` は非アンカー正規表現なので部分一致で動く) |
@@ -181,7 +181,7 @@ H-1..H-5 / I-1..I-3 / M-1..M-4 / S-1..S-10 / T-1..T-3 / V-1..V-10
   3. §2.6 の H-4 (frontend) 行の「回避不可」根拠を「Vercel の Promote 権限限定 +
      `production` ブランチ保護」に書き換える (現状の根拠 `gh workflow run` の deny は
      Vercel の git 連携デプロイに効かない)
-  4. あわせて `templates/frontend-repo/CLAUDE.md.tmpl` の「Vercel デプロイ」節 (63〜68 行) に
+  4. あわせて `templates/app-monorepo/frontend/CLAUDE.md.tmpl` の「Vercel デプロイ」節 (63〜68 行) に
      「Production Branch は `production` / `main` は Preview」を明記する。
      **Vercel の既定は `main` = Production** であり、節だけ読むと既定運用に流れる
 
@@ -191,10 +191,10 @@ H-1..H-5 / I-1..I-3 / M-1..M-4 / S-1..S-10 / T-1..T-3 / V-1..V-10
 
 ### 中 1. 実装・レビューエージェントの description が「3 層」のままで、確定した 4 層と矛盾する (AC-5.4)
 
-- `templates/backend-repo/.claude/agents/go-developer.md:3` — 「本番バックエンド (Go / gin / **3 層** /
+- `templates/app-monorepo/backend/.claude/agents/go-developer.md:3` — 「本番バックエンド (Go / gin / **3 層** /
   sqlc / wire / Managed Agents) …**Controller・UseCase・Repository**・Agent 層・DB スキーマをまたがる…」
   → **Service 層が列挙から落ちている**
-- `templates/backend-repo/.claude/agents/code-reviewer.md:3` — 「本番実装リポジトリ (Go **3 層** +
+- `templates/app-monorepo/backend/.claude/agents/code-reviewer.md:3` — 「本番実装リポジトリ (Go **3 層** +
   Managed Agents + **Next.js**) …」→ 3 層に加え、3 リポ分割後の backend リポに Next.js が残っている
 - 本文は正しく 4 層 (`go-developer.md:40-45` / `code-reviewer.md:23`)。ルート `CLAUDE.md` と
   `templates/README.md:10`・`CLAUDE.md.tmpl` はいずれも 4 層。description はエージェント選択時に
@@ -315,11 +315,11 @@ H-1..H-5 / I-1..I-3 / M-1..M-4 / S-1..S-10 / T-1..T-3 / V-1..V-10
 | DR-4 PoC 実装のコピー設計 | **問題なし**。`04` §2.2 / §2.3 は PoC 方式 (起動時自動マイグレーション / 手動 `update-agent-prompt`) を却下案として明示的に排除している |
 | DR-5 曖昧語による丸投げ | **問題なし**。`適切に` / `必要に応じて` / `後で検討` / `適宜` を対象ファイル全体で grep して 0 件。上限値 (2 巡 / 15 ファイル / 800 行 / 5 以下・6 以上) がすべて数値で確定している |
 | DR-6 AC の宙吊り | traceability 23/23 OK。逆方向で軽微 4 (DF-6 に対応する AC が無い) |
-| DR-7 プロトタイプを仕様として扱う | **問題なし**。`templates/frontend-repo/.github/pull_request_template.md:72` が「プロトタイプと挙動が異なる箇所とその根拠 (**仕様は設計書が正**)」を PR で要求しており、構造的に潰している |
+| DR-7 プロトタイプを仕様として扱う | **問題なし**。`templates/app-monorepo/.github/pull_request_template.md:72` が「プロトタイプと挙動が異なる箇所とその根拠 (**仕様は設計書が正**)」を PR で要求しており、構造的に潰している |
 | BE-3 / BE-5 (`.env` 方式・DB フォールバック) | 該当箇所は `04` §3.2 の deny (`Read(**/.env)`) と `deploy.yml` の environment secret。持ち込まれていない |
 | BE-8 / BE-9 / BE-10 (Agent と schema の乖離) | `04` §2.3 + `deploy.yml:201-210` (3 者一致検査を Agent 発行の前提条件にし、未実装なら落とす) + `:228` (Tools 全置換の目視確認材料)。**設計で構造的に潰せている** |
 | BE-11 (冪等性) | `deploy.yml` の `concurrency` (`:39-41`, `cancel-in-progress: false`) で同一環境への並行適用を禁止 |
-| FE-1〜FE-7 | `templates/frontend-repo/.github/pull_request_template.md:51-53` が FE-1〜FE-7 の該当確認を PR の必須記載にしている |
+| FE-1〜FE-7 | `templates/app-monorepo/.github/pull_request_template.md:51-53` が FE-1〜FE-7 の該当確認を PR の必須記載にしている |
 
 ## 良かった点
 
