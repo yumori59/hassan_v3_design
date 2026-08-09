@@ -75,27 +75,27 @@ body:
       multiple: true
       options:
         - 該当なし
-        - 着手前の計画承認 (新規リソース種別 / 設計書に無い構成 / 3 リポ跨ぎ / envs/prod)
+        - 着手前の計画承認 (新規リソース種別 / 設計書に無い構成 / app 跨ぎ / envs/prod)
         - terraform apply (dev) — 人間のみ (rule 04 §3.1)
         - terraform apply (prod) — rule 04 の H-4
         - state 操作 (import / state rm) — 人間のみ
     validations:
       required: true
 
-  # --- 必須 5: 依存 issue (他リポ) ----------------------------------------
+  # --- 必須 5: 依存 issue --------------------------------------------------
   - type: textarea
     id: dependencies
     attributes:
-      label: 依存 issue (他リポ) (必須)
+      label: 依存 issue (必須)
       description: >-
-        依存方向は infra → backend → frontend。このリポは依存の先頭にあるため、多くの場合「なし」になる。
+        依存方向は infra → app。このリポは依存の先頭にあるため、多くの場合「なし」になる。
         このリポの出力 (RDS エンドポイント / ECS クラスタ名 / Secrets の ARN) を待っている
         backend / frontend の issue があれば、それも参照として書く (順序の確認に使う)。
       value: |
         なし
       placeholder: |
         なし (このリポが先頭)
-        後続: <owner>/<backend-repo>#123 (この issue の apply 完了後に着手可)
+        後続: <owner>/<app-repo>#123 (この issue の apply 完了後に着手可)
     validations:
       required: true
 

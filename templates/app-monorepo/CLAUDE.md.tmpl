@@ -1,0 +1,106 @@
+# CLAUDE.md — <app-repo-name> (app モノレポ)
+
+hassan_v3 の設計 (`<hassan_v3 の絶対パス>/docs/design/`) を実装する本番アプリケーション。
+**backend (Go / AWS ECS) と frontend (Next.js / Vercel) を 1 リポジトリで持つ**。
+
+**設計書を読むときは必ず `docs/design/README.md` (索引) から入る** — 同ディレクトリは **1 セッションで読み切れない規模**であり、**1 つのタスクに必要なのはその一部**である。索引は「何を作るか → どのファイルの
+どの節を読むか」と「実装時に読まなくてよい節」を示す。
+
+## リポジトリ構成 (2 リポジトリ)
+
+決定の正は設計リポ hassan_v3 の `docs/design/architecture.md` §3.11 (D-I)。
+
+| リポジトリ | 中身 | デプロイ先 | 反映の契機 |
+|---|---|---|---|
+| **このリポジトリ** | `backend/` + `frontend/` + `api/` | ECS (ecspresso) / Vercel | PR マージ (+ 本番は H-4) |
+| **infra リポ** | Terraform (VPC / ALB / RDS / IAM / Secrets / ECS クラスタ) | AWS | **人手 `apply`** (マージでは反映されない) |
+
+```
+.
+├── backend/          Go / gin / 4 層 + entity + gateway の計 6 パッケージ層 / sqlc / wire / Managed Agents
+│                     → 規約は backend/CLAUDE.md と backend/.claude/rules/05-architecture-coding-rules.md
+├── frontend/         Next.js on Vercel / OpenAPI 生成型
+│                     → 規約は frontend/CLAUDE.md
+├── api/openapi.yaml  **BE→FE 契約の SSOT。生成物・手編集禁止**
+├── .claude/          2 リポ共通の rules (01〜04 + feedback_review_patterns.md) と skills
+├── .github/          ci.yml (path filter + gate) / deploy-backend.yml / rollback-backend.yml / e2e.yml
+│                     ISSUE_TEMPLATE (backend / frontend の 2 種) / pull_request_template.md / CODEOWNERS
+└── scripts/hooks/    pre-commit (staged パスでサブツリーに振り分ける)
+```
+
+**依存順序は `infra → app`**。infra の出力 (RDS エンドポイント / ECS クラスタ名 / Secrets の ARN) が
+このリポジトリの入力。**infra の PR はマージだけでは効かない — `apply` 済みが着手条件**。
+
+## サブツリーをまたぐときの絶対ルール (モノレポ固有。MR-1〜MR-6)
+
+**3 リポ構成では「リポジトリ境界」が無償で担保していたものが、モノレポでは機構になっている**。
+定義の正は `docs/design/architecture.md` §3.11.2、CI 実装の正は同 `operations.md` §5.1.1。
+
+| ID | 守ること |
+|---|---|
+| **MR-1** | **ブランチ保護の必須チェックは `gate` ジョブ 1 本のみ**。個別ジョブは path filter で skip され得るため、必須に指定すると PR が永久に pending になる。`ci.yml` のジョブ構成を変えたら `gate` の `needs` も同じ差分で更新する |
+| **MR-2** | Vercel は Root Directory = `frontend` + Ignored Build Step (`frontend/` `api/` に差分が無ければビルドしない)。**人手設定**なので `04-human-checkpoints.md` §4 のチェックリストで確認する |
+| **MR-3** | **`api/openapi.yaml` と `frontend/src/generated` は生成物。手編集しない**。backend の IF を変えたら `make -C backend docs` → FE の `npm run generate` まで同じ PR で行う (CI の `contract` ジョブが落とす)。**検査は `scripts/check-regen.sh` 経由**にする — 裸の `git diff --exit-code` は**未追跡ファイルを見ず追加漏れを素通りさせる** |
+| **MR-4** | `.github/CODEOWNERS` + ブランチ保護の "Require review from Code Owners"。**`api/` は BE / FE 双方を含む専用チーム 1 行**にする。⚠️ **「双方からそれぞれ 1 名の承認」は CODEOWNERS では表現できない** (1 行複数オーナーは誰か 1 人で充足 / 2 行書くと最後の行だけ適用) — 「双方が見る」は PR テンプレート §5 の宣言 + H-1 の人間のレビューが受け皿。**書き込み権限もサブツリー単位で分けられない** (3 リポ構成の分離は失われる = 受容済みの代償) |
+| **MR-5** | タグは `backend-v*` / `frontend-v*` の名前空間を使う (単一の `v*` を使わない) |
+| **MR-6** | **破壊的 API 変更の ①BE 新旧併存 → ②FE 切替 → ③BE 旧削除 を 1 PR に同梱しない**。後方互換な変更は同梱してよい。PR テンプレート §5 の宣言欄が唯一の検出経路 |
+
+**MR-6 が最も見落としやすい**。モノレポは「FE/BE 跨ぎの PR が 1 本で済む」利得と引き換えに、
+**「順序を守らずに済む経路」を新設している**。得た利得と守るべき制約を混同しないこと。
+
+**モノレポで既定が変わるもの (3 リポ構成の癖のまま使うと誤る)**:
+
+- **履歴はパスで絞る** — `git log` / `git blame` の既定はリポジトリ全体。
+  サブツリーの履歴を読むときは **`git log -- backend/`** のようにパスを付ける
+  (3 リポでは「リポの履歴 = そのサブツリーの履歴」だった)
+- **依存更新はサブツリーごとの宣言** — `.github/dependabot.yml` の `directory:` に
+  `/backend` (gomod) と `/frontend` (npm) を明示している。**サブツリーを増やしたらここも足す**
+  (足さないと version updates の PR が出なくなる。alerts だけ残るので気付きにくい)
+
+## コマンド
+
+サブツリーの中で作業するのが基本 (`cd backend` / `cd frontend`)。ルートから叩く場合は下記。
+
+| 目的 | コマンド |
+|---|---|
+| backend の検証ゲート | `make -C backend <build vet test lint>` (詳細は `backend/CLAUDE.md`) |
+| frontend の検証ゲート | `cd frontend && <npm run …>` (詳細は `frontend/CLAUDE.md`) |
+| **OpenAPI 契約の再生成** | `make -C backend docs` → `scripts/check-regen.sh api/openapi.yaml` |
+| **FE の型再生成** | `npm --prefix frontend run generate` → `scripts/check-regen.sh frontend/src/generated` |
+
+**生成物の差分検査は `scripts/check-regen.sh` を通す。裸の `git diff --exit-code` を書かない** —
+`git diff` は cwd に限定されないうえ、**未追跡ファイル (新規生成物) を一切見ない**ため、
+`api/openapi.yaml` の初回生成や orval / sqlc の**新規出力の追加漏れが素通りする** (MR-3 の空振り)。
+
+## 検証ゲート (完了条件)
+
+**触ったサブツリーの検証ゲートをすべて通す + 契約の再生成漏れゼロ**。
+CI では `gate` ジョブが green になることが完了条件 (個別ジョブの skip は正常)。
+サブツリー別の実体は `backend/CLAUDE.md` / `frontend/CLAUDE.md` を参照。
+
+## Claude Code 運用ルール
+
+| ファイル | 内容 |
+|---|---|
+| `.claude/rules/01-construction-loop.md` | **1 issue の作業ループ (S-1〜S-10)。全作業の起点** |
+| `.claude/rules/02-issue-granularity.md` | issue の粒度・DoD (V-1〜V-10)・リポ跨ぎ / サブツリー跨ぎのマージ順序 |
+| `.claude/rules/03-model-escalation.md` | モデルの既定・昇格判定 |
+| `.claude/rules/04-human-checkpoints.md` | 人間承認点 (H-1〜H-5) と機構・自律範囲・立ち上げチェックリスト |
+| `.claude/rules/feedback_review_patterns.md` | 頻出バグパターン (設計リポの同期コピー。新パターンは設計リポへ還流する) |
+| `.claude/skills/implementing-robustly/` | 着手前の影響半径測定・完了前セルフレビュー |
+| `.claude/skills/test-driven-development/` | Red→Green の進め方 |
+| `backend/.claude/` | backend 固有 (層の責務・依存規則 L-1〜L-6・`go-developer` / `code-reviewer`) |
+| `frontend/.claude/` | frontend 固有 (`react-developer` / `frontend-reviewer`) |
+
+- **作業は GitHub issue 起点** (`.github/ISSUE_TEMPLATE/task-backend.yml` または `task-frontend.yml` で起票)。
+  ループの現在位置と中断・再開は rules 01 の §6
+- 実装は `go-developer` / `react-developer`、レビューは**別セッションで** `code-reviewer` / `frontend-reviewer`
+- 要件・設計の変更が必要になったら**実装で辻褄を合わせず、設計リポ (hassan_v3) に差し戻す**
+
+## ハーネス
+
+- `ln -sf ../../scripts/hooks/pre-commit .git/hooks/pre-commit` で pre-commit を導入する
+  (staged パスで backend / frontend を振り分ける)。**`--no-verify` での回避はユーザー明示指示がない限り禁止**
+- CI (`.github/workflows/ci.yml`) が path filter → サブツリー別ジョブ → `contract` → `gate` の順で走る
+- **`.claude/settings.json` は立ち上げ時に作る** (許可 / 拒否の初期値は
+  `.claude/rules/04-human-checkpoints.md` §3.2 が正)

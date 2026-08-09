@@ -1,9 +1,9 @@
-# Rule 01: 1 issue の作業ループ (backend / frontend / infra 共通)
+# Rule 01: 1 issue の作業ループ (app モノレポ / infra リポ 共通)
 
 **GitHub issue 1 本を受け取ってから PR がマージされるまでの手順・担当・停止条件**を定める。
 このファイルはオーケストレーター (Claude Code のメインセッション) の行動規範であり、
-**3 リポジトリ共通** (`templates/shared/` から各実装リポの `.claude/rules/` にコピーされる)。
-リポ固有の読み替えは §1.3 (検証コマンド) と §2.4 (infra の Red/Green) に限る。
+**2 リポジトリ共通** (app モノレポ / infra リポ。`templates/shared/` から各実装リポの `.claude/rules/` にコピーされる)。
+サブツリー / リポ固有の読み替えは §1.3 (検証コマンド) と §2.4 (infra の Red/Green) に限る。
 
 このファイルが定めるのは**順序と担当**のみ。次は他の SSOT が持つ (ここに複製しない):
 
@@ -13,7 +13,7 @@
 | 着手前の影響半径測定・完了前セルフレビュー | [`.claude/skills/implementing-robustly/SKILL.md`](../skills/implementing-robustly/SKILL.md) |
 | 実装規約 (層の責務・エラー・テナント境界) | `CLAUDE.md` + `.claude/agents/*.md` |
 | 頻出バグパターン | `.claude/rules/feedback_review_patterns.md` |
-| issue の粒度・完了条件 (DoD)・リポ跨ぎのマージ順序 | rule `02-issue-granularity.md` |
+| issue の粒度・完了条件 (DoD)・リポ跨ぎ / サブツリー跨ぎのマージ順序 | rule `02-issue-granularity.md` |
 | 既定モデルと昇格 / 降格の基準 | rule `03-model-escalation.md` |
 | 人間承認点の一覧と機構 (environment 承認・deny) | rule `04-human-checkpoints.md` |
 | 要件・設計 (何を作るか) | 設計リポ hassan_v3 の `aidlc-docs/inception/<feature>/` と `docs/design/` |
@@ -31,7 +31,7 @@
 | **人間** | リポジトリのオーナー | 判断・承認・マージ |
 | **OR** | オーケストレーター | Claude Code のメインセッション。委譲・裏取り・issue への記録 |
 | **SA** | サブエージェント | 実装 = `go-developer` / `react-developer` / `infra-engineer`、レビュー = `code-reviewer` / `frontend-reviewer` / `infra-reviewer` |
-| **CI** | GitHub Actions | `.github/workflows/ci.yml` (と pre-commit hook) |
+| **CI** | GitHub Actions | `.github/workflows/ci.yml` (と pre-commit hook)。**app モノレポでは path filter でサブツリー別ジョブが出し分けられ、必須チェックは `gate` ジョブ 1 本のみ** (MR-1) |
 
 自律範囲 (実装リポでの確定値。`.claude/settings.json` に落とす):
 
@@ -64,7 +64,13 @@
 補足 (曖昧さを残さないための確定事項):
 
 - **push のタイミング**: 既定は S-9 で 1 回。ただし中断時の退避 push は S-4 以降いつでも可
-  (feature ブランチは壊れてよい場所)。退避 push でも CI は起動するため、失敗した CI を放置しない。
+  (feature ブランチは壊れてよい場所)。
+  **退避 push では CI は起動しない** — `ci.yml` の `push` トリガは `main` のみに限定されている
+  (2026-08-04 の是正。`push: branches: ["**"]` と `pull_request` を併用すると**同一 SHA に基準の違う
+  `gate` チェックランが 2 つ**生まれ、ブランチ保護がどちらを見るか不定になるため)。
+  **CI は S-9 で PR を作った時点から `pull_request` で走り、以降の push ごとに再走する**。
+  したがって **S-4〜S-8 の間は機械の検証が pre-commit だけになる** — この区間で
+  「CI が見てくれる」に期待しない (中断・再開の §6 が想定する期間がここに当たる)。
 - **S-7 を PR 作成より前に置く理由**: レビューの差し戻し (§3) が PR のレビューコメント履歴を汚さず、
   人間が PR を開いた時点で「重大ゼロ」であることを保証できる。PR 作成後にレビューする案は、
   人間が「まだレビュー中の PR」を見分けられなくなるため却下。
@@ -81,15 +87,27 @@
 | ② レビューの重大指摘が 2 巡目も残る | S-7 の 2 巡目 | 3 巡目に入らず停止して人間へ (§3) |
 | ③ 設計書に無いパターンに到達した | S-3 または S-5 | 昇格ではなく**設計リポへの差し戻し**を先に判定する (§4) |
 
-### 1.3 リポごとの S-6 (検証) の実体
+### 1.3 サブツリー / リポごとの S-6 (検証) の実体
 
 `CLAUDE.md` の「検証ゲート」節が各リポの正。ループ上は**全コマンドが通ることが S-6 の完了条件**:
 
-| リポ | S-6 で OR が実行するコマンド |
+| サブツリー / リポ | S-6 で OR が実行するコマンド |
 |---|---|
-| backend | `go build ./...` / `go vet ./...` / `go test ./...` / `golangci-lint run` / 生成物の再生成 (`make sqlc` `make wire` `make docs`) と `git diff --exit-code` |
-| frontend | `npx tsc --noEmit` / `npm run test` / `npm run build` / `npm run lint` / `npm run generate` と `git diff --exit-code` |
+| backend (`backend/`) | `go build ./...` / `go vet ./...` / `go test ./...` / `golangci-lint run` / 生成物の再生成 (`make sqlc` `make wire`) と **`scripts/check-regen.sh backend`** |
+| frontend (`frontend/`) | `npx tsc --noEmit` / `npm run test` / `npm run build` / `npm run lint` |
+| **契約 (`api/`)** | **backend / frontend のどちらを触った場合も実行する**: `make -C backend docs` → **`scripts/check-regen.sh api/openapi.yaml`** → `npm --prefix frontend run generate` → **`scripts/check-regen.sh frontend/src/generated`** (MR-3) |
 | infra | `terraform fmt -check -recursive` / `terraform validate` / `tflint --recursive` / `terraform plan` (差分の要約と `destroy`/`replace` の有無) |
+
+**生成物の差分検査は `scripts/check-regen.sh` を通す。裸の `git diff --exit-code` を書かない**:
+
+- `git diff` は**カレントディレクトリに限定されない** — pathspec が無いと他サブツリーの差分を拾う
+- `git diff` は**未追跡ファイルを一切見ない** — **新規に生成されたファイル (`api/openapi.yaml` の初回・
+  orval / sqlc の新規出力) の追加漏れが素通りする**。これが「エンドポイント追加」という最頻の変更で
+  MR-3 を空振りさせていた (2026-08-04 の design-reviewer 指摘 重大 1)
+- `check-regen.sh` は **`git status --porcelain --untracked-files=all`** を使うため、
+  **追加 (`??`) / 変更 (` M`) / 削除 (` D`) のすべてを検出し、インデックスを触らない**。
+  ⚠️ **`git add --intent-to-add` + `git diff` に「簡素化」しないこと** — `git add` が削除を
+  ステージするため **削除を見落とし**、かつローカル実行で**意図しない削除が commit に混入する**
 
 **S-6 は OR 自身が実行する**。実装 SA の報告に載っていた出力を S-6 の証拠として流用しない
 (SA は変更途中の状態で実行している可能性がある)。
@@ -249,7 +267,7 @@ OR は SA の差し戻し報告を**自分で判断して埋めない**。§4.2 
 | 単位 | 並列 / 直列 | 条件・理由 |
 |---|---|---|
 | **異なる issue (同一リポ)** | **並列可** | 触るファイルが重複しないこと。**`git worktree` で隔離**し、1 issue = 1 worktree = 1 ブランチ = 1 セッション |
-| **異なる issue (異なるリポ)** | **並列可** (依存が無い場合のみ) | 依存関係がある場合は直列 (infra → backend → frontend)。マージ順序は rule `02-issue-granularity.md` |
+| **異なる issue (異なるリポ / 異なるサブツリー)** | **並列可** (依存が無い場合のみ) | 依存関係がある場合は直列 (`infra → app`、app 内は `backend → frontend`)。マージ順序は rule `02-issue-granularity.md` |
 | **S-3 内の調査** | **並列可** | 独立した読み取り (既存コードの grep・設計書の確認) は同時に委譲してよい |
 | **同一 issue の S-4 → S-5 → S-6 → S-7** | **直列必須** | Red を見ずに Green は書けない。検証前のコードをレビューに出すと指摘が検証結果と食い違う |
 | **同一 issue の S-7 (レビュー)** | **直列・集約** | 差分全体を 1 セッションで見る。層ごと・ファイルごとに分割して並列レビューしない (層間の不整合が見えない) |
@@ -300,19 +318,21 @@ OR は SA の差し戻し報告を**自分で判断して埋めない**。§4.2 
 
 | 機構 | 走るタイミング | 内容 | ブロックするか |
 |---|---|---|---|
-| **pre-commit** | S-4 / S-5 / S-8 の各 commit | backend: `go build` + `go vet` + 変更パッケージの `go test` / frontend: 対応する軽量チェック / infra: `terraform fmt -check` + `validate`。生成物・OpenAPI・Agent 再発行の追従漏れは**警告**(非ブロック) | する (`--no-verify` 禁止) |
-| **CI (push)** | S-9 の push (退避 push でも起動) | 下表の全ジョブ | PR のマージをブロック |
-| **CI (pull_request)** | S-9 で PR 作成後 | 同上 (必須チェックとして設定する) | する |
+| **pre-commit** | S-4 / S-5 / S-8 の各 commit | **staged パスでサブツリーに振り分ける**。backend: `go build` + `go vet` + 変更パッケージの `go test` / frontend: 対応する軽量チェック / infra: `terraform fmt -check` + `validate`。生成物・OpenAPI・Agent 再発行・MR-6 の同梱は**警告**(非ブロック) | する (`--no-verify` 禁止) |
+| **CI (pull_request)** | **S-9 の PR 作成後 (以降の push ごとに再走)** | 下表の全ジョブ (path filter で変更サブツリー分のみ実行) | する (必須チェックは `gate` 1 本) |
+| **CI (push)** | **`main` へのマージ時のみ** (`ci.yml` の `push` は `main` 限定。**退避 push では起動しない**) | 同上 | — (マージ後の確認) |
 | **人間** | S-2 (条件付き) / S-10 | 計画承認 (該当 issue のみ) / PR approve + マージ | する |
 
 ### 7.1 既存 CI ジョブのループ上の位置
 
-| リポ | ジョブ / ステップ | S-6 で先に潰せるか |
+| サブツリー / リポ | ジョブ / ステップ | S-6 で先に潰せるか |
 |---|---|---|
 | backend | `go build` / `go vet` / `golangci-lint` / `go test` (UT) | すべて S-6 で同じコマンドを実行して潰す |
-| backend | 生成物の差分チェック (sqlc / wire) / OpenAPI 定義の差分チェック | S-6 で `make sqlc wire docs` + `git diff --exit-code` |
+| backend | 生成物の差分チェック (sqlc / wire) | S-6 で `make -C backend sqlc wire` + `scripts/check-regen.sh backend` |
 | backend | A-1 認証の適用漏れ検査 / A-4 所有者スコープの検査 / D-6 tool schema 3 者一致検査 | S-6 で該当スクリプトを実行。**未実装なら CI が落ちる設計なので、S-3 の計画に実装を含める** |
-| frontend | `tsc --noEmit` / `test` / `build` / `lint` / API 型の差分チェック | すべて S-6 で実行 |
+| frontend | `tsc --noEmit` / `test` / `build` / `lint` | すべて S-6 で実行 |
+| **`contract` ジョブ** | `api/openapi.yaml` ↔ `frontend/src/generated` の再生成漏れ (MR-3) | S-6 の「契約」行 (§1.3) で実行。**backend だけ / frontend だけの PR でも走る** |
+| **`gate` ジョブ** | 全ジョブの結果集約 (MR-1) | S-6 では再現しない (CI 固有)。**ブランチ保護の必須チェックはこれ 1 本のみ** |
 | infra | `fmt -check` / `validate` / `tflint --recursive` / `plan` (dev) + `destroy`/`replace` の検出 | S-6 で実行。`plan` の差分は §2.4 の事前宣言と突き合わせる |
 
 **CI で初めて赤を見るのは S-6 の手抜き**。S-6 は「CI と同じことをローカルで先に通す」ステップである。
@@ -322,7 +342,7 @@ OR は SA の差し戻し報告を**自分で判断して埋めない**。§4.2 
 1. **CI の全ジョブが green** (必須チェックとして GitHub 側で設定する)
 2. **S-7 のレビューで重大ゼロ** (レビュー結果の要約を PR に貼る)。§3 の上限到達で停止した PR はマージしない
 3. **PR の DoD チェックリストが充足** (機械検証項目 / 人間判断項目の区別は rule `02-issue-granularity.md`)
-4. **依存 issue (他リポ) がマージ済み** — API 破壊的変更は「backend で新旧併存 → frontend 切替 → 旧削除」の順序
+4. **依存 issue がマージ済み** — infra への依存は `apply` 済みまで。API 破壊的変更は「backend で新旧併存 → frontend 切替 → 旧削除」の順序で、**3 段を別 PR に分ける** (MR-6)
 5. **人間の approve とマージ操作** (エージェントはマージしない)
 
 ### 7.3 マージ後 (D-4 / D-6 のループ上の位置)
@@ -330,7 +350,7 @@ OR は SA の差し戻し報告を**自分で判断して埋めない**。§4.2 
 S-10 の後に走るリリース系は**人間承認点**であり、承認の機構は rule `04-human-checkpoints.md` が定める。
 本ルールが定めるのはループとの接続だけ:
 
-- `main` へのマージで **dev への継続デプロイ**が走る (`deploy.yml`)
+- `main` へのマージで **dev への継続デプロイ**が走る (backend は `deploy-backend.yml` / frontend は Vercel の Preview)
 - **DB マイグレーションの適用 (D-4)** と **Managed Agent の再発行 (D-6)** を含む issue は、
   S-2 でその該当を宣言し、S-9 の PR 本文に「適用が必要な変更」として明記する。
   適用は人間の承認を経て行われ、**エージェントは実行しない**

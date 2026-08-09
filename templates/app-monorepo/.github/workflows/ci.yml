@@ -1,0 +1,722 @@
+name: CI
+
+# app モノレポ (backend/ + frontend/ + api/) の CI 雛形。
+# <...> のプレースホルダを実構成に合わせて置換する。
+# 設計リポ (hassan_v3) の docs/design/ で決めた CI ゲート (D-2) と一致させること。
+# ユーザー指定: UT と lint を CI で機械強制する (C-8)。
+#
+# ■ 構成の正: architecture.md §3.11 (リポジトリ構成) / §3.11.2 (MR-1〜MR-6)
+#   実装の正: operations.md §5.1.1
+#
+# ■ MR-1 (path filter + gate) の要点 — **ここを崩すと PR がマージ不能になる**:
+#   - ブランチ保護の「必須ステータスチェック」に指定するのは **gate ジョブ 1 本のみ**。
+#     skip されたジョブは status を返さないため、個別ジョブを必須にすると pending のまま止まる。
+#   - `api/**` の変更は backend / frontend の **両方**をトリガーする (契約変更は両側の検証が要る)。
+#   - 導入直後に「backend のみ」「frontend のみ」「両方」の 3 通りの PR で挙動を確認すること
+#     (gate の skipped 許容条件を書き損ねると、逆に常に落ちる)。
+#
+# ■ サブツリー自己完結 (architecture.md §3.11.1):
+#   `run:` は working-directory で解決されるが、**アクションの `with:` 入力は解決されない** —
+#   go-version-file / node-version-file 等は **リポジトリルートからのパス**で書くこと。
+
+# **`push` は `main` のみ**にする (2026-08-04 に是正。design-reviewer 指摘 中 2)。
+# `push: branches: ["**"]` と `pull_request` の併用は、**同一 SHA に対して基準の違う
+# `gate` チェックランが 2 つ**生まれる (push 側は base が無いため path filter の判定が変わる)。
+# ブランチ保護がどちらを見るかが不定になるため、feature ブランチの検証は `pull_request` に寄せる。
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  # === MR-1: 変更サブツリーの判定 =============================================
+  changes:
+    name: changes (path filter)
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      api: ${{ steps.filter.outputs.api }}
+      meta: ${{ steps.filter.outputs.meta }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'frontend/**'
+            api:
+              - 'api/**'
+            # **機構ファイル自身を無検査にしない** (2026-08-04 に追加。design-reviewer 指摘 中 1)。
+            # `.github/**`・`scripts/**`・`.claude/**` はどのサブツリージョブの対象でもないため、
+            # 「CI 定義や pre-commit を壊す PR が全ジョブ skip で gate 緑」になっていた。
+            meta:
+              - '.github/**'
+              - 'scripts/**'
+              - '.claude/**'
+
+  # === backend (Go) ==========================================================
+  backend:
+    name: backend build / vet / test / lint
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # アクションの入力は working-directory の影響を受けないためルートからのパスで書く
+          go-version-file: backend/go.mod
+
+      - name: go build
+        run: go build ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      # 層規約 (依存規則 L-1〜L-6) と肥大化 lint (dupl / cyclop / funlen) の設定は
+      # backend/.golangci.yml が正。**gate 経由で必須チェックにする**
+      # (設計: 依存規則の違反した PR はマージできない — architecture.md §3.5.1)。
+      # .golangci.yml は golangci-lint v2 系のスキーマ (`version: "2"`) で書かれている。
+      # このステップが D-2① (depguard による L-1〜L-6) と D-2⑤ (dupl / cyclop / funlen) を兼ねる。
+      - name: D-2①⑤ golangci-lint (depguard による L-1〜L-6 / dupl・cyclop・funlen)
+        uses: golangci/golangci-lint-action@v6
+        with:
+          # アクション側にも working-directory 入力があるので明示する (defaults は効かない)
+          working-directory: backend
+          # **バージョンを固定する** (2026-08-04 に追加。design-reviewer 指摘 中 7)。
+          # 未固定だと golangci-lint の latest が上がった日に、コードを変えていない PR が落ちる。
+          # `.golangci.yml` は `version: "2"` スキーマなので **v2 系**を指定すること。
+          version: <v2.x.y>
+          args: --config=.golangci.yml
+
+      # **スキーマ適用は統合段の前提**。これが無いと postgres が起動していても
+      # テーブルが無く、DB を伴うテストが「接続できるが SELECT が落ちる」形で失敗する
+      # (設計: docs/design/testing.md §8。v2 は DB を伴うテストが 0 件で、この段が存在しなかった)。
+      # 方式 (psqldef / golang-migrate) は D-4 未確定 — 確定したらこのコマンドを置き換える。
+      - name: スキーマ適用 (統合段の前提)
+        run: |
+          set -euo pipefail
+          # SCHEMA_APPLY_TARGET は方式の確定後に実構成の Makefile ターゲットへ置換する
+          # (psqldef なら "psqldef" / golang-migrate なら "migrate")。
+          SCHEMA_APPLY_TARGET=""
+          if [ -z "$SCHEMA_APPLY_TARGET" ]; then
+            echo "::error::スキーマ適用ターゲットが未設定です。" \
+                 "docs/design/data-model.md の方式確定 (D-4) 後に SCHEMA_APPLY_TARGET を埋めること" \
+                 "(未設定のまま緑にしない — 統合段がテーブル無しで動くのを防ぐ)"
+            exit 1
+          fi
+          make "$SCHEMA_APPLY_TARGET"
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/test?sslmode=disable
+
+      - name: go test (UT + 統合)
+        run: go test ./...
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/test?sslmode=disable
+
+      # **差分検査は `scripts/check-regen.sh` を通す** (裸の `git diff --exit-code` を書かない)。
+      # 理由: `git diff` は**未追跡ファイルを見ない**ため、sqlc が新規に吐く `.sql.go` の
+      # 追加漏れが素通りする (2026-08-04 の design-reviewer 指摘 重大 1)。
+      # 同スクリプトは `git status --porcelain --untracked-files=all` で追加・変更・削除の
+      # 3 種すべてを見る (インデックスを触らない)。
+      - name: 生成物の差分チェック (sqlc / wire の再生成漏れ)
+        run: |
+          # 生成コマンドが未整備の間はこのステップを削除しておくこと。
+          make sqlc wire
+          "$GITHUB_WORKSPACE/scripts/check-regen.sh" backend
+
+      # golden ファイル (LLM 応答の固定サンプル) の再生成漏れを検出する。
+      # hassan_v3 docs/design/testing.md §5.3 の規約 4: 読み手・書き手・テストを同じ定義から導くため、
+      # golden は生成物として扱い**手編集しない**。再生成の差分が出たら定義とテストがずれている。
+      - name: golden ファイルの差分チェック (BE-12 の再発防止)
+        run: |
+          set -euo pipefail
+          if grep -qE '^golden:' Makefile 2>/dev/null; then
+            make golden
+            # golden は **新規ファイルが増える形**で漏れるため、未追跡も見る必要がある
+            "$GITHUB_WORKSPACE/scripts/check-regen.sh" backend/testdata/golden
+          else
+            echo "::error::Makefile に golden ターゲットがありません (testing.md §5.3 の規約 4)"
+            exit 1
+          fi
+
+      # 必要なテストが「在ること」の存在検査 (testing.md §10 の #4 / #5 / #7)。
+      # テストが通ることと、必要なテストが書かれていることは別の担保である。
+      - name: 必須テストの存在検査 (testing.md §10)
+        run: |
+          set -euo pipefail
+          if [ -x scripts/check-required-tests.sh ]; then
+            bash scripts/check-required-tests.sh
+          else
+            echo "::error::scripts/check-required-tests.sh が未実装です" \
+                 "(testing.md §10 の #4 / #5 / #7 = ①LLM 出力を数値化する entity 関数のレンジ入力ケース" \
+                 " ②feature const 群ごとの F-1〜F-5 ケース ③repository・controller のテストに" \
+                 " t.Skip が無いこと (許可は testing.Short() の 1 箇所のみ)。" \
+                 " 未実装なら『規約のみ』に戻るため落とす)"
+            exit 1
+          fi
+
+      # --- 設計で「CI で機械強制する」と決めたゲート ---------------------------
+      # スクリプト本体は実装リポで用意する (リポジトリ構造が確定してから書ける)。
+      # **雛形の時点では未実装で、その場合は CI が落ちるようにしてある** —
+      # 「設計には書いたが機構が無い」状態を防ぐため、無言のスキップにはしない。
+      - name: A-1 認証の適用漏れ検査 (全 route が認証ミドルウェアを通るか)
+        run: |
+          if [ -x scripts/check-route-auth.sh ]; then
+            bash scripts/check-route-auth.sh
+          else
+            echo "::error::scripts/check-route-auth.sh が未実装です (設計: A-1 / AC-1.1)"
+            echo "router の登録一覧と認証ミドルウェア適用を突き合わせ、素通りの route を検出する検査を実装してください"
+            exit 1
+          fi
+
+      - name: A-4 所有者スコープの検査 (所有者 ID を引数で受ける経路の契約検証)
+        run: |
+          if [ -x scripts/check-owner-scope.sh ]; then
+            bash scripts/check-owner-scope.sh
+          else
+            echo "::error::scripts/check-owner-scope.sh が未実装です (設計: A-4 / AC-1.2)"
+            echo "クライアント入力由来の所有者 ID を使う箇所に、契約一致検証があるかを検出する検査を実装してください"
+            echo "(v2 では一覧経路で契約一致検証が抜けていた実例がある — 存在確認は所有権の検証にならない)"
+            exit 1
+          fi
+
+      - name: D-6 tool の入出力スキーマ一致検査 (schema / handler / prompt / 読み手)
+        run: |
+          if [ -x scripts/check-tool-contract.sh ]; then
+            bash scripts/check-tool-contract.sh
+          else
+            echo "::error::scripts/check-tool-contract.sh が未実装です (設計: D-6 / BE-8 / BE-12)"
+            echo "検査対象 5 種 (architecture.md §3.8.4):"
+            echo "  1. schema にある tool 名に handler が無い / 2. handler があるのに schema に無い"
+            echo "  3. schema の引数名と handler のパースキーが不一致 (+ prompt の説明との 3 者一致)"
+            echo "  4. handler が entity/toolresult 以外の型 (匿名 struct / map[string]any / 手組み JSON) を戻り値に入れている"
+            echo "  5. 読み手が書き手の型に無いフィールド (または異なる型) を参照している (BE-12)"
+            exit 1
+          fi
+
+      # --- D-2 の検査 ②〜⑨ (architecture.md §5 の D-2 行と 1 対 1 で対応させる) --------
+      # ステップ名の `D-2<番号>` が対応の索引。設計の宣言と実物のずれを grep で照合できるようにしてある。
+      # 単純なパターン照合で足りるもの (③④⑥⑧⑨) はここで実装し、
+      # 構文解析が必要なもの (②⑦) はスクリプト本体を実装リポで用意する (未実装なら落ちる)。
+      # **grep の対象パスは backend サブツリーのルートからの相対** (working-directory: backend)。
+      - name: D-2② 層境界の公開関数の戻り値が CodedError か (fmt.Errorf は内部のみ)
+        run: |
+          if [ -x scripts/check-error-contract.sh ]; then
+            bash scripts/check-error-contract.sh
+          else
+            echo "::error::scripts/check-error-contract.sh が未実装です (設計: §3.9① / AC-6.11 / AC-6.17)"
+            echo "go/ast で controller / usecase / service / repository / gateway の公開関数を走査し、"
+            echo "error を返す関数が *constants.CodedError を返しているかを検査してください"
+            echo "(パッケージ内部の非公開関数は fmt.Errorf(\"%w\") を許可する — 検査対象は層境界のみ)"
+            exit 1
+          fi
+
+      # L-5 が禁じるのは「**外部 SDK・gateway 実装・sqlc 生成物**の型」のエイリアス
+      # (architecture.md §3.5.1 の L-5)。module 内パッケージ (entity / config 等) への
+      # エイリアスは対象外なので、右辺のパッケージ名でホワイトリスト除外する。
+      # 誤検知で「除外設定で黙らせる」運用に流れると code-reviewer の観点と衝突するため、
+      # 除外リストは module 内パッケージ名のみを列挙する (外部パッケージは決して足さない)。
+      - name: D-2③ 外部パッケージ型の型エイリアス検出 (L-5 / F6 の再発防止)
+        run: |
+          hits=$(grep -rnE '^type +[A-Za-z_][A-Za-z0-9_]* += +[a-z][A-Za-z0-9_]*\.' \
+                   --include='*.go' usecase service 2>/dev/null | grep -v '_test\.go' \
+                   | grep -vE '= *(entity|toolresult|config|constants|apperror)\.' || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo "::error::usecase / service で外部パッケージの型エイリアスを定義しています (L-5)"
+            echo "IF は利用側のパッケージで定義してください (v2 の type LLMService = llm.Service 方式は不採用 — architecture.md D-A''')"
+            echo "module 内パッケージへのエイリアスなら、このステップの除外リストに同一 PR で追記してください"
+            exit 1
+          fi
+
+      # 変換関数の所在は controller/errresp.go を規約とする (1 箇所に集約。architecture.md §3.9①)。
+      # 別のファイル名にする場合は下の除外パスだけを変える (集約先は 1 つに保つ)。
+      - name: D-2④ CodedError の型アサーションが変換関数 1 本に限られているか (F5)
+        run: |
+          hits=$(grep -rn --exclude-dir=vendor 'err\.(\*constants\.CodedError)' --include='*.go' . 2>/dev/null \
+                   | grep -v '_test\.go' | grep -v 'controller/errresp\.go' || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo "::error::CodedError の直接型アサーションは HTTP 変換関数 1 本 (controller/errresp.go) 以外で禁止です"
+            echo "判定は errors.As を使ってください (直接アサーションはラップされた CodedError を取りこぼす — F5: v2 は 8 ファイル 61 箇所)"
+            exit 1
+          fi
+
+      - name: D-2⑥ config 以外での os.Getenv 禁止 (設定値の SSOT / BE-2)
+        run: |
+          hits=$(grep -rn --exclude-dir=vendor 'os\.Getenv\|os\.LookupEnv' --include='*.go' . 2>/dev/null \
+                   | grep -v '_test\.go' | grep -vE '(^|/)config/' || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo "::error::環境変数の読み取りは config パッケージに集約してください (architecture.md §3.9②)"
+            exit 1
+          fi
+
+      - name: D-2⑦ 層規約の対象パスの登録漏れ検査 (§3.5.2 / layering-scopes.yml)
+        run: |
+          if [ -x scripts/check-layer-scopes.sh ]; then
+            bash scripts/check-layer-scopes.sh
+          else
+            echo "::error::scripts/check-layer-scopes.sh が未実装です (設計: §3.5.2 / AC-6.19)"
+            echo "3 つの集合を作ります:"
+            echo "  ① service/ usecase/ repository/ 配下の実ディレクトリ集合 (layering-scopes.yml の common_layers を除く)"
+            echo "  ② layering-scopes.yml の v3_domains / ported_domains"
+            echo "  ③ .golangci.yml の L2-service-no-cross-domain-<domain> 規則名 / L5-no-external-sdk の files /"
+            echo "     L3-no-sqlc-outside-repository の files / exclusions のパス正規表現に現れるドメイン名"
+            echo "**比較は非対称です** (移植分は ③ に載せてはいけないため、対称比較にすると"
+            echo " ported_domains が非空になった瞬間に必ず落ちます)。検査する条件は 3 つ:"
+            echo "  条件 1: ① == (v3_domains ∪ ported_domains)   … 新設ドメインの登録漏れ"
+            echo "  条件 2: ③ == v3_domains                       … .golangci.yml への登録漏れ / 余分な登録"
+            echo "  条件 3: ported_domains のどのドメイン名も ③ に現れない … 移植分を誤って強制対象に入れた"
+            echo "1 つでも満たさなければ exit 1 にしてください"
+            exit 1
+          fi
+
+      - name: D-2⑧ 監査ログ戻り値の無言破棄 (_ =) の検出 (§3.9③ / F11)
+        run: |
+          hits=$(grep -rnE '^[[:space:]]*(_ =|_, _ =).*([Ll]og|Audit|Activity|Event)' \
+                   --include='*.go' controller usecase service repository 2>/dev/null \
+                   | grep -v '_test\.go' || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo "::error::監査ログ / イベントログの戻り値を _ = で破棄しています (architecture.md §3.9③)"
+            echo "失敗は WARN ログ + メトリクスとして観測可能にしてください (v2 は 6 ファイル 17 箇所で無言破棄 — F11)"
+            exit 1
+          fi
+
+      # Repository 以外から SQL へ到達する経路を 3 種類まとめて検出する (architecture.md の D-2⑨)。
+      # (a) narrow IF 経由の生 SQL / (b) sqlc 生成パッケージの import (depguard の backstop) /
+      # (c) narrow IF から実型へ戻す型アサーション (§3.7 の 2 で残ると明記した抜け道)。
+      # <module-path> と db/rdb は実構成に合わせて置換する。
+      # gateway も対象 — §3.3 は gateway の禁止事項に「DB アクセス」を挙げ、observability.md の O-C は
+      # 「gateway は DB を触れないため永続化は呼び出し元の UseCase が行う」を明細記録点の根拠にしている。
+      # depguard 側 (.golangci.yml の L3-no-sqlc-outside-repository の files / L4-gateway-no-upper-layers の
+      # deny に database/sql・pgx) と対を成す backstop (design-reviewer の中 A 指摘 2026-07-30)。
+      - name: D-2⑨ Repository 以外での SQL 到達経路の検出 (§3.3 / §3.7 の 2・3 / L-3 の backstop)
+        run: |
+          targets="service usecase/theme usecase/asset usecase/conversation usecase/idea usecase/plan controller entity gateway"
+          fail=0
+          # **対象ディレクトリの存在を先に確かめる** (2026-08-04 に追加。design-reviewer 指摘 中 4)。
+          # `grep -r <dir> 2>/dev/null` は dir が無くてもヒット 0 = 合格になるため、
+          # ドメインの追加・改名で**検査が沈黙する** (DR-6 の「検査が対象 0 件を検査して緑になる」型)。
+          for d in $targets; do
+            if [ ! -d "$d" ]; then
+              echo "::error::検査対象 $d が存在しません。ドメインの追加・改名をしたら"
+              echo "  ①この targets ②backend/.golangci.yml の L3 の files ③layering-scopes.yml"
+              echo "  ④設計リポ architecture.md §3.5.2 の表 を同一 PR で更新してください"
+              echo "  (放置すると grep のヒット 0 = 合格になり、検査が黙って消えます)"
+              fail=1
+            fi
+          done
+          raw=$(grep -rnE '\.(Exec|Query|QueryRow)\(ctx' --include='*.go' $targets 2>/dev/null \
+                  | grep -v '_test\.go' || true)
+          if [ -n "$raw" ]; then
+            echo "$raw"
+            echo "::error::(a) SQL の実行は Repository の責務です (architecture.md §3.3)"
+            echo "tx は narrow IF (Exec / Query / QueryRow) として渡るため型では防げません — Repository の XxxWithTx へ渡してください"
+            fail=1
+          fi
+          sqlc=$(grep -rn '<module-path>/db/rdb' --include='*.go' $targets 2>/dev/null \
+                   | grep -v '_test\.go' || true)
+          if [ -n "$sqlc" ]; then
+            echo "$sqlc"
+            echo "::error::(b) sqlc 生成パッケージを import できるのは repository/** だけです (architecture.md §3.5.1 の「sqlc 生成パッケージの扱い」)"
+            echo "全ドメインの全クエリを含むため、ここから他ドメインへ到達できます (L-2 / L-3 / A-4 / A-6 / BE-11 の迂回路)"
+            echo "enum・モデル型・params 構造体は entity/ で定義し、Repository が変換して返してください (§3.6)"
+            fail=1
+          fi
+          assert=$(grep -rnE '\.\((pgx\.Tx|\*sql\.Tx)\)' --include='*.go' $targets 2>/dev/null \
+                     | grep -v '_test\.go' || true)
+          if [ -n "$assert" ]; then
+            echo "$assert"
+            echo "::error::(c) narrow IF から実型へ戻す型アサーションは禁止です (architecture.md §3.7 の 2)"
+            echo "Begin / Commit / Rollback を取り戻すとトランザクション境界が UseCase から離れ、BE-10 / BE-11 の防御が消えます"
+            fail=1
+          fi
+          [ "$fail" -eq 0 ]
+
+      - name: math/rand 禁止検査 (認証フローの乱数は crypto/rand。auth.md §6.10-3 が SSOT)
+        run: |
+          if [ -x scripts/check-crypto-rand.sh ]; then
+            bash scripts/check-crypto-rand.sh
+          else
+            echo "::error::scripts/check-crypto-rand.sh が未実装です (設計: auth.md §6.10-3)"
+            echo "math/rand の import を検出し、許可リスト (所在と追加の承認手順は auth.md §6.10-3) 以外で使われていたら exit 1 にしてください"
+            exit 1
+          fi
+
+  # === frontend (Next.js) ====================================================
+  frontend:
+    name: frontend tsc / test / build / lint
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          # アクションの入力は working-directory の影響を受けないためルートからのパスで書く
+          node-version-file: frontend/.node-version
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: install
+        run: npm ci
+
+      - name: tsc --noEmit
+        run: npx tsc --noEmit
+
+      - name: test (UT)
+        run: npm run test
+
+      - name: build
+        run: npm run build
+
+      - name: lint
+        run: npm run lint
+
+      # === 設計で決めた 4 検査 (hassan_v3 docs/design/frontend.md §3.3 / §7 / §8 / §11.2) =========
+      # **機構が無いと FE-3 / FE-4 / FE-6 の担保が「規約文書に書くだけ」に退行する** —
+      # v2 は同じ禁止事項を文書に持ちながら eslint に該当ルールが 1 つも無く、FE-5 が実際に起きた。
+      # 依存方向 (L-F1〜L-F6) とトークン強制は eslint 側 (`npm run lint`) が担う。
+      # ここでは eslint で表現できない 4 つを検査する。
+      # (API 型の差分チェックは MR-3 として contract ジョブへ移した — 契約は 2 サブツリーに跨るため)
+
+      - name: 検査 1 併置テストの存在 (FE-4 / FE-6)
+        # `src/lib/parse/**` と `features/*/lib/**` の実装に同名の *.test.ts が無ければ落とす。
+        # 「分離するだけ」では PoC で FE-6 が起きたため、テストの存在まで機械で担保する。
+        run: |
+          set -uo pipefail
+          missing=0
+          for f in $(find src/lib/parse src/features/*/lib -name '*.ts' ! -name '*.test.ts' 2>/dev/null); do
+            t="${f%.ts}.test.ts"
+            if [ ! -f "$t" ]; then
+              echo "::error file=$f::併置テスト $t がありません (frontend.md §8。FE-4 / FE-6)"
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - name: 検査 2 公開パスの許可リストとルートグループの一致 (FE-K)
+        # middleware.ts の除外パス許可リストと `(auth)` 配下の実ページが一致することを確認する。
+        # v2 は matcher の否定正規表現 1 本で、書き間違えると全ページが素通りした。
+        run: |
+          set -uo pipefail
+          MW="src/middleware.ts"
+          if [ ! -f "$MW" ]; then
+            echo "::error::$MW がありません (frontend.md §11.2 の未認証遮断が存在しないことになる)"
+            exit 1
+          fi
+          # 許可リストの実体 (配列名) は実装に合わせて置換する
+          ALLOWLIST_NAME="PUBLIC_PATHS"
+          if ! grep -q "$ALLOWLIST_NAME" "$MW"; then
+            echo "::error::$MW に許可リスト ($ALLOWLIST_NAME) がありません。" \
+                 "否定正規表現 1 本での除外は採らない (frontend.md §11.2 の却下案 a)"
+            exit 1
+          fi
+          echo "許可リストとルートグループの照合スクリプトは実装リポで用意する" \
+               "(scripts/check-public-paths.sh)。未実装なら次のステップで落ちる"
+          if [ -x scripts/check-public-paths.sh ]; then
+            bash scripts/check-public-paths.sh
+          else
+            echo "::error::scripts/check-public-paths.sh が未実装です (frontend.md §11.2)"
+            exit 1
+          fi
+
+      - name: 検査 3 NEXT_PUBLIC_ の許可リスト (A-1)
+        # ブラウザバンドルに載る環境変数を許可リストで固定する。
+        # v2 は API のベース URL を NEXT_PUBLIC_ で公開していた (V-8) — v3 はサーバ専用に変える。
+        run: |
+          set -uo pipefail
+          # 許可する NEXT_PUBLIC_ 変数名 (スペース区切り)。増やすときは PR レビューの対象にする
+          ALLOWED="NEXT_PUBLIC_APP_ENV"
+          bad=0
+          for name in $(grep -rhoE 'NEXT_PUBLIC_[A-Z0-9_]+' src 2>/dev/null | sort -u); do
+            case " $ALLOWED " in
+              *" $name "*) ;;
+              *)
+                echo "::error::$name は許可リストにありません。" \
+                     "ブラウザに露出してよい値だけを許可します (frontend.md §12。秘密や BE のベース URL を入れない)"
+                bad=1
+                ;;
+            esac
+          done
+          exit $bad
+
+      - name: 検査 4 globals.css の行数 (FE-3。ブロックしない)
+        # トークンで表現できずに CSS を足した箇所をレビュー対象にするための可視化。
+        if: always()
+        run: |
+          set -uo pipefail
+          CSS="src/styles/globals.css"
+          if [ -f "$CSS" ]; then
+            LINES=$(wc -l < "$CSS" | tr -d ' ')
+            echo "globals.css: ${LINES} 行" >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::globals.css は ${LINES} 行です (増えている場合、トークンで表現できなかった理由を PR に書く)"
+          fi
+
+  # === 機構ファイル自身の検査 (中 1 の対処) ==================================
+  # CI 定義・hook・スクリプトを壊す PR を「全ジョブ skip で gate 緑」にしないための最低限。
+  meta:
+    name: meta (機構ファイルの検査)
+    needs: changes
+    if: needs.changes.outputs.meta == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: シェルスクリプト・hook の構文検査
+        run: |
+          set -euo pipefail
+          fail=0
+          # `pre-commit` は拡張子が無いので名前でも拾う
+          while IFS= read -r f; do
+            echo "bash -n $f"
+            bash -n "$f" || fail=1
+          done < <(find scripts -type f \( -name '*.sh' -o -name 'pre-commit' \) | sort)
+          [ "$fail" -eq 0 ]
+
+      - name: ワークフローの静的検査 (actionlint)
+        run: |
+          set -euo pipefail
+          # actionlint はジョブ間の needs 参照・式の型・run の shell 誤りを見る。
+          # **未導入なら落とす** (無言のスキップにしない — 本ジョブの存在意義が消える)
+          if ! command -v actionlint >/dev/null 2>&1; then
+            # **プロセス置換 `bash <(curl …)` を使わない** — パイプラインの終了コードは `bash` のものになり、
+            # **curl が失敗しても空スクリプトを実行して exit 0** になる (意図した ::error:: が出ない)。
+            # 一度ファイルへ落として `&&` で繋ぐ (2026-08-05 の design-reviewer 指摘 軽微 1)。
+            curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash \
+                 -o /tmp/download-actionlint.bash \
+              || { echo "::error::actionlint のインストーラ取得に失敗しました"; exit 1; }
+            bash /tmp/download-actionlint.bash \
+              || { echo "::error::actionlint の導入に失敗しました"; exit 1; }
+            PATH="$PWD:$PATH"
+          fi
+          actionlint
+
+      # **`check-regen.sh` の自己テスト** (2026-08-05 に追加)。
+      # このスクリプトは MR-3 の実体であり、**壊れても静かに緑を返す**性質を持つ
+      # (実際に初版は「削除を検出しない」欠陥を持ったまま設計リポの検証ゲート全通過で通っていた)。
+      # そのため**使い捨てリポジトリで実挙動を毎回確認する**。
+      #
+      # **「pathspec 不一致」のケースを必ず含めること** (2026-08-05 に追加。3 巡目の重大 1) —
+      # 2 度目の作り直しは「存在しないパスを緑で返す」退行を持ち込んでおり、
+      # **当時の 5 ケースには 1 つも引っかからなかった**。呼び出し側の pathspec は
+      # 手書きなので、タイポ・改名で MR-3 が空振りする経路がここにしかない。
+      - name: check-regen.sh の自己テスト (追加 / 変更 / 削除 / 差分なし / 副作用 / pathspec 不一致)
+        run: |
+          set -euo pipefail
+          S="$GITHUB_WORKSPACE/scripts/check-regen.sh"
+          T="$(mktemp -d)"
+          (
+            cd "$T"
+            git init -q .
+            git config user.email ci@example.com
+            git config user.name ci
+            mkdir -p gen
+            echo old > gen/a.txt
+            echo keep > gen/b.txt
+            git add -A
+            git commit -qm init
+
+            fail=0
+            expect() {  # expect <期待する exit> <ケース名> [pathspec (既定 gen)]
+              if bash "$S" "${3:-gen}" >/dev/null 2>&1; then got=0; else got=1; fi
+              if [ "$got" != "$1" ]; then
+                echo "::error::check-regen.sh の自己テスト失敗: $2 (期待 exit $1 / 実際 exit $got)"
+                fail=1
+              fi
+            }
+            expect 0 "差分なし"
+            echo new > gen/c.txt ; expect 1 "未追跡の追加" ; rm gen/c.txt
+            echo mod >> gen/a.txt; expect 1 "変更"        ; git checkout -q -- .
+            rm gen/b.txt         ; expect 1 "削除"        ; git checkout -q -- .
+            # **存在しない pathspec は「差分なし」と区別できないので落ちること** (3 巡目 重大 1)。
+            # ここが exit 0 だと、タイポ・改名で MR-3 が恒久的に空振りしても `OK` が出る。
+            expect 1 "pathspec 不一致 (ファイル)"      "gen2/a.txt"
+            expect 1 "pathspec 不一致 (ディレクトリ)"  "nonexistent"
+            # **インデックスを汚染しないこと** (汚染すると commit に意図しない削除が混入する)
+            rm gen/b.txt; bash "$S" gen >/dev/null 2>&1 || true
+            if [ -n "$(git diff --cached --name-only)" ]; then
+              echo "::error::check-regen.sh がインデックスを書き換えています (副作用は許容しない)"
+              fail=1
+            fi
+            [ "$fail" -eq 0 ]
+          )
+          rm -rf "$T"
+          echo "check-regen.sh の自己テスト OK (追加 / 変更 / 削除 / 差分なし / 副作用なし / pathspec 不一致)"
+
+      # **MR-1 の担保: `gate` が「何を集約するか」は PR で変更可能なコード**である。
+      # `needs` から 1 ジョブ消せば、そのジョブが失敗しても必須チェックは緑になる。
+      # 3 リポ構成では「必須チェックの厳格さ」はリポジトリ設定 (サーバ側) にあったが、
+      # `gate` 集約でコード側へ移った (`feedback_review_patterns.md` の DR-10)。
+      # **したがって照合を実装リポ側に持たせる** — 設計リポの `make check-monorepo-ci` だけに
+      # 置くと、切り出した瞬間に担保が消える (2026-08-05 の design-reviewer 指摘 D-2)。
+      - name: "MR-1 gate の整合 (job 集合 == needs == 判定名 / if: always() の有無)"
+        run: bash scripts/check-ci-gate.sh .github/workflows/ci.yml
+
+      # **`.claude/` と issue / PR テンプレートの構文検査** (2026-08-05 に追加。3 巡目の 中 12)。
+      # `meta` フィルタは `.claude/**` を含むのに、これまでの検査は
+      # `find scripts` / `actionlint` / `check-regen.sh` 自己テスト / `check-ci-gate.sh` の 4 つで、
+      # **`.claude/` を 1 バイトも見ていなかった** — フィルタに入れて無検査は
+      # 「検査しているように見える」ぶん、外してあるより悪い。
+      #
+      # **`settings.json` を壊す影響は目に見えない**: `04-human-checkpoints.md` §3.2 の deny
+      # (`gh workflow run` / `production` への push) は、**JSONC コメントを 1 つ残すだけで全滅する**
+      # のに、失敗はエラーにならず「deny が無い状態」として静かに成立する (同 §2.5)。
+      # モノレポでは `.claude/` は任意の PR が編集できるファイルなので、CI で見る。
+      - name: .claude/settings.json の JSON 妥当性
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(.claude/settings.json .claude/settings.local.json)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::.claude/settings.json がありません (H-2〜H-4 の deny がこのファイルに載っています)"
+            exit 1
+          fi
+          for f in "${files[@]}"; do
+            python3 -m json.tool "$f" >/dev/null \
+              || { echo "::error::$f が JSON として不正です (JSONC のコメントを残すと deny が全滅します)"; exit 1; }
+            echo "OK: $f"
+          done
+
+      # `actionlint` は `.github/workflows/` しか見ないため、issue / PR テンプレートは無検査だった。
+      # issue テンプレートが YAML として壊れると **GitHub 側で選択肢に出なくなる** (必須 5 欄 = AC-2.3 が消える)。
+      - name: .github の YAML パース (issue テンプレート・dependabot・CODEOWNERS の存在)
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r f; do
+            python3 -c 'import sys,yaml; yaml.safe_load(open(sys.argv[1]))' "$f" \
+              || { echo "::error::$f が YAML として不正です"; fail=1; }
+          done < <(find .github -maxdepth 2 -name '*.yml' -not -path '.github/workflows/*' | sort)
+          [ -f .github/CODEOWNERS ] || { echo "::error::.github/CODEOWNERS がありません (MR-4)"; fail=1; }
+          [ "$fail" -eq 0 ]
+
+  # === MR-3: OpenAPI 契約の再生成漏れ検査 =====================================
+  # **モノレポ化の見返り本体**。3 リポ構成では「backend の OpenAPI をどう frontend へ渡すか」が
+  # 未設計のまま残っていた (旧 templates/backend-repo/STRUCTURE.md §5)。
+  # 片側だけの変更でも契約はずれ得るため、**どのサブツリーが変わってもこのジョブは走らせる**
+  # (path filter で skip する条件を作らない — operations.md §5.1.1)。
+  contract:
+    name: contract (OpenAPI ↔ 生成型の同期)
+    needs: changes
+    # **`meta` (= `scripts/**` ほか) も条件に含める** (2026-08-05 に追加。design-reviewer 指摘 D-3)。
+    # MR-3 の実体は `scripts/check-regen.sh` なので、**それを無力化する PR が
+    # `scripts/` だけの変更なら contract が skip され `gate` 緑で通っていた**。
+    if: >-
+      needs.changes.outputs.backend == 'true' ||
+      needs.changes.outputs.frontend == 'true' ||
+      needs.changes.outputs.api == 'true' ||
+      needs.changes.outputs.meta == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.node-version
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # api/openapi.yaml は **生成物**。手編集を禁止し、backend の IF から必ず再生成する。
+      - name: OpenAPI 定義の再生成 (api/openapi.yaml)
+        run: make -C backend docs
+
+      # **`git diff --exit-code` を直接書かない** — 雛形の `api/` は `.gitkeep` のみなので
+      # `api/openapi.yaml` は **初回 PR では未追跡**であり、裸の `git diff` では必ず素通りする。
+      # MR-3 (モノレポ化の見返り本体) が初回から効かなくなるため、`check-regen.sh` を通す。
+      - name: api/openapi.yaml の差分チェック (BE の IF 変更が契約に反映されているか)
+        run: |
+          if ! "$GITHUB_WORKSPACE/scripts/check-regen.sh" api/openapi.yaml; then
+            echo "::error::api/openapi.yaml が最新ではありません (make -C backend docs の実行漏れ)"
+            echo "backend の IF を変えたら契約を再生成してコミットしてください"
+            exit 1
+          fi
+
+      - name: install (frontend)
+        run: npm ci
+        working-directory: frontend
+
+      # 生成の入力は **リポジトリ内の api/openapi.yaml**。
+      # 3 リポ構成では取得方法 (raw URL / アーティファクト / 公開エンドポイント) が未確定だったが、
+      # モノレポではローカルのファイルを読むだけで済む。orval の設定でこのパスを指すこと。
+      - name: API 型の再生成 (frontend/src/generated)
+        run: npm run generate
+        working-directory: frontend
+
+      # エンドポイント追加では orval が **新規ファイル**を吐くため、未追跡を見る必要がある
+      - name: frontend/src/generated の差分チェック (FE の型ズレ検出)
+        run: |
+          if ! "$GITHUB_WORKSPACE/scripts/check-regen.sh" frontend/src/generated; then
+            echo "::error::API 型が最新ではありません (npm run generate の実行漏れ)"
+            echo "api/openapi.yaml の更新後は型を再生成してコミットしてください"
+            exit 1
+          fi
+
+  # === MR-1: gate (ブランチ保護の必須ステータスチェックはこの 1 本のみ) ========
+  # skip されたジョブは status を返さないため、個別ジョブを必須チェックに指定すると
+  # 「backend だけの PR」で frontend の status が永久に来ず、マージ不能になる。
+  # このジョブは **success または skipped を成功**、それ以外 (failure / cancelled) を失敗とする。
+  gate:
+    name: gate
+    if: always()
+    needs: [changes, backend, frontend, contract, meta]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 全ジョブの結果を判定
+        run: |
+          set -euo pipefail
+          fail=0
+          check() {
+            case "$2" in
+              success|skipped) echo "OK   $1: $2" ;;
+              *)               echo "FAIL $1: $2"; fail=1 ;;
+            esac
+          }
+          check changes  "${{ needs.changes.result }}"
+          check backend  "${{ needs.backend.result }}"
+          check frontend "${{ needs.frontend.result }}"
+          check contract "${{ needs.contract.result }}"
+          check meta     "${{ needs.meta.result }}"
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::必須ジョブが失敗しています (上の FAIL 行を参照)"
+            exit 1
+          fi
+          # changes が skipped になるのは異常 (無条件ジョブのため) — 設定崩れの検出
+          if [ "${{ needs.changes.result }}" = "skipped" ]; then
+            echo "::error::changes ジョブが skipped です。path filter の設定が壊れています"
+            exit 1
+          fi

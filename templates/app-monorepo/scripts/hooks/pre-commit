@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# pre-commit hook (app モノレポ雛形) — staged パスでサブツリーに振り分けて検証する
+#
+# `ln -sf ../../scripts/hooks/pre-commit .git/hooks/pre-commit` で導入する。
+# 二層化: 重い全体テスト・build・lint は CI、軽い「差分のみ」は pre-commit。
+# 失敗するとコミット不可。`--no-verify` での回避はユーザー明示指示がない限り禁止。
+#
+# ■ モノレポ固有の要点:
+#   - **触っていないサブツリーの検証は走らせない** (backend だけの変更で npm を叩かない)。
+#     CI の path filter (MR-1) と同じ考え方を hook 側にも入れる。
+#   - パスは**リポジトリルートからの相対** (`backend/...` / `frontend/...` / `api/...`) で判定する。
+set -uo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+staged=$(git diff --cached --name-only --diff-filter=ACM || true)
+be_staged=$(echo "$staged" | grep -E '^backend/'  || true)
+fe_staged=$(echo "$staged" | grep -E '^frontend/' || true)
+api_staged=$(echo "$staged" | grep -E '^api/'     || true)
+
+if [[ -z "$be_staged" && -z "$fe_staged" && -z "$api_staged" ]]; then
+  echo "[pre-commit] backend / frontend / api に変更なし — スキップ"
+  echo "[pre-commit] OK"
+  exit 0
+fi
+
+# =========================================================================
+# backend (Go)
+# =========================================================================
+if [[ -n "$be_staged" || -n "$api_staged" ]] && [[ ! -f backend/go.mod ]]; then
+  # **無言でスキップしない** (2026-08-04 に是正。design-reviewer 指摘 軽微 3)。
+  # frontend 側は node_modules 未導入で WARN を出すのに、backend 側は黙って通っていた。
+  echo "[pre-commit] WARN: backend/go.mod がありません — backend のチェックをスキップ" >&2
+fi
+
+if [[ -n "$be_staged" || -n "$api_staged" ]] && [[ -f backend/go.mod ]]; then
+  go_staged=$(echo "$be_staged" | grep -E '\.go$' || true)
+
+  echo "[pre-commit] backend: go build ./..."
+  if ! (cd backend && go build ./...); then
+    echo "[pre-commit] FAIL: go build ./... (backend)" >&2
+    exit 1
+  fi
+
+  echo "[pre-commit] backend: go vet ./..."
+  if ! (cd backend && go vet ./...); then
+    echo "[pre-commit] FAIL: go vet ./... (backend)" >&2
+    exit 1
+  fi
+
+  if [[ -n "$go_staged" ]]; then
+    # backend/ プレフィックスを外して backend から見た相対パッケージにする
+    pkgs=$(echo "$go_staged" | sed 's#^backend/##' | xargs -n1 dirname | sort -u | sed 's#^#./#')
+    echo "[pre-commit] backend: go test (変更パッケージ): $(echo "$pkgs" | tr '\n' ' ')"
+    # shellcheck disable=SC2086
+    if ! (cd backend && go test $pkgs); then
+      echo "[pre-commit] FAIL: go test (変更パッケージ / backend)" >&2
+      exit 1
+    fi
+  else
+    echo "[pre-commit] backend: Go 変更なし — go test スキップ"
+  fi
+fi
+
+# =========================================================================
+# frontend (TypeScript)
+# =========================================================================
+if [[ -n "$fe_staged" || -n "$api_staged" ]]; then
+  ts_staged=$(echo "$fe_staged" | grep -E '\.(ts|tsx)$' || true)
+
+  if [[ ! -d frontend/node_modules ]]; then
+    echo "[pre-commit] WARN: frontend/node_modules 未インストール — FE のチェックをスキップ (npm ci 推奨)" >&2
+  elif [[ -z "$ts_staged" ]]; then
+    echo "[pre-commit] frontend: TS 変更なし — スキップ"
+  else
+    echo "[pre-commit] frontend: tsc --noEmit"
+    if ! (cd frontend && npx tsc --noEmit); then
+      echo "[pre-commit] FAIL: 型エラーを修正してから再コミットしてください" >&2
+      exit 1
+    fi
+
+    # 差分に対応するテストのみ実行 (全体は CI)。テストランナーの --related 相当を使う。
+    rel=$(echo "$ts_staged" | sed 's#^frontend/##' | tr '\n' ' ')
+    echo "[pre-commit] frontend: 関連テスト"
+    # **関連テストが 0 件のときに落とさない** (2026-08-04 に是正。design-reviewer 指摘 中 12)。
+    # `vitest related` は該当テストが 1 件も無いと非 0 で終わる実装があり、
+    # **`--no-verify` が禁止されているため「型定義だけ触った PR がコミットできない」**という
+    # 回避不能な詰まりになる。**`--passWithNoTests` で 0 件を正常終了として扱う**。
+    # (「テストが無い」ことの担保は CI の「検査 1 併置テストの存在」が持つ — hook の仕事ではない)
+    # shellcheck disable=SC2086
+    if ! (cd frontend && npx vitest related --run --passWithNoTests $rel); then
+      echo "[pre-commit] FAIL: テストが通りません" >&2
+      exit 1
+    fi
+  fi
+fi
+
+# =========================================================================
+# 非ブロックの注意喚起
+# =========================================================================
+
+# --- 生成物の追従漏れ検出 (backend) --------------------------------------
+schema_staged=$(echo "$be_staged" | grep -E '^backend/db/(schema\.sql|queries/)' || true)
+gen_staged=$(echo "$be_staged" | grep -E '^backend/(db/rdb/.*\.sql\.go|common/di/wire_gen\.go)$' || true)
+if [[ -n "$schema_staged" && -z "$gen_staged" ]]; then
+  echo "[pre-commit] 注意: スキーマ/クエリを変更していますが生成物 (sqlc/wire) が含まれていません。"
+  echo "[pre-commit] 　　　 make -C backend sqlc / wire の実行漏れがないか確認してください。"
+fi
+
+# --- OpenAPI 契約の追従漏れ検出 (MR-3 の pre-commit 側) --------------------
+# Controller の IF を変えたら api/openapi.yaml を再生成する。
+# **これは CI の contract ジョブ (MR-3) が必ず落とす** — hook は早めに気付かせるだけ。
+ctrl_staged=$(echo "$be_staged" | grep -E '^backend/controller/' || true)
+if [[ -n "$ctrl_staged" && -z "$api_staged" ]]; then
+  echo "[pre-commit] 注意: Controller を変更していますが api/openapi.yaml の更新が含まれていません。"
+  echo "[pre-commit] 　　　 IF 変更なら make -C backend docs で再生成してください (CI の contract が落ちます)。"
+fi
+
+# --- 生成型の手編集検出 (frontend) ---------------------------------------
+fe_gen_staged=$(echo "$fe_staged" | grep -E '^frontend/src/generated/' || true)
+if [[ -n "$fe_gen_staged" ]]; then
+  echo "[pre-commit] 注意: API 型の生成物を変更しています:"
+  echo "$fe_gen_staged" | sed 's/^/[pre-commit]   /'
+  echo "[pre-commit] 手編集ではなく api/openapi.yaml の更新 → npm run generate で対応してください。"
+fi
+
+# --- 破壊的 API 変更の同梱検出 (MR-6) -------------------------------------
+# api/openapi.yaml と frontend/src/generated が同じコミットに入るのは
+# 「後方互換な変更」または「破壊的変更の ② FE 切替」のどちらか。
+# 破壊的変更の ①②③ を 1 PR に同梱してはいけない (architecture.md §3.11.2 の MR-6)。
+if [[ -n "$api_staged" && -n "$fe_staged" ]]; then
+  echo "[pre-commit] 注意: api/ と frontend/ を同じコミットに含んでいます。"
+  echo "[pre-commit] 　　　 破壊的 API 変更の場合、①新旧併存 / ②FE 切替 / ③旧削除 は PR を分けてください (MR-6)。"
+  echo "[pre-commit] 　　　 後方互換な変更なら同梱して構いません。PR テンプレート §5 で宣言すること。"
+fi
+
+# --- Managed Agent 再発行の注意喚起 (backend) ----------------------------
+# system prompt / custom tool schema を変えたら Agent 再発行が必要 (BE-8 / BE-10)。
+agent_staged=$(echo "$be_staged" | grep -E '^backend/(prompts/.*|.*conversation_tools.*\.go|.*agent.*schema.*)$' || true)
+if [[ -n "$agent_staged" ]]; then
+  echo "[pre-commit] 注意: Managed Agent の system prompt / tool schema に影響する変更を含みます:"
+  echo "$agent_staged" | sed 's/^/[pre-commit]   /'
+  echo "[pre-commit] Agent の再発行が必要か確認してください (BE-8 / BE-10)。"
+fi
+
+echo "[pre-commit] OK"

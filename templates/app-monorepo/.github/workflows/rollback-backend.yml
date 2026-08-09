@@ -1,6 +1,6 @@
 name: Rollback
 
-# backend リポジトリ雛形。**ロールバックの唯一の起動経路**。
+# app モノレポ雛形 — **`backend/` サブツリーのロールバックの唯一の起動経路**。
 # <...> のプレースホルダを実構成に合わせて置換する。
 #
 # なぜワークフローにするのか (hassan_v3 docs/design/operations.md §4.1 / §5.3):
@@ -9,7 +9,7 @@ name: Rollback
 #   - prod は environment 承認を通す (H-4 と同じ承認者)。dev は承認なしで即実行する
 #
 # 設計上の要点:
-#   - **deploy.yml から自動起動しない**。deploy.yml の失敗時ステップはこの workflow の起動を促すだけ。
+#   - **deploy-backend.yml から自動起動しない**。deploy-backend.yml の失敗時ステップはこの workflow の起動を促すだけ。
 #     自動で戻すと、原因が DB 側にある場合にアプリだけ戻り、状態の組み合わせが増える
 #   - **Agent ID / Environment ID は「起動時に 1 回解決」される値** (operations.md §3.3 の⑤)。
 #     SSM を前バージョンへ戻すだけでは稼働中タスクに反映されないため、**必ずタスク置換まで行う**
@@ -42,7 +42,7 @@ permissions:
   contents: read
   id-token: write             # OIDC で AWS ロールを引き受ける
 
-# deploy.yml と同じ group を使い、**デプロイとロールバックが同時に走らない**ようにする。
+# deploy-backend.yml と同じ group を使い、**デプロイとロールバックが同時に走らない**ようにする。
 # 承認待ちをキャンセルしない。
 concurrency:
   group: deploy-${{ inputs.environment }}
@@ -92,15 +92,16 @@ jobs:
         #   /hassan-v3/<env>/agent/<name>/source-hash      ← CI だけが読み書きする
         # 前バージョンの値は SSM のパラメータ履歴から取得する (版履歴が切り戻し手段。OP-E)。
         #
-        # **未実装のまま緑にしない** (deploy.yml の 3 者一致検査と同じ扱い)。
+        # **未実装のまま緑にしない** (deploy-backend.yml の 3 者一致検査と同じ扱い)。
         # ここが無言で通ると「SSM は戻っていないのに②でタスクだけ置換され、
         # 新コード + 新 Agent のまま = 何も戻っていない」状態でジョブが成功する。
         run: |
           set -euo pipefail
-          if [ -x scripts/rollback-agent.sh ]; then
-            bash scripts/rollback-agent.sh "${{ inputs.environment }}"
+          # **パスは backend/ サブツリー配下** (モノレポ)
+          if [ -x backend/scripts/rollback-agent.sh ]; then
+            bash backend/scripts/rollback-agent.sh "${{ inputs.environment }}"
           else
-            echo "::error::scripts/rollback-agent.sh が未実装です。" \
+            echo "::error::backend/scripts/rollback-agent.sh が未実装です。" \
                  "target=service+agent での切り戻しは実行できません" \
                  "(要求動作: <prompts/agents.yaml> の列挙ごとに /hassan-v3/<env>/agent/<name>/id と" \
                  " /hassan-v3/<env>/anthropic/environment-id を get-parameter-history の直前バージョンへ put-parameter し、" \
@@ -116,7 +117,7 @@ jobs:
         run: |
           set -euo pipefail
           ecspresso rollback \
-            --config=<stacks>/${{ inputs.environment }}/ecspresso.yml \
+            --config=<backend/stacks>/${{ inputs.environment }}/ecspresso.yml \
             --wait-until=service-stable
 
       # target = service+agent の場合、① で SSM を戻しただけでは反映されないため、

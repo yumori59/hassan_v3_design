@@ -4,7 +4,9 @@ hassan_v3 の設計 (`<hassan_v3 の絶対パス>/docs/design/infrastructure.md`
 **AWS を Terraform で管理する** (ユーザー指定: 全て IaC)。
 対象: VPC / ALB / ECS (クラスタ・サービス) / RDS PostgreSQL / IAM / Secrets Manager / CloudWatch。
 
-**3 リポジトリ構成**: このリポジトリは infra のみ。backend (Go / ECS) と frontend (Next.js / Vercel) は別リポ。
+**2 リポジトリ構成**: このリポジトリは infra のみ。アプリ (backend = Go / ECS、frontend = Next.js / Vercel) は
+**app モノレポ** 1 つにまとまっている。**依存順序は `infra → app`** で、
+**このリポジトリの PR はマージだけでは効かない — `apply` 済みが app 側の着手条件**。
 **このリポジトリの出力 (RDS エンドポイント / ECS クラスタ名 / Secrets ARN) が backend の入力**。
 
 ## コマンド
@@ -59,7 +61,7 @@ terraform fmt -check -recursive → terraform validate → <tflint> → terrafor
 | ファイル | 内容 |
 |---|---|
 | `.claude/rules/01-construction-loop.md` | **1 issue の作業ループ (S-1〜S-10)。全作業の起点** |
-| `.claude/rules/02-issue-granularity.md` | issue の粒度・DoD (V-1〜V-10)・3 リポ跨ぎのマージ順序 |
+| `.claude/rules/02-issue-granularity.md` | issue の粒度・DoD (V-1〜V-10)・リポ跨ぎのマージ順序 |
 | `.claude/rules/03-model-escalation.md` | モデルの既定・昇格判定 (M-1〜M-4 / T-1〜T-3) |
 | `.claude/rules/04-human-checkpoints.md` | 人間承認点 (H-1〜H-5) と機構・自律範囲 |
 | `.claude/agents/infra-engineer.md` | Terraform 実装エージェント (実装専任) |

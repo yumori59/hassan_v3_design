@@ -1,6 +1,7 @@
 name: Deploy
 
-# backend リポジトリ雛形 (Q-7=B: Terraform = 基盤 / ecspresso = サービス定義・タスク定義・リリース)。
+# app モノレポ雛形 — **`backend/` サブツリーのデプロイ**
+# (Q-7=B: Terraform = 基盤 / ecspresso = サービス定義・タスク定義・リリース)。
 # <...> のプレースホルダを実構成に合わせて置換する。
 #
 # 設計上の要点 (docs/design/architecture.md の D-G / D-6 / AC-3.3):
@@ -22,6 +23,14 @@ name: Deploy
 on:
   push:
     branches: [main]          # → dev へ継続デプロイ (承認なし。C-15)
+    # **`ci.yml` の backend ジョブを起動する条件 ⊆ 本 paths** にする (モノレポ機構の MR-1)。
+    # 追加分 (デプロイ定義自身の変更など) は理由をコメントで書くこと。
+    # 両方向を `make check-monorepo-ci` の検査⑤ (deploy ⊆ ci) と検査⑪ (ci の backend ⊆ deploy) が見る。
+    # 片方だけ更新すると「CI は走ったがデプロイされない」/「CI が見ていない変更でデプロイされる」が起きる。
+    paths:
+      - 'backend/**'
+      - 'api/**'
+      - '.github/workflows/deploy-backend.yml'
   workflow_dispatch:          # → prod への手動リリース (H-4)
     inputs:
       environment:
@@ -79,7 +88,9 @@ jobs:
         run: |
           IMAGE_TAG="$(date +%Y%m%d)-${GITHUB_SHA::8}"
           IMAGE="${{ steps.ecr.outputs.registry }}/<ECR リポジトリ名>:${IMAGE_TAG}"
-          docker build -f <Dockerfile のパス> -t "$IMAGE" .
+          # **ビルドコンテキストは backend/** (モノレポのためルートを渡さない —
+          # frontend/ と node_modules がコンテキストに含まれ、ビルドが無駄に重くなる)
+          docker build -f <backend/Dockerfile のパス> -t "$IMAGE" backend
           docker push "$IMAGE"
           echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
@@ -331,10 +342,12 @@ jobs:
         #     (列挙漏れが「再発行されない」に倒れるのを防ぐ)
         # 未実装なら落とす (無言のスキップにしない — ci.yml と同じ扱い)
         run: |
-          if [ -x scripts/check-tool-contract.sh ]; then
-            bash scripts/check-tool-contract.sh
+          # **パスは backend/ サブツリー配下** (モノレポ。ci.yml は working-directory で
+          # 同じスクリプトを `scripts/...` として呼ぶ — 実体は同一ファイル)
+          if [ -x backend/scripts/check-tool-contract.sh ]; then
+            bash backend/scripts/check-tool-contract.sh
           else
-            echo "::error::scripts/check-tool-contract.sh が未実装です (設計: D-6 / BE-8)"
+            echo "::error::backend/scripts/check-tool-contract.sh が未実装です (設計: D-6 / BE-8)"
             exit 1
           fi
 
@@ -407,7 +420,7 @@ jobs:
         run: |
           echo "::error::Agent の再発行に失敗しました。**アプリのリリースは実行されません**"
           echo "  SSM の Agent ID / Environment ID を前バージョンへ戻し、コードも旧イメージのまま維持する"
-          echo "  稼働中タスクは古い ID を保持し続けているため、戻した後にタスクを置換する (rollback.yml)"
+          echo "  稼働中タスクは古い ID を保持し続けているため、戻した後にタスクを置換する (rollback-backend.yml)"
 
   # === 4. サービスのリリース (H-4) ==========================================
   release:
@@ -441,10 +454,49 @@ jobs:
         with:
           version: v2
 
+      # === app ↔ infra の契約を実行時に検証する (2026-08-05 に追加) ==========
+      # **`ecspresso` の定義は tfstate から クラスタ名 / subnet ID / SG ID /
+      #   ターゲットグループ ARN / シークレット ARN を解決する** (infrastructure.md §4.2)。
+      # これは **app と infra に跨る契約**であり、**どちらのリポの CI も静的に照合できない**
+      # (app 側は tfstate を持たず、infra 側は ecspresso の定義を持たない)。
+      # `api/openapi.yaml` が MR-3 で解決した問題が、app ↔ infra には残っている
+      # (設計: hassan_v3 `docs/design/architecture.md` §3.11.4)。
+      #
+      # **静的検査の代わりに、デプロイ直前の実行時検証で受ける**。
+      # `verify` は定義が参照する ARN / ID・イメージ・シークレット・ロールが**実在するか**を
+      # AWS 側に問い合わせて確かめる。これが無いと、
+      #   - infra の `apply` 漏れ
+      #   - ターゲットグループの作り直しによる ARN 変更
+      #   - シークレットの改名
+      # が「`deploy` が古い ID で成功してしまう」形ではなく**何も検知されないまま**進む。
+      #
+      # **`verify` の失敗は `deploy` を止める** (`set -e` 相当。ジョブが失敗する)。
+      - name: 契約の実行時検証 (ecspresso verify)
+        run: |
+          set -euo pipefail
+          # `--no-color` は GitHub のログで ANSI が読みにくくなるのを避けるため
+          ecspresso verify \
+            --config=<backend/stacks/${ENV_NAME}/ecspresso.yml> \
+            --tasks-config-env IMAGE="${IMAGE}" \
+            --no-color
+        # 失敗時に何を疑うかを出す (原因が infra 側にあることが多く、app 側を見ても分からない)
+        continue-on-error: false
+
+      - name: verify 失敗時の切り分け手順
+        if: failure()
+        run: |
+          echo "::error::ecspresso verify が失敗しました。**app ↔ infra の契約が壊れています**"
+          echo "  疑う順序 (hassan_v3 docs/design/architecture.md §3.11.4):"
+          echo "  1. infra の PR がマージされたが **apply されていない** (最頻。§6.3 の着手条件)"
+          echo "  2. ターゲットグループ / シークレットが**作り直され ARN が変わった**"
+          echo "  3. tfstate の参照先 (バケット / キー) が変わった"
+          echo "  4. デプロイ用 IAM ロールに tfstate バケットの読み取り権限が無い (INF-I)"
+          echo "  **app 側のコードを見ても原因は分かりません** — infra リポの apply 状況を先に確認してください"
+
       - name: デプロイ
         run: |
           ecspresso deploy \
-            --config=<stacks/${ENV_NAME}/ecspresso.yml> \
+            --config=<backend/stacks/${ENV_NAME}/ecspresso.yml> \
             --tasks-config-env IMAGE="${IMAGE}" \
             --wait-until=service-stable
           # タスク定義は ecspresso のテンプレート機能で IMAGE を差し込む
@@ -455,53 +507,36 @@ jobs:
         # **自動で戻さない** — 原因が DB 側にある場合にアプリだけが戻り、状態の組み合わせが増える
         # (hassan_v3 docs/design/operations.md §5.3)。起動先を出力するだけにする
         run: |
-          echo "::error::デプロイに失敗しました。ロールバックは rollback.yml (workflow_dispatch) から起動する:"
-          echo "  gh workflow run rollback.yml -f environment=${ENV_NAME} -f target=service -f reason=\"<障害の症状を 1 行で>\""
+          echo "::error::デプロイに失敗しました。ロールバックは rollback-backend.yml (workflow_dispatch) から起動する:"
+          echo "  gh workflow run rollback-backend.yml -f environment=${ENV_NAME} -f target=service -f reason=\"<障害の症状を 1 行で>\""
           echo "  (実行できるのは prod* environment の承認者。個人の AWS 認証情報では実行しない)"
-          echo "  中身: ecspresso rollback --config=<stacks/${ENV_NAME}/ecspresso.yml> --wait-until=service-stable"
+          echo "  中身: ecspresso rollback --config=<backend/stacks/${ENV_NAME}/ecspresso.yml> --wait-until=service-stable"
           echo "  Agent を再発行済みの場合は target=service+agent を選ぶ — SSM の Agent ID / Environment ID を"
           echo "  前バージョンへ戻したうえでタスクを置換する (04-human-checkpoints.md §2.3 / operations.md §5.3)"
           echo "  マイグレーションを適用済みの場合、非破壊なら戻さない / 破壊的ならスナップショットから復元する"
 
-      # === dev デプロイ完了を frontend リポへ通知する (E2E のトリガー) ==================
+      # === E2E の起動 (dev のみ) ==========================================
       # hassan_v3 docs/design/testing.md §7.4: E2E は「main マージ後の dev デプロイ完了」に回す。
-      # **FE の e2e.yml は repository_dispatch (types: dev-deployed) を待っている** —
-      # 送信側がここに無いと、そのトリガーは永久に発火しない (機構の無い設計になる)。
       #
-      # 前提: **クロスリポジトリの dispatch には frontend リポへの権限を持つトークンが必要**
-      # (`GITHUB_TOKEN` は自リポジトリにしか効かない)。GitHub App のインストールトークンか
-      # fine-grained PAT を `E2E_DISPATCH_TOKEN` として dev environment に登録する
-      # (operations.md §4.1 の「置いてよい値」の例外として扱う判断が要る = 要確認)。
+      # **モノレポ化で送信側の実装が不要になった** (2026-08-03。D-I の方針転換):
+      # 3 リポ構成では frontend が別リポだったため、ここから **クロスリポジトリの
+      # `repository_dispatch`** を打つ必要があり、そのために **`E2E_DISPATCH_TOKEN`**
+      # (GitHub 側に置く唯一のシークレット例外 — operations.md §4.1) を持つ必要があった。
+      # モノレポでは `e2e.yml` が同一リポジトリにあるため、**`workflow_run` トリガーで
+      # このワークフローの完了を直接受け取れる** → 送信側のステップもトークンも不要。
       #
-      # トークン未設定でもデプロイは失敗させない (E2E はブロックしない設計 — testing.md §7.4)。
-      # ただし**無言のスキップにはせず警告を出す** (トリガーが死んでいることに気付けるように)。
-      - name: E2E の起動通知 (dev のみ)
+      # ⚠️ **`repository_dispatch` を `GITHUB_TOKEN` で打つ形に置き換えてはいけない** —
+      # GitHub は `GITHUB_TOKEN` 起因のイベントで新しいワークフロー実行を起動しない
+      # (無限ループ防止)。同一リポジトリでは `workflow_run` が唯一成立する経路である。
+      #
+      # 受信側 = `e2e.yml` の `on.workflow_run` (workflows: [Deploy] / types: [completed])。
+      # dev / prod の判別は `github.event.workflow_run.event` (`push` = dev 継続デプロイ /
+      # `workflow_dispatch` = prod) で行う。**この対応を壊すと E2E が prod デプロイでも回る**。
+      - name: E2E の起動方法 (記録用。dev のみ)
         if: needs.build.outputs.env_name == 'dev'
-        env:
-          DISPATCH_TOKEN: ${{ secrets.E2E_DISPATCH_TOKEN }}
-          FRONTEND_REPO: <owner/frontend-repo>
         run: |
-          set -uo pipefail
-          if [ -z "${DISPATCH_TOKEN:-}" ]; then
-            echo "::warning::E2E_DISPATCH_TOKEN が未設定のため E2E を起動できません" \
-                 "(frontend の e2e.yml は repository_dispatch を待っています)。" \
-                 "nightly では回りますが、このデプロイに対する E2E は実行されません"
-            exit 0
-          fi
-          # **HTTP ステータスを明示的に見る** — `curl -sS` は 4xx / 5xx でも終了コード 0 を返すため、
-          # `|| echo` だけでは「トークンが無効で通知できていない」ことに永久に気付けない
-          # (dispatch の成功は 204 No Content)。
-          HTTP_CODE=$(curl -sS -o /tmp/dispatch-res.txt -w '%{http_code}' -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${DISPATCH_TOKEN}" \
-            "https://api.github.com/repos/${FRONTEND_REPO}/dispatches" \
-            -d "{\"event_type\":\"dev-deployed\",\"client_payload\":{\"sha\":\"${GITHUB_SHA}\"}}" || echo "000")
-          if [ "$HTTP_CODE" = "204" ]; then
-            echo "E2E の起動通知に成功しました (204)"
-          else
-            # **デプロイは失敗させない** (E2E はブロックしない設計) が、**警告は必ず出す**
-            echo "::warning::E2E の起動通知に失敗しました (HTTP ${HTTP_CODE})。" \
-                 "トークンの権限 (frontend リポの dispatch) と FRONTEND_REPO の値を確認してください。" \
-                 "E2E は nightly では回りますが、このデプロイに対する E2E は実行されません"
-            head -c 500 /tmp/dispatch-res.txt || true
-          fi
+          echo "E2E は e2e.yml の workflow_run トリガーが本 workflow の完了を受けて起動します。"
+          echo "  受信条件: workflow_run.conclusion == 'success' && workflow_run.event == 'push'"
+          echo "  対象 SHA: ${GITHUB_SHA} (受信側は github.event.workflow_run.head_sha で参照)"
+          echo "  E2E は何もブロックしません (testing.md §7.4)。赤は通知のみ。"
+          echo "  ただし **E2E が赤のまま prod デプロイ (H-4) を進めない** (04 §1.1 の承認材料)。"

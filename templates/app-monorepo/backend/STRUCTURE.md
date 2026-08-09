@@ -75,7 +75,7 @@
 ### 1.2 `.claude/` の配置 (雛形は `agents/` + backend 固有の `rules/05-architecture-coding-rules.md`。
 共通 `rules/` `skills/` は立ち上げ時に合流)
 
-**決定と立ち上げ手順の正は [`../README.md`](../README.md)** (本節は概要のみ。二重管理しない)。
+**決定と立ち上げ手順の正は [`../../README.md`](../../README.md)** (本節は概要のみ。二重管理しない)。
 
 - **`aidlc-planner` / `architecture-designer` / `design-reviewer` / `poc-analyst` は設計リポ (hassan_v3) 側に残す** —
   実装リポには持ってこない (設計判断は hassan_v3 で行う。役割分離は `.claude/rules/02-agents.md` と同じ理由)
@@ -154,7 +154,7 @@
 | `entity/toolresult/` | ツール 1 本ごとの結果型 + 共通エンベロープ `Result` (`Payload` は marker interface) | 設計 §3.8.5 (BE-12)。書き手・読み手・テストが同じ宣言を使う |
 | `common/di/provider.go` · `wire.go` · `wire_gen.go` | 依存グラフの組み立て。`wire_gen.go` は生成物で**手編集禁止** | v2 踏襲 (`hassan-v2-backend/di/`) |
 | `prompts/agents.yaml` | Agent 名 → system prompt のパス + tool schema の列挙 | 再発行トリガのハッシュ対象。`check-tool-contract.sh` が実発行対象との一致を検査する |
-| `testdata/golden/toolresult/<tool>.json` | 型から生成した golden。**手書きしない** | 設計 `testing.md` §5.3。CI の `make golden` + `git diff --exit-code` が再生成漏れを落とす |
+| `testdata/golden/toolresult/<tool>.json` | 型から生成した golden。**手書きしない** | 設計 `testing.md` §5.3。CI の `make golden` + **`scripts/check-regen.sh backend/testdata/golden`** が再生成漏れを落とす (**新規 golden の追加漏れ**も見るため裸の `git diff` は使わない) |
 
 ### gateway に置くもの (第 1 リリース)
 
@@ -205,5 +205,15 @@
 | `account` | 認証・アカウント基盤の 37 本 | 同上。`db/queries/account/` は v2 移植分として設計 `data-model.md` §3.6 に記載がある |
 | `ops` | `llm_call_records` / `audit_logs` / レート制限 | 同上。ドメインではなく運用系のため、どの区分に置くかが未決 |
 
-その他、**OpenAPI 定義の出力先** (`make docs` の生成先) は設計で確定していないため、
-ディレクトリを作っていない。frontend の型生成の入力になるため、実装リポで決めたら本ファイルに追記する。
+### OpenAPI 定義の出力先 (2026-08-03 に確定)
+
+**`make docs` の生成先は `../api/openapi.yaml`** (app モノレポのルート直下 `api/`)。
+**`backend/` の中には置かない** — `frontend/` の orval が入力として読むため、
+**どちらのサブツリーにも属さない契約の置き場**として `api/` を切っている
+(設計 `architecture.md` §3.11 / D-I。3 リポ構成では出力先も受け渡し方法も未確定だった)。
+
+- **`api/openapi.yaml` は生成物。手編集しない**
+- 再生成漏れは CI の `contract` ジョブ (MR-3) が落とす。
+  検査は **`scripts/check-regen.sh api/openapi.yaml`** を通す —
+  裸の `git diff --exit-code` は**未追跡ファイルを見ない**ため、
+  **初回生成 (雛形の `api/` は `.gitkeep` のみ) が必ず素通りする**

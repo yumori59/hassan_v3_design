@@ -1,4 +1,8 @@
-# .golangci.yml — <backend-repo-name> (バックエンド) の層規約の機械強制
+# .golangci.yml — app モノレポの `backend/` サブツリーの層規約の機械強制
+#
+# **このファイルは backend/ のルートに置く** (サブツリー自己完結。architecture.md §3.11.1)。
+# CI は `working-directory: backend` で golangci-lint を走らせるため、`files:` の相対パターンと
+# depguard の規則 (モジュールパス基準) は 3 リポ構成のときから変更不要である。
 #
 # 設計リポ (hassan_v3) の docs/design/architecture.md が正。転記元:
 #   §3.5.1  依存規則 L-1〜L-6 と depguard での表現

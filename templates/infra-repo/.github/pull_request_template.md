@@ -60,7 +60,7 @@ V-2 / V-3 は `modules/` の `terraform test` に適用する。`envs/` のみ�
 ## 5. 依存と後続
 
 - 依存 issue (他リポ): **なし (このリポが依存の先頭)** / `<owner>/<repo>#N`
-- **このリポの出力を待っている後続 issue**: `<owner>/<backend-repo>#N` (この PR の `apply` 完了後に着手可) / なし
+- **このリポの出力を待っている後続 issue**: `<owner>/<app-repo>#N` (この PR の `apply` 完了後に着手可) / なし
 - 出力値 (RDS エンドポイント / ECS クラスタ名 / Secrets ARN) の変更: なし / あり
   - ある場合、受け取り側 (backend / frontend) の対応 issue と、先に確認した内容:
 

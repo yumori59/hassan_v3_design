@@ -39,8 +39,10 @@ while IFS= read -r fdir; do
     continue
   fi
 
-  # requirements から AC-ID を抽出 (AC-1 / AC-1.2 / AC-12.3 形式)
-  acs=$(grep -ohE '\bAC-[0-9]+(\.[0-9]+)?' $reqs | sort -u -V 2>/dev/null || grep -ohE '\bAC-[0-9]+(\.[0-9]+)?' $reqs | sort -u)
+  # requirements から AC-ID を抽出 (AC-1 / AC-1.2 / AC-12.3 / 接頭辞付きの AC-CV-1.1 形式)
+  # 接頭辞付きを拾わないと、増分ごとに名前空間を分けた AC が「照合対象ゼロ」で素通りする (DR-6)
+  ac_re='\bAC-([A-Z]{2,}-)?[0-9]+(\.[0-9]+)?'
+  acs=$(grep -ohE "$ac_re" $reqs | sort -u -V 2>/dev/null || grep -ohE "$ac_re" $reqs | sort -u)
   if [[ -z "$acs" ]]; then
     echo "[traceability] $feature: AC-ID の定義なし — スキップ (受入基準に AC-ID を振ること)"
     continue

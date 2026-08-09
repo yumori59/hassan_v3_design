@@ -1,6 +1,6 @@
 name: E2E
 
-# frontend リポジトリ雛形。**E2E (Playwright) の実行機構**。
+# app モノレポ雛形 — **E2E (Playwright) の実行機構** (`frontend/` サブツリーのテストを実行する)。
 # <...> のプレースホルダを実構成に合わせて置換する。
 #
 # 設計の SSOT: 設計リポ hassan_v3 `docs/design/testing.md` §7 (T-J / T-K)。
@@ -18,11 +18,20 @@ name: E2E
 
 on:
   # ① main マージ後の dev デプロイ完了をトリガーにする。
-  #    FE の dev デプロイは Vercel が行うため、GitHub Actions からは完了を直接知れない。
-  #    このため **BE 側の dev デプロイ完了 (deploy.yml) から repository_dispatch で叩く**か、
-  #    下の workflow_run / schedule のいずれかを選ぶ (実装リポで 1 つに決める)。
-  repository_dispatch:
-    types: [dev-deployed]
+  #    **モノレポでは `workflow_run` が唯一成立する経路** (2026-08-03。D-I の方針転換):
+  #    3 リポ構成では frontend が別リポだったため BE 側からクロスリポジトリの
+  #    `repository_dispatch` を打つ必要があり、そのための `E2E_DISPATCH_TOKEN` が
+  #    「GitHub 側に置く唯一のシークレット例外」だった (operations.md §4.1)。
+  #    同一リポジトリになったのでトークンは不要になった。
+  #    ⚠️ `repository_dispatch` を `GITHUB_TOKEN` で打つ形にはできない —
+  #    GitHub は `GITHUB_TOKEN` 起因のイベントで新しい実行を起動しない (無限ループ防止)。
+  #
+  #    FE 自体の dev デプロイは Vercel が行い GitHub Actions からは完了を知れないため、
+  #    **BE の dev デプロイ完了を「dev が新しくなった」の代理シグナルとして使う**
+  #    (FE のみの変更では BE のデプロイが走らないため、その場合は nightly (②) が拾う)。
+  workflow_run:
+    workflows: [Deploy]        # deploy-backend.yml の `name:`。**リネームしたらここも直す**
+    types: [completed]
 
   # ② nightly (dev の状態を毎日確認する)
   schedule:
@@ -49,17 +58,40 @@ jobs:
   e2e:
     name: Playwright (dev)
     runs-on: ubuntu-latest
-    # dev の資格情報を environment secret から取る (リポジトリ全体の変数に置かない)。
-    environment: dev
+    # **workflow_run 起動時は「成功した dev デプロイ」だけを受ける**。
+    # `workflow_run.event == 'push'` が dev 継続デプロイ / `workflow_dispatch` が prod なので、
+    # これを外すと **prod デプロイでも E2E が dev に対して走る**。
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    # **専用 environment `dev-e2e` を使う** (2026-08-05 に変更。design-reviewer 指摘 D-4)。
+    # モノレポでは backend のデプロイと E2E が同一リポジトリのため、
+    # **`environment: dev` を共有すると OIDC の `sub` クレームが同一になり、
+    # E2E のワークフローが dev のデプロイ用ロール (ECR push / ecspresso) を引き受けられる**。
+    # 3 リポ構成では `repo:` クレームで分離できていた担保が消えている
+    # (設計: hassan_v3 `docs/design/infrastructure.md` §4.5)。
+    # `dev-e2e` に承認者は設定しない (自動実行のまま)。付与する権限は
+    # **Secrets Manager の read のみ** (E2E 用アカウントの資格情報)。
+    environment: dev-e2e
     timeout-minutes: 30         # 設計上の全体目安 15 分 + 余裕 (testing.md §3 の E 段)
+    defaults:
+      run:
+        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
+        with:
+          # workflow_run 起動では既定の ref が「デフォルトブランチの最新」になるため、
+          # **デプロイされた commit を明示的に checkout する** (テストとデプロイ対象のずれを防ぐ)
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: <バージョン>
+          # アクションの入力は working-directory の影響を受けないためルートからのパスで書く
+          node-version-file: frontend/.node-version
           cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: install
         run: npm ci
@@ -158,26 +190,36 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
+          # **アクションの `path:` は `defaults.run.working-directory` に従わない** —
+          # ルートからのパスで書く (置換時に `frontend/` を落とすとレポートが空になる)
           path: |
-            <playwright-report/>
-            <test-results/>
+            frontend/<playwright-report/>
+            frontend/<test-results/>
           retention-days: 14
 
       - name: 結果の要約 (H-4 の承認材料になる)
         if: always()
+        env:
+          # **モノレポでは BE と FE が同一 commit** なので、検証対象は 1 つの SHA で一意に決まる
+          # (3 リポ構成では E2E が frontend リポで走り `github.sha` が FE 側だったため、
+          #  BE 側 commit を `client_payload.sha` で別途運んでいた — その分岐は不要になった)。
+          # `workflow_run` 起動時の `github.sha` は**デフォルトブランチの最新**であり
+          # checkout した ref とは別物になるため、**`head_sha` を使う**。
+          TARGET_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
         run: |
           {
             echo "## E2E (dev)"
             echo "- 起動理由: ${{ github.event_name }} ${{ inputs.reason }}"
-            echo "- FE の対象 commit: \`${{ github.sha }}\`"
-            # BE 側の commit は repository_dispatch の client_payload.sha で渡ってくる。
-            # **nightly / 手動実行では BE の commit が不明** なので、その旨を明示する
-            # (H-4 の承認材料に使えるのは dispatch 起動の結果だけ — testing.md §7.4)
-            if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-              echo "- BE の対象 commit: \`${{ github.event.client_payload.sha }}\`"
+            if [ "${{ github.event_name }}" = "workflow_run" ]; then
+              # dev デプロイ完了を受けた実行 = **H-4 の承認材料として使える唯一の形**
+              echo "- 検証対象 commit (BE / FE 共通): \`${TARGET_SHA}\`"
+              echo "  (dev デプロイ完了 \`${{ github.event.workflow_run.name }}\` #${{ github.event.workflow_run.run_number }} を受けて起動)"
+              echo "- **H-4 の承認材料として使える**"
             else
-              echo "- BE の対象 commit: **不明** (${{ github.event_name }} 起動のため)。"
-              echo "  **この結果は H-4 の承認材料に使わない** (testing.md §7.4)"
+              # nightly / 手動実行は「どの commit が dev に載っているか」を特定できない
+              echo "- 検証対象 commit: **不明** (${{ github.event_name }} 起動のため)。"
+              echo "  チェックアウトした ref は \`${TARGET_SHA}\` だが、**dev に載っているコードと一致する保証は無い**"
+              echo "  **この結果は H-4 の承認材料に使わない** (dev の継続監視用。testing.md §7.4)"
             fi
             echo "- 結果: ${{ job.status }}"
             echo ""

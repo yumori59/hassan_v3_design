@@ -1,0 +1,42 @@
+# CODEOWNERS (MR-4。architecture.md §3.11.2)
+#
+# モノレポ化でリポジトリ境界が消えた分、レビュー担当の分離をパスで担保する。
+# 3 リポ構成では「別リポ = 別レビュアー」が自動的に成立していた。
+#
+# <owner> / チーム名は立ち上げ時に実際の GitHub team に置換する。
+# **CODEOWNERS はブランチ保護の "Require review from Code Owners" を有効にして初めて効く**
+# (04-human-checkpoints.md §4 の立ち上げチェックリストに含める)。
+
+# 既定 (どの owner にも当たらない変更の受け皿)
+*                       @<owner>/<app-maintainers>
+
+/backend/               @<owner>/<backend-reviewers>
+/frontend/              @<owner>/<frontend-reviewers>
+
+# 契約 (`api/`) は両サブツリーに影響する。**専用チーム 1 行で書く**。
+#
+# ⚠️ **「BE と FE の双方からそれぞれ 1 名の承認」は CODEOWNERS では表現できない**
+# (2026-08-05 に確定。design-reviewer 2 巡目の重大 R2-3):
+#   - **1 行に複数オーナーを並べる** (`@be @fe`) → その行のオーナーのうち **誰か 1 人**で充足する
+#   - **同じパスを 2 行書く** → GitHub は **最後に一致したパターンだけを適用**するため、
+#     2 行目 (= 後に書いた側) のオーナー 1 名で充足する。**1 行目は無視される**
+#   どちらの書き方でも「双方の承認」にはならない。
+#
+# したがって **`api/` には BE / FE 双方のレビュアーを含む専用チームを割り当て**、
+# 「どちらかが見る」ことだけを機構で担保する。
+# **「双方が見る」ことは機構では担保しない** — PR テンプレート §5 の段の宣言 +
+# H-1 の確認観点 ⑧ (人間のレビュー) が受け皿である
+# (`04-human-checkpoints.md` §2.6 の「回避可」に MR-4 として登録済み)。
+/api/                   @<owner>/<api-reviewers>
+
+# **注意 (MR-4 の限界。2 点)**:
+#   1. 上記のとおり「双方の承認」は機構化できない
+#   2. CODEOWNERS は**レビュー要求**であって書き込み権限の制限ではない。
+#      3 リポ構成が「FE 開発者に BE リポの write を渡さない」をリポジトリ単位の権限で
+#      担保していた分は、モノレポでは**代替できない** (受容済みの代償)
+# 詳細は設計リポ hassan_v3 `docs/design/architecture.md` §3.11.2 の MR-4。
+
+# CI / デプロイ / 承認機構の変更は機構の所有者を通す
+/.github/               @<owner>/<app-maintainers>
+/.claude/               @<owner>/<app-maintainers>
+/scripts/               @<owner>/<app-maintainers>

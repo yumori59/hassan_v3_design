@@ -1,0 +1,51 @@
+name: Guard production PR
+
+# `production` ブランチへの PR は **`main` 発のみ**に限定する。
+#
+# ■ なぜワークフローで見るのか (2026-08-05 に新設。design-reviewer 3 巡目の 中 7)
+#
+#   `04-human-checkpoints.md` §4.1 は「`production` は `main` からの PR のみ」を
+#   **ブランチ保護の設定項目**として書いていたが、**GitHub のブランチ保護 / ruleset には
+#   「PR の head ブランチを制限する」設定が存在しない** (2026-08-05 時点の理解)。
+#   つまり**設定では担保できない要求を設定として書いていた**。
+#
+#   担保が無いと、任意の `feature/*` から `production` へ PR を出し、承認 1 名で
+#   **`main` を経ずに FE 本番へ出せる**。`operations.md` §7.3 の「dev の未リリース変更を
+#   prod に出さない」4 段のうち、機械で効く 3 段は **backend にしか効かない**ため、
+#   FE 側はこの経路が唯一の穴になる。
+#
+# ■ 使い方
+#   ブランチ保護で **本ワークフローの `guard` ジョブを必須ステータスチェックに指定する**
+#   (`production` ブランチの保護設定。`main` の `gate` とは別)。
+#   指定しないと落ちても merge できるため、設定を忘れると機構が消える。
+#
+#   ⚠️ `ci.yml` の `gate` に相乗りさせないこと — `gate` は `main` 向け PR の必須チェックであり、
+#   `production` 向け PR は path filter の基準 (base ブランチ) が変わる。
+
+on:
+  pull_request:
+    branches: [production]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: production への PR は main 発のみ
+    runs-on: ubuntu-latest
+    steps:
+      - name: head ブランチの検査
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          echo "head: $HEAD_REF → base: production"
+          if [ "$HEAD_REF" != "main" ]; then
+            echo "::error::production への PR は main からのみ許可されています (head: $HEAD_REF)"
+            echo ""
+            echo "  production は Vercel の Production Branch です。main を経ない変更を出すと、"
+            echo "  dev で検証されていないコミットが FE の本番に載ります。"
+            echo "  対処: 変更をまず main へマージし、そのうえで main → production の PR を作り直してください。"
+            exit 1
+          fi
+          echo "OK: head は main です"

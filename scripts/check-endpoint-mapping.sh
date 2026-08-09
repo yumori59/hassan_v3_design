@@ -23,6 +23,12 @@ cd "$(dirname "$0")/.."
 AA="docs/design/API/auth-accounts.md"
 RM="docs/design/API/README.md"
 ST="docs/design/API/settings.md"
+
+# ドメインファイルの集合 (2026-08-02 に 6 → 9)。**ドメインを増やすときはこの配列だけを直す** —
+# 「N ドメイン」を含む正規表現とエラーメッセージは NDOM から生成されるため、
+# 配列と文書の食い違いは検査④が自動的に検出する (DR-9 の機械強制)。
+DOMAINS=(themes assets knowledge idea-boards news settings conversation ideas plans)
+NDOM=${#DOMAINS[@]}
 errors=0
 checked=0
 
@@ -96,22 +102,24 @@ expect "§3.1.1 のコード表の行数 == 本文の自称値" \
   "$aa_codes" "$aa_codes_claim" "R-AA-25"
 
 # ── ③ README §3 の合計 ───────────────────────────────
-# 「**合計 110 エンドポイント** = 下表の 6 ドメイン **73 本** + 認証・アカウント基盤 …」
+# 「**合計 149 エンドポイント** = 下表の 9 ドメイン **112 本** + 認証・アカウント基盤 …」
+# ドメイン数は 2026-08-02 に 6 → 9 (conversation / ideas / plans を追加)。**数値をハードコードしない** —
+# 下の DOMAINS 配列の要素数から生成し、配列を増やせば正規表現も追随する (DR-9)
 rm_total=$(grep -oE '合計 ?\*{0,2}[0-9]+ ?\*{0,2}エンドポイント' "$RM" | head -1 | grep -oE '[0-9]+')
-rm_domains=$(grep -oE '6 ドメイン ?\*{0,2}[0-9]+ ?\*{0,2}本' "$RM" | head -1 | grep -oE '[0-9]+' | tail -1)
+rm_domains=$(grep -oE "$NDOM ドメイン ?\\*{0,2}[0-9]+ ?\\*{0,2}本" "$RM" | head -1 | grep -oE '[0-9]+' | tail -1)
 if [[ -n "$rm_total" && -n "$rm_domains" ]]; then
-  expect "README.md §3 の合計 == 6 ドメイン + 認証・アカウント基盤" \
+  expect "README.md §3 の合計 == $NDOM ドメイン + 認証・アカウント基盤" \
     "$rm_total" "$((rm_domains + aa_eps))" "R-AA-22 ③"
 else
   checked=$((checked + 1))
-  echo "[ERROR] README.md §3 の合計値または 6 ドメインの本数を取り出せなかった (パターンが変わった可能性)"
+  echo "[ERROR] README.md §3 の合計値または $NDOM ドメインの本数を取り出せなかった (パターンが変わった可能性)"
   errors=$((errors + 1))
 fi
 
-# ── ④ 6 ドメイン: ファイル実測 == 総覧表の行 == §3.x の明細行数 (2026-08-01 追加) ──
+# ── ④ 全ドメイン: ファイル実測 == 総覧表の行 == §3.x の明細行数 (2026-08-01 追加 / 2026-08-02 に 9 ドメイン化) ──
 dom_subtotal=0
 i=0
-for f in themes assets knowledge idea-boards news settings; do
+for f in "${DOMAINS[@]}"; do
   i=$((i + 1))
   file="docs/design/API/$f.md"
   # ドメインファイルのエンドポイント表の実測 (行頭が「| GET | 」等)
@@ -127,13 +135,68 @@ for f in themes assets knowledge idea-boards news settings; do
 done
 # 小計行 (「| **小計 (6 ドメイン)** | — | **79** | …」)
 rm_subtotal=$(grep -E '^\| \*\*小計' "$RM" | head -1 | awk -F'|' '{print $4}' | grep -oE '[0-9]+')
-expect "6 ドメイン実測の合計 == README §3 の小計行" "$dom_subtotal" "$rm_subtotal" "④"
-# 冒頭の「6 ドメイン N 本」と注の「共通規約が対象にするのは 6 ドメインの N 本」
-expect "6 ドメイン実測の合計 == README §3 冒頭の「6 ドメイン N 本」" "$dom_subtotal" "$rm_domains" "④"
-rm_kyotsu=$(grep -oE '共通規約が対象にするのは 6 ドメインの ?\*{0,2}[0-9]+ ?\*{0,2}本' "$RM" | head -1 | grep -oE '[0-9]+' | tail -1)
-expect "6 ドメイン実測の合計 == README §3 注の共通規約対象本数" "$dom_subtotal" "$rm_kyotsu" "④"
+expect "$NDOM ドメイン実測の合計 == README §3 の小計行" "$dom_subtotal" "$rm_subtotal" "④"
+# 冒頭の「$NDOM ドメイン N 本」と注の「共通規約が対象にするのは $NDOM ドメインの N 本」
+expect "$NDOM ドメイン実測の合計 == README §3 冒頭の「$NDOM ドメイン N 本」" "$dom_subtotal" "$rm_domains" "④"
+rm_kyotsu=$(grep -oE "共通規約が対象にするのは $NDOM ドメインの ?\\*{0,2}[0-9]+ ?\\*{0,2}本" "$RM" | head -1 | grep -oE '[0-9]+' | tail -1)
+expect "$NDOM ドメイン実測の合計 == README §3 注の共通規約対象本数" "$dom_subtotal" "$rm_kyotsu" "④"
+
+# ── ⑤ custom tool の本数: 定義元の表 == 転記先 (2026-08-02 追加) ──
+# 起票理由: 「PoC 9 本 → v3 8 本」という数え上げた値が conversation.md の複数箇所にあり、
+# tool の増減は D-6 (Agent 再発行) を伴うため必ず起きる。検算されない件数は必ずずれる (DR-9)。
+CV="docs/design/API/conversation.md"
+if [[ -f "$CV" ]]; then
+  # §4.1 の tool 表の実測 (行頭が「| `tool_name` | 」。§4.2 の手前まで)
+  tool_rows=$(awk '/^### 4\.1 /,/^### 4\.2 /' "$CV" | grep -cE '^\| `[a-z_]+` \| ')
+  # 見出しの自称値 「### 4.1 採用する tool (PoC 9 本 → v3 8 本)」の後者
+  tool_claim=$(grep -oE '採用する tool \(PoC [0-9]+ 本 → v3 [0-9]+ 本\)' "$CV" | head -1 | grep -oE '[0-9]+' | tail -1)
+  expect "conversation.md §4.1 の tool 表の実測 == 見出しの自称値" "$tool_rows" "$tool_claim" "⑤"
+  # 本文の「1 本減って N 本になる」
+  tool_body=$(grep -oE '1 本減って ?\*{0,2}[0-9]+ ?\*{0,2}本' "$CV" | head -1 | grep -oE '[0-9]+' | tail -1)
+  expect "conversation.md §4.1 の tool 表の実測 == 本文の「N 本になる」" "$tool_rows" "$tool_body" "⑤"
+else
+  checked=$((checked + 1))
+  echo "[ERROR] $CV が見つからない (ファイルを移動・改名したなら本スクリプトの CV を更新すること)"
+  errors=$((errors + 1))
+fi
+
+# ── ⑥ 403 の本数: 総覧表の列の合計 == 小計・本文・§5 の転記 (2026-08-02 追加) ──
+# 起票理由: 403 の本数が README 内の 4 箇所に転記されているのに無検査だった (レビュー 中 4)。
+# ドメインが増えるたびに 403 が増減するため、検算しないと必ずずれる (DR-9)。
+# 総覧表のドメイン行 (小計・認証・合計を除く) の 403 列を合計する
+sum403=$(awk -F'|' '
+  /^\| \*\*小計/ {exit}
+  /^\| [^|]+ \| \[[a-z-]+\.md\]/ { gsub(/[* ]/,"",$7); if ($7 ~ /^[0-9]+$/) s+=$7 }
+  END{print s+0}' "$RM")
+sub403=$(grep -E '^\| \*\*小計' "$RM" | head -1 | awk -F'|' '{gsub(/[* ]/,"",$7); print $7}')
+expect "README §3 総覧の 403 列の合計 == 小計行の 403" "$sum403" "$sub403" "⑥"
+body403=$(grep -oE '403 の ?\*{0,2}[0-9]+ ?\*{0,2}本 ?=' "$RM" | head -1 | grep -oE '[0-9]+' | tail -1)
+expect "README §3 総覧の 403 列の合計 == §3 本文の「403 の N 本 =」" "$sum403" "$body403" "⑥"
+a5_403=$(grep -oE '403 は合計 ?\*{0,2}[0-9]+ ?\*{0,2}本' "$RM" | head -1 | grep -oE '[0-9]+' | tail -1)
+expect "README §3 総覧の 403 列の合計 == §5 の A-5 行の「403 は合計 N 本」" "$sum403" "$a5_403" "⑥"
+
+# ── ⑦ 403 の内訳と合計行 (2026-08-02 追加。2 巡目レビュー R2-M1 = 検査⑥ の穴) ──
+# 検査⑥ は「総覧のドメイン行の合計 == 小計・本文・§5」までしか見ておらず、
+#   (a) 総覧「合計」行の 403 が無検査   (b) 本文の「N 本 = R-1 x 本 + R-2 y 本」の算術が無検査
+# だった (故障注入で 2 種が素通りすることを確認)。両方を塞ぐ。
+if [[ -n "${sum403:-}" ]]; then
+  # (a) 合計行の 403 == 小計 + 認証・アカウント基盤
+  aa403=$(grep -E '^\|[^|]*\| \[auth-accounts\.md\]' "$RM" | head -1 | awk -F'|' '{gsub(/[* ]/,"",$7); print $7}')
+  tot403=$(grep -E '^\| \*\*合計\*\*' "$RM" | head -1 | awk -F'|' '{gsub(/[* ]/,"",$7); print $7}')
+  expect "README §3 の合計行の 403 == 小計 + 認証・アカウント基盤" "$((sum403 + ${aa403:-0}))" "$tot403" "⑦"
+  # (b) 本文「403 の N 本 = §2.2 の R-1 (x 本) + R-2 (… = y 本)」の x + y == N
+  r1=$(grep -oE 'R-1 ?\(?\*{0,2}[0-9]+ ?\*{0,2}本' "$RM" | head -1 | grep -oE '[0-9]+' | tail -1)
+  r2=$(grep -oE '= ?\*{0,2}[0-9]+ ?\*{0,2}本\)' "$RM" | head -1 | grep -oE '[0-9]+' | tail -1)
+  if [[ -n "$r1" && -n "$r2" ]]; then
+    expect "README §3 本文の 403 の内訳 (R-1 + R-2) == 403 の合計" "$((r1 + r2))" "$sum403" "⑦"
+  else
+    checked=$((checked + 1))
+    echo "[ERROR] README §3 本文の 403 の内訳 (R-1 / R-2 の本数) を取り出せなかった (パターンが変わった可能性)"
+    errors=$((errors + 1))
+  fi
+fi
 
 # ── 結果 ────────────────────────────────────────
-echo "[endpoint-mapping] 実測: auth-accounts.md $aa_eps 本 / 6 ドメイン $dom_subtotal 本 / settings.md §5 $st_rows 行"
+echo "[endpoint-mapping] 実測: auth-accounts.md $aa_eps 本 / $NDOM ドメイン $dom_subtotal 本 / settings.md §5 $st_rows 行 / custom tool ${tool_rows:-?} 本 / 403 ${sum403:-?} 本"
 echo "[endpoint-mapping] 照合 $checked 件 / エラー $errors 件"
 [[ "$errors" -eq 0 ]] || exit 1

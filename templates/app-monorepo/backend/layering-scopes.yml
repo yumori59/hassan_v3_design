@@ -47,10 +47,9 @@ ported_domains: []
 # 共通層: ドメイン区分を持たない。L-1 / L-4 / L-5 と肥大化 lint を全体に適用する。
 # **architecture.md §3.5.2 の「共通層」の行と同一の集合に保つ** (写しのドリフトを作らない)。
 # 検査 ⑦ はこのリストを①のドメイン集合から除外するために使う。
-# 注: `config` は実装リポでは `common/config/` に置く (STRUCTURE.md §1)。
-#     ここでの名前はパッケージ名 (architecture.md 側の表記) を指し、ディレクトリの
-#     ネスト位置とは独立している — ①の走査対象は usecase/ service/ repository/ 配下
-#     の 2 段目ディレクトリ名であり、config はそもそもそこに現れないため影響しない。
+# 名前は **パッケージ名** (architecture.md と同じ表記)。物理パスは config のみ common/config/
+# (architecture.md §3.5.1 の `common/` の決定)。①の走査対象は usecase/ service/ repository/ の
+# 2 段目ディレクトリ名なので、ネスト位置は本リストの一致判定に影響しない。
 common_layers:
   - entity
   - gateway
