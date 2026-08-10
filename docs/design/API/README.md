@@ -31,7 +31,7 @@
 > ①**公開エンドポイント 6 本がある** (§2.1 の「本ディレクトリに公開エンドポイントは無い」の例外)
 > ②**資格情報エラーの 401 に `CodedError` 本文を持つ** (§2.5 の「401 は本文なし」の例外)
 > ③**429 を返す 10 本がある** (§2.5 の 429 行が「本ディレクトリの対象外」としている範囲の例外。
-> 未認証で叩ける 6 本 + MFA 検証 2 本 + **認証済みで資格情報を提示する 3 本** = メール変更 / パスワード変更 / MFA 再登録)。
+> 未認証で叩ける 6 本 + MFA 検証 1 本 + **認証済みで資格情報を提示する 3 本** = メール変更 / パスワード変更 / MFA 再登録。**2026-08-10 の AA-D-22 で `POST /admin/mfa/totp/verify` が消え MFA 検証は 1 本**)。
 > 加えて **403 の第 3 系統 (契約の不変条件ガード)** を持つため、§2.2 / §2.5 の「403 は R-1 / R-2 の
 > 2 系統・合計 16 本」は**9 ドメインについての数**である。差分の根拠は
 > [auth-accounts.md](auth-accounts.md) §3.1 (AA-D-9 / AA-D-12 / AA-D-17) / §3.1.1 (コードの値域) / §3.7、
@@ -278,7 +278,7 @@ RAG 検索のスコープ強制は [knowledge.md](knowledge.md) §4 が詳細を
 **conversation.md / plans.md に 403 を返すエンドポイントは無い** (会話ターンは個人スコープのみ、企画書は個人スコープのみで見える他人が存在しない)。
 **認証・アカウント基盤 ([auth-accounts.md](auth-accounts.md)) は第 3 系統 (R-3 = 不変条件ガード。
 「最後の契約内管理者をロック / 降格 / 削除できない」「自分自身をロック / 削除できない」) を持ち、
-同書の 403 は 10 本ある** — 系統と本数の SSOT は同書 §3.1。
+同書の 403 は 8 本ある** — 系統と本数の SSOT は同書 §3.1 (**実測は `make check-endpoint-mapping` が正**。2026-08-10 の AA-D-22 で 10 → 8)。
 それ以外のすべての権限エラーは 404 に落ちる — Repository が所有者条件を `WHERE` に持つため
 0 件として返り、UseCase が `NotFound` 系 `CodedError` に変換するだけでよい
 ([../auth.md](../auth.md) §6.6 の帰結)。
@@ -303,7 +303,7 @@ RAG 検索のスコープ強制は [knowledge.md](knowledge.md) §4 が詳細を
 | 非同期ジョブが未完了の状態で結果を要求 | **200** (状態 `processing` / `running` を本文で返す) | — | [assets.md](assets.md) `GET /asset-extractions/{extraction_id}`、[knowledge.md](knowledge.md) `GET /knowledge-files/{file_id}` (D-API-15) |
 | 下流 LLM / 外部サービスの失敗 (**ストリーム開始前**) | **502** | `CodedError` | LLM 列が ✓ のエンドポイントと [news.md](news.md) の CMS 経路。**500 と区別**して外部起因を識別可能にする (O-4) |
 | 下流 LLM / 外部サービスの失敗 (**ストリーム開始後**) | **HTTP では表現しない** | SSE の `error` イベント | SSE 列が ✓ のエンドポイント (D-API-12 / [../architecture.md](../architecture.md) §3) |
-| **レート制限の超過** | **429** | `CodedError` (`Retry-After` 付き) | **9 ドメインは対象外** (全て認証必須 = §2.1。認証済み経路の暴走抑止は O-3 の安全弁が担う — [../observability.md](../observability.md) §4.4)。**[auth-accounts.md](auth-accounts.md) は 429 を返す (11 本)** — 同書 §3.7 が対象エンドポイントを列挙する (未認証で叩ける 6 本 + MFA 検証 2 本 + 認証済みで資格情報を提示する 3 本)。値と方式の SSOT は [../auth.md](../auth.md) §6.11-3。**403 で返さない** |
+| **レート制限の超過** | **429** | `CodedError` (`Retry-After` 付き) | **9 ドメインは対象外** (全て認証必須 = §2.1。認証済み経路の暴走抑止は O-3 の安全弁が担う — [../observability.md](../observability.md) §4.4)。**[auth-accounts.md](auth-accounts.md) は 429 を返す (10 本。実測は `make check-endpoint-mapping` が正)** — 同書 §3.7 が対象エンドポイントを列挙する (未認証で叩ける 6 本 + MFA 検証 2 本 + 認証済みで資格情報を提示する 3 本)。値と方式の SSOT は [../auth.md](../auth.md) §6.11-3。**403 で返さない** |
 | 上記以外のサーバ内部エラー | **500** | `CodedError` | 全エンドポイント |
 
 ### 2.6 代表的なリクエスト / レスポンス例
@@ -382,7 +382,7 @@ LLM 9 本 = `POST /asset-extractions` / `POST /knowledge-threads/{thread_id}/mes
 **O-2 の計測対象はこの 9 本** (§4 の O-2 行)。
 **認証・アカウント基盤に LLM / SSE 経路は無い** ([auth-accounts.md](auth-accounts.md) §4 の A-6 / O-2 / O-5)。
 403 の 16 本 = §2.2 の R-1 (3 本) + R-2 (idea-boards 8 本 + ideas 5 本 = 13 本)。
-**認証・アカウント基盤の 10 本は別勘定** = 契約内管理者限定 9 本 + SuperAdmin 限定 1 本 (同書 §2.3 / §2.4)。
+**認証・アカウント基盤の 8 本は別勘定** = 契約内管理者限定 8 本 (同書 §2.3)。**SuperAdmin 限定の 1 本は AA-D-22 で消滅**。
 **§3.1〜§3.9 は 9 ドメインの内訳**であり、認証・アカウント基盤の一覧は
 [auth-accounts.md](auth-accounts.md) §2 が持つ (系統別に 4 節)。
 
