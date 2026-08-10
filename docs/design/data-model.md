@@ -190,7 +190,7 @@ flowchart TB
 
 | # | 検査 | 検出する事故 |
 |---|---|---|
-| ① | スキーマ定義中の全テーブルが `contract_id` を持つこと。**除外リストは §4.1.2 の (a) 表 7 件 + 同 (b) 表のうち `contract_id` を持たない 2 件 (`account_mfa_configs` / `reset_password_requests`) = 9 件に限る** (2026-07-31 の DM-A4=B で `signup_links` が除外から外れ、同日 `admin_mfa_configs` が (a) に加わった)。**`contract_id` を持つ `accounts` / `companies` / `signup_links` は除外しない** (除外すると将来 `contract_id` が落ちても検出できない)。**この件数は `make check-table-counts` が §4.1.2 の 2 表から実測して照合する** | 新規テーブルの所有者列の付け忘れ |
+| ① | スキーマ定義中の全テーブルが `contract_id` を持つこと。**除外リストは §4.1.2 の (a) 表 6 件 + 同 (b) 表のうち `contract_id` を持たない 2 件 (`account_mfa_configs` / `reset_password_requests`) = 8 件に限る** (2026-07-31 の DM-A4=B で `signup_links` が除外から外れ、同日 `admin_mfa_configs` が (a) に加わった)。**`contract_id` を持つ `accounts` / `companies` / `signup_links` は除外しない** (除外すると将来 `contract_id` が落ちても検出できない)。**この件数は `make check-table-counts` が §4.1.2 の 2 表から実測して照合する** | 新規テーブルの所有者列の付け忘れ |
 | ②-1 | **§3.4.2 の分類① (移管対象。31 件) の集合 == 所有者移管 UseCase が `UPDATE` するテーブルの集合** (厳密な集合一致) | 非正規化した `account_id` の更新漏れ (孤立) |
 | ②-2 | `account_id` を持つテーブルの集合 == **分類① ∪ 分類② ∪ 分類③ (34 件)** で、**分類②③に属するのは §3.4.2 の有限列挙のテーブルだけ**であること | 「移管しない」を新規テーブルで無言に選ぶこと (②-1 の集合一致が骨抜きになる) |
 | ③ | 読み取り系クエリ (`Get*` / `List*` / `Count*` / `Search*`) が所有者条件を持つこと | [auth.md](auth.md) §6.4 の既存検査 (本書は対象テーブルを与えるだけ) |
@@ -209,7 +209,7 @@ flowchart TB
 |---|---|
 | 1 | **`accounts.contract_id` を更新する経路を v3 に作らない** (v2 にも無い — F-2)。契約の付け替えが必要になった場合は、非正規化した `contract_id` の再計算を伴う運用作業として設計し直す (§8 の DM-Q2) |
 | 2 | **所有者移管 (メンバー削除時) は専用の UseCase 1 本だけが行う**。対象は §3.4.2 の**分類①に限る**。**§3.3 の検査②-1 で機械照合する** |
-| 3 | メンバー削除の既定の挙動は **「分類①を契約内管理者へ移管 → 分類②を削除 → 分類③はそのまま残す → `accounts` の行を物理削除」** とする。**v2 は CASCADE で所有物ごと消えていた** (DM-6 の却下 b) ため**挙動が変わる** → 要確認 (§8 の DM-Q2)。**v2 の `accounts` に `deleted_at` が無く削除は物理削除である** (`hassan-v2-backend/db/schema.sql:30`〜`:47` に `deleted_at` 無し / `hassan-v2-backend/db/queries/account.sql:83`〜`:84` = `DELETE FROM accounts WHERE id = $1`) ため、§4.2 の「v2 の列を変えない」方針のもとでアカウントの論理削除は選べない |
+| 3 | メンバー削除の既定の挙動は **「削除せず無効化のみ」** とする (**2026-08-10 のユーザー回答 = DM-Q2 ①**)。`accounts` の行を**物理削除せず**、**所有物の移管も行わない** — 分類①②③のいずれにも触れない。**v2 は CASCADE で所有物ごと消えていた** (DM-6 の却下 b) ため挙動が変わるが、**契約の資産が失われないという v3 の目的は満たす**。**代償**: `accounts` に無効化を表す列が要る = **§4.2 の「v2 に無い列を足さない」への明示的な例外** (下の DM-A5)。**旧採用案 (却下)**: 「分類①を契約内管理者へ移管 → 分類②を削除 → 分類③は残す → 物理削除」 — 移管対象が最大 29 テーブルに及び、非同期ジョブ・状態テーブル (`account_deletions`)・冪等キー・heartbeat 回収を要する。無効化のみならこれらがすべて不要になる ([API/auth-accounts.md](API/auth-accounts.md) AA-D-13 の改訂) |
 
 #### 3.4.2 `account_id` を持つ 34 テーブルの 3 分類 (メンバー削除時の扱い)
 
@@ -363,7 +363,7 @@ db/
 
 > 行番号 1〜42 のうち欠番は無い (**42 行**)。§3.3 の検査①はこの表を入力にする。
 
-#### 4.1.2 機能テーブル以外の 12 テーブル (2 種類の例外を分けて列挙する)
+#### 4.1.2 機能テーブル以外の 11 テーブル (2 種類の例外を分けて列挙する)
 
 **[auth.md](auth.md) §6.3 の例外列挙に対応する**。**2 種類を混ぜないために表を 2 つに分ける** —
 混ぜると **`contract_id` を実際に持つ `accounts` / `companies` が検査①の対象外**になり、
@@ -376,7 +376,7 @@ db/
 > `make check-table-counts` の検算対象**である (`scripts/check-table-counts.sh`)。
 > **他文書へ件数を転記しない** — 転記が必要になったら本節へのリンクにする。
 
-**(a) 所有者列を持たない 7 件 = §3.3 の検査①の例外** (**検査①の入力はこの表だけ**。この表に無いテーブルに例外を認めない)
+**(a) 所有者列を持たない 6 件 = §3.3 の検査①の例外** (**検査①の入力はこの表だけ**。この表に無いテーブルに例外を認めない)
 
 | テーブル | 例外の理由 |
 |---|---|
@@ -385,7 +385,6 @@ db/
 | `admin_accounts` / `admin_auth_roles` | 社内管理者のアカウントとロール定義。全契約を横断する運用主体であり契約に属さない |
 | `register_admin_password_requests` | 社内管理者のパスワード登録要求。未認証経路から token で引く |
 | **`auth_rate_limit_counters`** | **未認証エンドポイントのカウンタ**であり、契約・アカウントが確定する前に書く ([auth.md](auth.md) §6.11-3) |
-| **`admin_mfa_configs`** | **社内管理者の MFA 設定** (v3 新設。定義は §4.2)。`admin_accounts` に属し**契約を横断する運用主体の設定**なので `contract_id` を持たない。`account_mfa_configs.account_id` は `accounts` への FK なので流用できない (`hassan-v2-backend/db/schema.sql:68`〜`:77`。[auth.md](auth.md) §6.2 が新設を決定) |
 
 **(b) 所有者列を実際に持つ 5 件 = 検査①の例外ではない** (検査①を**通る**。
 クエリ側で所有者条件を掛けられない経路のみ [auth.md](auth.md) §6.4 の**許可リスト**で個別に例外化する)
@@ -401,7 +400,7 @@ db/
 > **`account_mfa_configs` / `reset_password_requests` の扱い**: この 2 件は `account_id` を持ち
 > `contract_id` を持たない。**検査①は「`contract_id` を持つこと」を見るため、この 2 件は (a) と同じく
 > 検査①の入力から外す必要がある** — ただし**理由が (a) と異なる** (所有者列が無いのではなく、
-> 認証系で `contract_id` が確定する前に書かれるため)。**検査①の実装は (a) 7 件 + 本注記の 2 件 = 9 件を
+> 認証系で `contract_id` が確定する前に書かれるため)。**検査①の実装は (a) 6 件 + 本注記の 2 件 = 8 件を
 > 除外リストに持つ**こととし、**除外の根拠を 2 種類に分けて記載する** (増えたときにどちらの理由かが分かる形にする)。
 > **`accounts` / `companies` / `signup_links` は除外リストに入れない** (いずれも `contract_id` を持つ)。
 >
@@ -422,11 +421,13 @@ db/
 | **`signup_links` に `contract_id NOT NULL` + FK を追加** | 契約単位の招待を表現する (**DM-A4=B。2026-07-31 確定** — §8.1)。**v2 の既存未使用リンクには対応値が無い**ため、移行では**引き継がず失効させて再発行**を既定候補とする (最終確定は DM-A2 の移行設計) | §4.1.2 (b) |
 | **秘密の保存形を改める** | `signup_links` は `id` を秘密に使わず **`token_hash` を新設**、`reset_password_requests.hash` → **`token_hash` に改名し平文を保存しない** | 本節末「招待・リセットの秘密の格納」。[auth.md](auth.md) §6.10-1 の `crypto/rand` 要件を**判定可能**にするため |
 | 上記以外の列の追加なし | v2 に無い列を足さない | 移行の写像を単純に保つ。必要が生じたら移行後に追加する |
+| **例外 1 件 (DM-A5。2026-08-10)** | **`accounts.deactivated_at timestamptz NULL` を追加する** | DM-Q2 = 「削除せず無効化のみ」の帰結。**却下案**: (a) 既存の `last_locked_at` を流用する — ロック (回復可能な一時停止) と無効化 (恒久) は §6.9 の回復経路の扱いが違い、解除 API が無効化まで解いてしまう。(b) 別テーブル `account_deactivations` を作る — 1 アカウント 1 行の状態を別テーブルに置くと一覧の絞り込みが毎回 JOIN になる。**`GET /accounts` / `GET /accounts/{id}` が無効化済みを既定で除外するか**は[API/auth-accounts.md](API/auth-accounts.md) §5 の R-AA-27 で決める |
 
 **対象**: `contracts` / `accounts` / `companies` / `auth_roles` / `account_mfa_configs` /
 `reset_password_requests` / `signup_links` / `admin_accounts` / `admin_auth_roles` /
 `register_admin_password_requests` (出典: `hassan-v2-backend/db/schema.sql:5`〜`:92`, `:312`, `:342`, `:501`)。
-**v3 で新設するものは `auth_rate_limit_counters` と `admin_mfa_configs` の 2 件** (いずれも下記で定義)。
+**v3 で新設するものは `auth_rate_limit_counters` の 1 件** (下記で定義)。
+**`admin_mfa_configs` は 2026-08-10 の AA-D-22 (社内管理者に MFA を課さない) で削除した** ([API/auth-accounts.md](API/auth-accounts.md) §5 の R-AA-28)。
 
 **`auth_rate_limit_counters`** (v2 に無い。[auth.md](auth.md) §6.11-3 が「共有ストアに置く。既定は DB」と決定):
 
@@ -439,19 +440,6 @@ db/
 | 掃除 | `window_start < now() - <保持期間>` の行を定期削除 (実行方式は [operations.md](operations.md) の定期実行に載せる) |
 | しきい値 / fail-closed の挙動 / 観測 | **[auth.md](auth.md) §6.11-3・§6.11-4 が SSOT** (本書では決めない) |
 | 書き込み負荷の見積り | 認証エンドポイントのリクエスト数と同数の UPSERT。[infrastructure.md](infrastructure.md) の R-6 へ入力 |
-
-**`admin_mfa_configs`** (v2 に無い。[auth.md](auth.md) §6.2 が「社内管理者は MFA 必須」「`admin_mfa_configs`
-相当を新設する」と決定。**§4.1.2 (a) の例外テーブル**):
-
-| 項目 | 内容 |
-|---|---|
-| 主キー | `admin_account_id uuid` (単一行制約。1 管理者 = 1 設定) |
-| 列 | `mfa_type text NOT NULL CHECK (mfa_type IN ('totp'))` / `otp_secret text NOT NULL` / `is_verified boolean NOT NULL DEFAULT false` / `created_at` / `updated_at` |
-| FK | `admin_account_id`→`admin_accounts` (**CASCADE**。管理者アカウント削除で設定も消す) |
-| 雛形 | v2 の `account_mfa_configs` (`hassan-v2-backend/db/schema.sql:68`〜`:77`)。**`accounts` への FK を `admin_accounts` に差し替えたもの**であり、列構成は同一 |
-| `contract_id` を持たない理由 | 社内管理者は全契約を横断する運用主体で契約に属さない (§4.1.2 (a)) |
-| クエリ側の扱い | [auth.md](auth.md) §6.4 の許可リスト**種別⑦** (全契約横断の運用操作)。社内管理者系統 (`X-Admin-Token`) からのみ到達する |
-| 初回登録の窓 | **投入直後は `is_verified = false`**。この窓の閉じ方 (一時パスワードの生成・有効期限・期限切れの無効化) は [auth.md](auth.md) §6.2 が SSOT |
 
 **招待・リセットの秘密の格納** (v2 は「リンク ID (UUID) 自体が秘密」/ `reset_password_requests.hash` に
 平文を保存する形だった。**v3 は両方とも改める** — [auth.md](auth.md) §6.10-1 が
@@ -1169,7 +1157,7 @@ auth.md §6.3 / §6.4 への転記は同文書の担当セッションが行う 
 
 | # | 検査 | 本書の該当節 |
 |---|---|---|
-| 1 | 全テーブルが `contract_id` を持つこと。**除外リストは §4.1.2 (a) の 7 件 + `account_mfa_configs` / `reset_password_requests` = 9 件に限る** (`accounts` / `companies` / `signup_links` は除外しない — DM-A4=B) | §3.3 の① / §4.1.2 |
+| 1 | 全テーブルが `contract_id` を持つこと。**除外リストは §4.1.2 (a) の 6 件 + `account_mfa_configs` / `reset_password_requests` = 8 件に限る** (`accounts` / `companies` / `signup_links` は除外しない — DM-A4=B) | §3.3 の① / §4.1.2 |
 | 2-1 | **§3.4.2 の分類① (31 件) の集合 == 所有者移管 UseCase が UPDATE する集合** | §3.3 の②-1 / §3.4.2 |
 | 2-2 | `account_id` を持つテーブル (34 件) が**分類①②③のいずれかに分類されており、②③に属するのは §3.4.2 の有限列挙のテーブルだけ**であること | §3.3 の②-2 / §3.4.2 |
 | 3 | 台帳フィールドに書き手が存在すること | §4.11.2 の 4 |
@@ -1224,7 +1212,7 @@ auth.md §6.3 / §6.4 への転記は同文書の担当セッションが行う 
 | # | 項目 | 内容 | 確定先 |
 |---|---|---|---|
 | **DM-Q1** | 拡張の可用性 | **`pg_trgm` / `pgvector` / (代替候補の) `pg_bigm` が RDS PostgreSQL で有効化できるか**を確認する。使えない場合 §3.5 の検索方式と §4.7 のチャンクテーブルが変わる | [infrastructure.md](infrastructure.md) |
-| **DM-Q2** | メンバー削除時の所有物 | **3 点**: ①採用案は「分類①を契約内管理者へ移管 → 分類②を削除 → 分類③は残す → `accounts` を物理削除」(§3.4.1 の 3)。**v2 は CASCADE で消えていた**ため挙動が変わる ②契約の付け替え経路を持たない前提 (§3.4.1 の 1) の確認 ③**移管対象 29 テーブルの行数の実測** (§3.4.3 の 5。バッチ上限の既定値 50 集約が妥当かの根拠になる。**推測値を設計に書かない**) | 要件確認 (認証系 API の仕様 = Task-3i と同時) / ③は `Task-2f` |
+| **DM-Q2** | メンバー削除時の所有物 | **回答済み (2026-08-10)**: **削除せず無効化のみ**。①§3.4.1 の 3 を改訂済み ②契約の付け替え経路を持たない前提は維持 (§3.4.1 の 1) ③**移管対象 29 テーブルの行数の実測は不要になった** — 移管を行わないため。`Task-2f` からこの目的の項目を外してよい | **回答済み** |
 | **DM-Q3** | 第 1 リリースに含めるドメイン | Q-3 `[Answer 3]` は「PoC 由来の新機能セット (テーマ・アセット・会話型)」だが、[API/](API/README.md) の 6 ドメインは増分 1 とされている ([architecture.md](architecture.md) §8 も同じ食い違いを仮定として記録)。**§4.1.1 の「増分」列と §6.3 の投入順序がこれに依存する** | ユーザー判断 |
 | **DM-Q4** | 新着通知メールの記録 | `news_email_logs` 相当を v3 が持つか ([API/news.md](API/news.md) NW-Q5)。**要件が確認されるまで列を作らない** | 要件確認 |
 | **DM-Q5** | ~~`active_rate` の定義~~ → **解消 (2026-07-30)** | ST-Q9 の回答で `GET /usage-summary` はクロス集計形 (月 × メンバー × 活動種別) に変わり、`active_rate` は廃止された ([API/settings.md](API/settings.md) §3 / §7.1)。集計元が `audit_logs` である点は §4.10 のとおり | — |

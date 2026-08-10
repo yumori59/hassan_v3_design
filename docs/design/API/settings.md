@@ -179,8 +179,8 @@ if !authAccount.AuthRoleID.IsAdmin() { 403 }     // 契約内ロールの判定
 | ロック解除・MFA リセット | `POST /accounts/unlock` / `POST /accounts/mfa/reset` | `同:82-83` |
 | **社内管理者のサインイン** | `POST /admin/signin` (**公開エンドポイント**) | `同:195` (**2026-07-31 訂正** — `:194` は `adminRoute := r.Group("/admin")`。[../auth.md](../auth.md) §6.2 と [auth-accounts.md](auth-accounts.md) §2.1 は当初から `:195` で正しい) |
 | **社内管理者によるロック解除** (全契約横断) | `POST /admin/accounts/unlock` | `同:211` |
-| **社内管理者の MFA 登録・検証** | ユーザー側の `POST /mfa/totp/generate` / `verify` が移植元 (**`admin_mfa_configs` は新設**) | `同:231-232` |
-| **社内管理者の MFA リセット** (SuperAdmin のみ) | ユーザー側の `POST /accounts/mfa/reset` が移植元 | `同:83` |
+| **社内管理者の MFA 登録・検証** | ユーザー側の `POST /mfa/totp/generate` / `verify` が移植元 (**`admin_mfa_configs` は新設**) | `同:231-232` |  ⚠️ **2026-08-10: v3 では作らない** ([auth-accounts.md](auth-accounts.md) AA-D-22)
+| **社内管理者の MFA リセット** (SuperAdmin のみ) | ユーザー側の `POST /accounts/mfa/reset` が移植元 | `同:83` |  ⚠️ **2026-08-10: v3 では作らない** (同 AA-D-22)
 | MFA (TOTP) | `POST /mfa/totp/generate` / `verify` / `reset` | `同:231-233` |
 | 契約情報 | `GET /contracts` | `同:62` |
 | 会社情報 | `GET /companies` / `POST /companies` / `PUT /companies` / `PUT /companies/mfa` | `同:93`, `:95-97` |

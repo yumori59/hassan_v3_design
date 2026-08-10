@@ -304,7 +304,7 @@ Agent 経路・直接 API 経路の**両方**で、1 回の LLM 呼び出しご�
 | ドメイン | `action` の値 | 出典 |
 |---|---|---|
 | **認証** (v2 に既存の 6 種 — `hassan-v2-backend/db/schema.sql:467`〜`:479`) | `signin_success` / `signin_failed` / `mfa_verify_success` / `mfa_verify_failed` / `mfa_reset_by_admin` / `mfa_reset_by_aillio_admin` | [API/auth-accounts.md](API/auth-accounts.md) §3.7 |
-| **アカウント・ロック** | `account_created` / `account_role_changed` / `account_deleted` / `account_locked` / `account_unlocked` | 同 §3.7 / [auth.md](auth.md) §6.9 |
+| ~~**アカウント・ロック**~~ | ~~`account_created` / `account_role_changed` / `account_deleted` / `account_locked` / `account_unlocked`~~ | **2026-08-10 の AA-D-23 で削除** — 監査ログを v2 相当に限定し、v3 独自の対象 (メンバー作成・権限変更・削除・ロック・解除) を記録しないことにした ([API/auth-accounts.md](API/auth-accounts.md) §3.7 / §5 の R-AA-7③ 取り下げ)。**再開する場合は同書 §6.1 の AA-Q11 から** |
 | **利用状況の集計対象** (契約内の活動) | `theme_created` / `idea_diverged` / `plan_drafted` / `knowledge_chat` / `asset_registered` / `comment_posted` | [API/settings.md](API/settings.md) §3 (`GET /usage-summary` のクロス集計の軸) |
 | **生成・削除・共有** | 各ドメインの設計書が本表へ追記する (アイデア / 企画書 / アセット抽出の生成・削除、共有設定の変更) | 本節の「記録対象」 |
 
