@@ -43,9 +43,8 @@
 | §2.2 の 2 本 | `/mfa` / `/mfa/setup` | 既存 |
 | §2.3.1 の **`GET /accounts/me`** | 全画面のヘッダ・セッション初期化 ([../frontend.md](../frontend.md) §5.2.2) | 既存 |
 | §2.3.1 の **残り 6 本** (`PUT /accounts/me` / `PUT /accounts/me/email` / `PUT /accounts/me/password` / `POST /accounts/me/icon` / `DELETE /accounts/me/icon` / `POST /mfa/totp/reset`) | **`/settings/profile`** | **新設済み** ([../frontend.md](../frontend.md) §11.1。2026-07-31。§5 **R-AA-16** = 実施済み)。**6 本すべてに消費者となる画面がある**ので、本増分から外す条件分岐は消滅した |
-| §2.3.2 の 10 本 + §2.3.3 の 4 本 | `/settings/members` | 既存 (会社情報も同画面) |
-| §2.4 の 8 本 | `/admin/accounts` / `/admin/admins` / `/admin/mfa*` | 既存 |
-| §2.3.2 の `GET /account-deletions/{deletion_id}` | `/settings/members` の削除進捗表示 | 既存画面内 (AA-D-13) |
+| §2.3.2 の 9 本 + §2.3.3 の 4 本 | `/settings/members` | 既存 (会社情報も同画面) |
+| §2.4 の 5 本 | `/admin/accounts` / `/admin/admins` | 既存。**`/admin/mfa*` は AA-D-22 で消滅** |
 
 ### 1.2 v2 の事実 (移植の入力。出典付き)
 
@@ -91,18 +90,18 @@
 | P-3 | **社内管理者トークンの有効期間は一般ユーザーと同じ 7 日** | [../frontend.md](../frontend.md) §11.3.1 ([Answer] FE-Q8。2026-07-31) |
 | P-4 | **E2E 専用アカウントは MFA 無効**。例外の表現は本書が定義する (§3.6) | [../testing.md](../testing.md) §7.3 (T-Q3=B) |
 | P-5 | **社内管理者は MFA (TOTP) 必須**・初回サインイン後に登録を強制。ロック機構は持たない | [../auth.md](../auth.md) §6.2 |
-| P-6 | **認証系統は 4 系統のホワイトリスト**で管理し、CI が系統単位の一致を検査する (**系統の定義と検査機構の SSOT**。ホワイトリストに載る**エンドポイントの列挙**は本書 §2 が元表 — AA-D-20) | [../auth.md](../auth.md) §6.7 |
+| P-6 | **認証系統は 3 系統のホワイトリスト** (2026-08-10 の AA-D-22 で 4 → 3)で管理し、CI が系統単位の一致を検査する (**系統の定義と検査機構の SSOT**。ホワイトリストに載る**エンドポイントの列挙**は本書 §2 が元表 — AA-D-20) | [../auth.md](../auth.md) §6.7 |
 | P-7 | **レート制限・応答マスク・429・ロック機構**は [../auth.md](../auth.md) §6.11 が SSOT。本書は適用対象の列挙のみを行う (§2.1 / §3.7) | [../auth.md](../auth.md) §6.11 |
 | P-8 | **手動ロック API は v3 新設**。契約内管理者 = ロック + 解除 (自分自身・最後の契約内管理者のガード付き)、社内管理者 = 解除のみ・全契約横断 | [../auth.md](../auth.md) §6.9 |
 
 ---
 
-## 2. エンドポイント一覧 (合計 **37 本**)
+## 2. エンドポイント一覧 (合計 **33 本**)
 
 ### 2.0 表記と共通規約
 
 - **Q** = クエリ / **B** = リクエストボディ / **R** = レスポンス本文
-- **系統** = [../auth.md](../auth.md) §6.7 の 4 系統。**節ごとに 1 系統**にしてあり、この節構成が
+- **系統** = [../auth.md](../auth.md) §6.7 の 3 系統 (2026-08-10 の AA-D-22 で 4 → 3)。**節ごとに 1 系統**にしてあり、この節構成が
   **「どのエンドポイントがどの系統か」の元表**になる (§7.2 で実装リポへ引き渡す)。
   **系統の定義そのものと CI 検査の仕組みは同 §6.7 が SSOT** — 役割分担は **AA-D-20** (P-6 との関係もそこで整理)
 - **共通のステータス**は [README.md](README.md) §2.5 に従い、本表は**固有のもののみ**挙げる。
@@ -114,7 +113,6 @@
   **例外 1 件**: `POST /accounts/signup` は **200** (既存行のパスワード設定であり作成ではない。§2.1 / §3.3)
 - **JSON キーは snake_case**、ID は `accounts` / `contracts` / `companies` が uuid
   ([../data-model.md](../data-model.md) §4.2 が v2 の型をそのまま持つ)。
-  **v3 新設の `account_deletions` も uuid** (`deletion_id`。理由は §5 R-AA-4)
 
 ### 2.1 系統: 公開 (認証なし。6 本)
 
@@ -123,7 +121,7 @@
 
 | メソッド | パス | 概要 | 主な入出力 | 固有ステータス | 移植元 |
 |---|---|---|---|---|---|
-| POST | `/accounts/signin` | サインイン (JWT 発行) | B: `{email, password}` — R: `SignInResult` (§2.5) | 200 / **401** (資格情報不正 = マスク `AU-C-00001` / ロック `AU-C-00002`。**分類 C** = §3.1.1) / 429 | `hassan-v2-backend/router/router.go:76`、`hassan-v2-backend/usecase/account/sign_in.go:57-133` |
+| POST | `/accounts/signin` | サインイン (JWT 発行) | B: `{email, password}` — R: `SignInResult` (§2.5) | 200 / **401** (資格情報不正 = マスク `AU-C-00001` / ロック `AU-C-00002` / **無効化済み `AU-C-00006`** = [../data-model.md](../data-model.md) の DM-A5 補足 1。**分類 C** = §3.1.1) / 429 | `hassan-v2-backend/router/router.go:76`、`hassan-v2-backend/usecase/account/sign_in.go:57-133` |
 | POST | `/accounts/signup-links/lookup` | 招待リンクの検証と招待先の表示 (**読み取りだが POST**。理由は AA-D-4) | B: `{token}` — R: `{email, expires_at}` | 200 / **404** (不正・期限切れ・使用済みを区別しない) / 429 | `同:78` (`GET /accounts/signup-links/:id`)、`hassan-v2-backend/usecase/account/get_signup_link.go:31-42` |
 | POST | `/accounts/signup` | 招待受諾 (パスワード設定) | B: `{token, password, confirmed_password}` — **`email` を受け取らない** (V2-D1) — R: `SignInResult` (そのままサインイン状態にする) | **200** (**201 ではない** — 作成ではなく既存行 (`is_completed=false`) のパスワード設定であり `Location` を返さない。[README.md](README.md) D-API-11「作成 201」に対する明示の例外。§3.3) / **404** (トークン不正) / **409** (既にサインアップ済み) / **400** (パスワード不一致・強度違反) / 429 | `同:75`、`hassan-v2-backend/usecase/account/sign_up.go:40-91` |
 | POST | `/accounts/reset-password` | パスワードリセット要求 (メール送信) | B: `{email}` — R: なし | **204 固定** (アカウント不存在でも 204。[../auth.md](../auth.md) §6.11-1) / 429 | `同:79`、`hassan-v2-backend/usecase/account/request_reset_password.go:45-90` |
@@ -141,11 +139,11 @@
 | POST | `/mfa/totp/generate` | TOTP の登録開始 (シークレット発行) | R: `{totp_url, issued_at}` (`otpauth://` URL。QR は FE が描く) | 200 / **409** (検証済みの TOTP が既にある) | `hassan-v2-backend/router/router.go:231`、`hassan-v2-backend/usecase/mfa/create_totp.go:29-61` |
 | POST | `/mfa/totp/verify` | TOTP の検証 (トークン再発行) | B: `{totp_code}` (6 桁) — R: `{token, expires_at, mfa: {required_type, registered, verified}}` | 200 / **401** (コード不一致 `AU-C-00003`。**分類 C** = セッションを破棄しない。**v2 は 500** = V2-D2) / **404** (登録が無い) / **429** | `同:232`、`hassan-v2-backend/usecase/mfa/verify_totp.go:46-88` |
 
-### 2.3 系統: ユーザー認証 (MFA 検証済みが必須。21 本)
+### 2.3 系統: ユーザー認証 (MFA 検証済みが必須。20 本)
 
 **スコープ列の意味**: **自分** = `WHERE account_id = <認証ユーザー>` / **契約** =
 `WHERE contract_id = <認証ユーザーの契約>` ([README.md](README.md) §2.3)。
-**403 の 9 本は契約内管理者限定 (R-1)**、そのうち 3 本は**契約の不変条件ガード (R-3。§3.4)** でも 403 を返す。
+**403 の 8 本は契約内管理者限定 (R-1)** (**実測は `make check-endpoint-mapping` が正**。2026-08-10 の AA-D-22 / AA-D-13 で 9 → 8)、そのうち 3 本は**契約の不変条件ガード (R-3。§3.4)** でも 403 を返す。
 
 #### 2.3.1 自分のアカウント (7 本)
 
@@ -163,19 +161,18 @@
 | DELETE | `/accounts/me/icon` | アイコン削除 | 自分 | — | 204 | `同:74` |
 | POST | `/mfa/totp/reset` | 自分の TOTP を解除して再登録できる状態にする (**有効な TOTP コードが必要**) | 自分 | B: `{totp_code}` — R: なし | 204 / **400** (コード不一致 `AU-C-00005`。**分類 C** = §3.1.1。AA-D-17) / **404** (登録が無い) / **429** (AA-D-10) | `同:233`、`hassan-v2-backend/usecase/mfa/reset_totp.go:25-46` |
 
-#### 2.3.2 メンバー管理 (10 本。**403** = 契約内管理者限定 8 本。一覧・取得の 2 本は全メンバー可)
+#### 2.3.2 メンバー管理 (9 本。**403** = 契約内管理者限定 7 本。一覧・取得の 2 本は全メンバー可)
 
 | メソッド | パス | 概要 | スコープ | 主な入出力 | 固有ステータス | 移植元 |
 |---|---|---|---|---|---|---|
-| GET | `/accounts` | 契約内メンバー一覧 (**ロック状態を含む**) | 契約 | Q: `keyword` (氏名・メール・役割・所属) / `limit` / `offset` / `sort` (`updated_at`\|`created_at`\|`name`) — R: `{items: Account[], total_count}` | 200 / 400 | `同:65`、`hassan-v2-backend/db/queries/account.sql:20-24`、ロック列は `hassan-v2-backend/db/queries/account.sql:98` |
+| GET | `/accounts` | 契約内メンバー一覧 (**ロック状態を含む**) | 契約 | Q: `keyword` (氏名・メール・役割・所属) / **`include_deactivated`** (既定 `false`。無効化済みを含めるか — DM-A5 補足 3) / `limit` / `offset` / `sort` (`updated_at`\|`created_at`\|`name`) — R: `{items: Account[], total_count}` | 200 / 400 | `同:65`、`hassan-v2-backend/db/queries/account.sql:20-24`、ロック列は `hassan-v2-backend/db/queries/account.sql:98` |
 | GET | `/accounts/{account_id}` | メンバー取得 | 契約 | R: `Account` | 200 / **404** (他契約・不存在) | `同:67`、`hassan-v2-backend/usecase/account/get_account_by_id.go:33-46` |
 | POST | `/accounts` | メンバー作成 (パスワード無し・`is_completed=false`) | 契約 | B: `{name, email, auth_role, division, role}` — R: `Account` | **201** / **403** / **409** (メール重複・**契約の人数上限**) / 400 | `同:68`、`hassan-v2-backend/usecase/account/create_account.go:40-73` |
 | PUT | `/accounts/{account_id}` | メンバーの氏名・メール・権限変更 | 契約 | B: `{name, email, auth_role, division, role}` — R: `Account` | 200 / **403** (管理者以外 / **最後の契約内管理者の降格**) / **404** / **409** (メール重複) | `同:70`、`hassan-v2-backend/usecase/account/update_account_by_admin.go:37-80` |
-| DELETE | `/accounts/{account_id}` | メンバー削除 (**所有物の移管を伴う非同期ジョブ**。AA-D-13) | 契約 | R: `{deletion_id, status, remaining_aggregates}` | **202** / **200** (同一対象のジョブが実行中 = 冪等) / **403** (管理者以外 / **最後の契約内管理者** / **自分自身**) / **404** | `同:81`、`hassan-v2-backend/usecase/account/delete_account.go:31-64`、移管方式は [../data-model.md](../data-model.md) §3.4.3 |
-| GET | `/account-deletions/{deletion_id}` | 削除ジョブの状態 | 契約 | R: `{deletion_id, target_account_id, status, remaining_aggregates, failure, started_at, finished_at}` (**`remaining_aggregates` は応答時に数えた算出値。列として持たない** — R-AA-4) | 200 / **403** / **404** | 新設 ([README.md](README.md) §1.3 の J-2 / J-7) |
+| DELETE | `/accounts/{account_id}` | メンバー削除 (**無効化のみ。所有物は移管しない**。AA-D-13) | 契約 | R: なし | **204** / **403** (管理者以外 / **最後の契約内管理者** / **自分自身**) / **404** | `同:81`、`hassan-v2-backend/usecase/account/delete_account.go:31-64`、無効化の帰結 7 点は [../data-model.md](../data-model.md) §4.2 の **DM-A5 補足**が SSOT。**既存トークンは失効しない (最大 7 日アクセスが続く)**・**メールアドレスは永久に占有される** |
 | POST | `/accounts/{account_id}/signup-links` | 招待リンクの発行・再送 (**未使用リンクを失効させてから発行**) | 契約 | R: `{expires_at}` (**トークンは応答に含めない**) | **201** / **403** / **404** / **409** (既にサインアップ済み) | `同:77`、`hassan-v2-backend/usecase/account/create_signup_link.go:43-93` |
 | POST | `/accounts/{account_id}/mfa/reset` | メンバーの TOTP をリセット (デバイス紛失時) | 契約 | R: なし | 204 / **403** / **404** | `同:83`、`hassan-v2-backend/usecase/account/reset_member_mfa.go:44-70` |
-| POST | `/accounts/{account_id}/lock` | **手動ロック (v3 新設)** | 契約 | R: `Account` (`is_locked=true`) | 200 / **403** (管理者以外 / **自分自身** / **最後の未ロック契約内管理者**) / **404** | **v2 に無い** ([../auth.md](../auth.md) §6.9) |
+| POST | `/accounts/{account_id}/lock` | **手動ロック (v3 新設)**。⚠️ **2026-08-10 の実装スコープ外** — 設計は確定させたまま、9 月末までの増分では実装しない (§6.1 の AA-Q13) | 契約 | R: `Account` (`is_locked=true`) | 200 / **403** (管理者以外 / **自分自身** / **最後の未ロック契約内管理者**) / **404** | **v2 に無い** ([../auth.md](../auth.md) §6.9) |
 | DELETE | `/accounts/{account_id}/lock` | ロック解除 (失敗回数も 0 に戻す) | 契約 | R: `Account` (`is_locked=false`) | 200 / **403** (管理者以外) / **404** | `同:82`、`hassan-v2-backend/db/queries/account.sql:73-78` (**email 指定の `:66-71` は使わない** = V2-D4) |
 
 #### 2.3.3 契約・会社情報 (4 本。**403** = 1 本)
@@ -193,28 +190,27 @@
 > 「設定できるが認証が成立しない」状態になる (BE-10)。**列そのものは v2 と同じ 3 値で持つ**
 > ([../data-model.md](../data-model.md) §4.2 の「列を変えない」) が、**API は 2 値のみ受け付ける**。
 
-### 2.4 系統: 社内管理者認証 (8 本)
+### 2.4 系統: 社内管理者認証 (5 本)
 
-**`X-Admin-Token`**。前提 P-5 (MFA 必須)。**§2.4.1 の 2 本のみ MFA 未検証で到達可**
-(= 4 系統の 4 番目)。全 8 本が**契約スコープを持たない** (全契約横断が目的)。
-
-#### 2.4.1 MFA 未検証で到達可 (2 本)
-
-| メソッド | パス | 概要 | 主な入出力 | 固有ステータス | 移植元 |
-|---|---|---|---|---|---|
-| POST | `/admin/mfa/totp/generate` | 社内管理者の TOTP 登録開始 | R: `{totp_url, issued_at}` | 200 / **409** (検証済みが既にある) | ユーザー側 `hassan-v2-backend/router/router.go:231` が移植元。**`admin_mfa_configs` は v3 新設** ([../auth.md](../auth.md) §6.2)。**テーブル定義は [../data-model.md](../data-model.md) §4.2 に反映済み** (2026-07-31。例外分類は同 §4.1.2 (a) = 所有者列を持たない・§3.3 の検査①の除外リストも 9 件へ連動済み。要求は §5 **R-AA-18** = 実施済み) — **本書 §2.4.1 の 2 本はスキーマ待ちではなくなった** |
-| POST | `/admin/mfa/totp/verify` | 社内管理者の TOTP 検証 (トークン再発行) | B: `{totp_code}` — R: `{token, expires_at, mfa: {registered, verified}}` | 200 / **401** (不一致 `AU-C-00003`。**分類 C** = セッションを破棄しない) / **404** (未登録) / **429** | 同 `:232` |
-
-#### 2.4.2 MFA 検証済みが必須 (6 本)
+**`X-Admin-Token`**。**社内管理者に MFA を課さない** (2026-08-10 のユーザー決定 = AA-D-22)。
+したがって**この系統に「MFA 未検証で到達可」の区分は無く**、系統は **3 系統**になる ([../auth.md](../auth.md) §6.7)。
+全 5 本が**契約スコープを持たない** (全契約横断が目的)。
 
 | メソッド | パス | 概要 | 主な入出力 | 固有ステータス | 移植元 |
 |---|---|---|---|---|---|
-| GET | `/admin/me` | 自分 (社内管理者) の情報 | R: `{id, name, email, admin_auth_role: "super_admin"\|"admin", mfa_registered}` | 200 | `hassan-v2-backend/router/router.go:196` |
+| GET | `/admin/me` | 自分 (社内管理者) の情報 | R: `{id, name, email, admin_auth_role: "super_admin"\|"admin"}` | 200 | `hassan-v2-backend/router/router.go:196` |
 | GET | `/admin/accounts` | **全契約横断**のアカウント検索 (ロック状態・会社名つき) | Q: `keyword` (会社名・氏名・メール) / `is_locked` (任意) / `limit` / `offset` — R: `{items: AdminAccountView[], total_count}` | 200 / 400 | `同:216`、`hassan-v2-backend/db/queries/account.sql:86-120` |
 | DELETE | `/admin/accounts/{account_id}/lock` | ロック解除 (**解除専用。ロックは持たない**) | R: `AdminAccountView` | 200 / **404** (不存在) | `同:211`、`hassan-v2-backend/usecase/admin_account/unlock_account_by_admin.go:25-33` |
 | POST | `/admin/accounts/{account_id}/mfa/reset` | **一般アカウント**の TOTP リセット (全契約横断。AA-Q2) | R: なし | 204 / **404** | `同:217`、`hassan-v2-backend/controller/account.go:1046-1082` |
-| GET | `/admin/admins` | 社内管理者の一覧 (MFA 登録状態つき) | Q: `limit` / `offset` — R: `{items: [{id, name, email, admin_auth_role, mfa_registered}], total_count}` | 200 | `同:205`、`hassan-v2-backend/controller/admin_account.go:90` |
-| POST | `/admin/admins/{admin_account_id}/mfa/reset` | **社内管理者**の TOTP リセット (デバイス紛失時) | R: なし | 204 / **403** (SuperAdmin 以外 [**v2 は 401** — [../auth.md](../auth.md) §5-3] / **自分自身は不可** [AA-D-12]) / **404** | ユーザー側 `同:83` が移植元。権限判定は `hassan-v2-backend/auth/middleware.go:153-163` |
+| GET | `/admin/admins` | 社内管理者の一覧 | Q: `limit` / `offset` — R: `{items: [{id, name, email, admin_auth_role}], total_count}` | 200 | `同:205`、`hassan-v2-backend/controller/admin_account.go:90`。**`mfa_registered` を返さない** (AA-D-22) |
+
+> **削除した 3 本と、その根拠** (2026-08-10 = AA-D-22):
+> `POST /admin/mfa/totp/generate` / `POST /admin/mfa/totp/verify` / `POST /admin/admins/{admin_account_id}/mfa/reset`。
+> **いずれも v2 に実体が無い** — [settings.md](settings.md) §5 の移植チェックリストで移植元に挙がっていたのは
+> **ユーザー側の `POST /mfa/totp/generate` / `verify` / `POST /accounts/mfa/reset`** (`hassan-v2-backend/router/router.go:231-233`, `:83`) であり、
+> **社内管理者用のエンドポイントは v2 に存在しない**。したがって削除は **C-16 (v2 にある操作は落とさない) に抵触しない**。
+> **`GET /admin/admins` は残す** — v2 に実体があり (`同:205`)、C-16 の対象。ただし応答から `mfa_registered` を落とす。
+> **再開する場合の入口**: `admin_mfa_configs` の定義と系統の 4 分割を戻すこと。§6.1 の AA-Q12 に残す。
 
 ### 2.5 レスポンスオブジェクト (暫定 — [../data-model.md](../data-model.md) §4.2 に従う)
 
@@ -256,9 +252,9 @@
 {
   "token": "<JWT>", "expires_at": "2026-08-07T09:00:00Z",
   "admin_account": { "id": "b71e…", "name": "運用担当", "email": "ops@aillio.io",
-                     "admin_auth_role": "super_admin" },
-  "mfa": { "registered": false, "verified": false }
+                     "admin_auth_role": "super_admin" }
 }
+// ⚠️ 2026-08-10 (AA-D-22): `mfa` を返さない。社内管理者に MFA が無いため
 ```
 
 ```json
@@ -288,9 +284,10 @@ Task-3i への是正要求として出している。本書は `account.auth_rol
 誤っていた (正 = `:195`)。訂正は §5 **R-AA-3⑤** で要求する。
 **行数・件数は機械照合されている** (2026-07-31。§5 **R-AA-22** = 実施済み): `scripts/check-endpoint-mapping.sh`
 (`make check-endpoint-mapping` / `make check` に組み込み済み) が **[settings.md](settings.md) §5 の行数 == 本表の行数**、
-および **§2 のエンドポイント実数 == [README.md](README.md) §3 の総覧値 (37 / 110 / 403 の 10 本)** を**照合 5 件**で見る。
-**照合していないのは出典の行番号のみ** (上段のとおり)。**未照合の件数が 2 つ残る**: §3.7 の**レート制限 11 本**と
-§3.1.1 の **10 コード**は同スクリプトの対象外で人手一致のまま — 追加要求は §5 **R-AA-25**。
+および **§2 のエンドポイント実数 == [README.md](README.md) §3 の総覧値** を**照合 5 件**で見る
+(**総覧値をここに転記しない** — 2026-08-10 の AA-D-22 / AA-D-13 改訂で本数が動いたため。実測は `make check-endpoint-mapping` の出力が正 = DR-9)。
+**照合していないのは出典の行番号のみ** (上段のとおり)。**未照合の件数が 2 つ残る**: §3.7 の**レート制限 10 本**と
+§3.1.1 の **11 コード**は同スクリプトの対象外で人手一致のまま — 追加要求は §5 **R-AA-25**。
 
 | # | §5 の行 (v2 のエンドポイント) | 本書の対応 | 備考 |
 |---|---|---|---|
@@ -305,9 +302,9 @@ Task-3i への是正要求として出している。本書は `account.auth_rol
 | 9 | 招待リンク発行 `POST /accounts/signup-links` | §2.3.2 `POST /accounts/{account_id}/signup-links` | email 指定 → account_id 指定 (AA-D-3)・**単一有効リンク** (AA-D-5) |
 | 10 | ロック解除・MFA リセット `POST /accounts/unlock` / `POST /accounts/mfa/reset` | §2.3.2 `DELETE /accounts/{account_id}/lock` / `POST /accounts/{account_id}/mfa/reset` (+ **新設** `POST …/lock`) | V2-D4 の解消 (AA-D-11) |
 | 11 | 社内管理者サインイン `POST /admin/signin` | §2.1 `POST /admin/signin` | 応答に MFA 状態を追加 (P-5) |
-| 12 | 社内管理者によるロック解除 `POST /admin/accounts/unlock` | §2.4.2 `DELETE /admin/accounts/{account_id}/lock` | **解除専用**。到達に必要な `GET /admin/accounts` を追加 (§5 の是正要求 R-AA-3) |
-| 13 | 社内管理者の MFA 登録・検証 | §2.4.1 の 2 本 | `admin_mfa_configs` は v3 新設。**[../data-model.md](../data-model.md) §4.2 に定義済み** (2026-07-31。§5 R-AA-18 = 実施済み) |
-| 14 | 社内管理者の MFA リセット (SuperAdmin のみ) | §2.4.2 `POST /admin/admins/{admin_account_id}/mfa/reset` | 権限不足は **403** (v2 は 401) |
+| 12 | 社内管理者によるロック解除 `POST /admin/accounts/unlock` | §2.4 `DELETE /admin/accounts/{account_id}/lock` | **解除専用**。到達に必要な `GET /admin/accounts` を追加 (§5 の是正要求 R-AA-3) |
+| 13 | 社内管理者の MFA 登録・検証 | **作らない** (AA-D-22) | **v2 に実体が無い** — §5 の移植元欄はユーザー側 `同:231-232` を指しており、社内管理者用のエンドポイントは v2 に存在しない。したがって C-16 に抵触しない。`admin_mfa_configs` も作らない |
+| 14 | 社内管理者の MFA リセット (SuperAdmin のみ) | **作らない** (AA-D-22) | 同上 (移植元はユーザー側 `同:83`)。**社内管理者が MFA を持たないためリセット対象が無い** |
 | 15 | MFA (TOTP) `POST /mfa/totp/generate` / `verify` / `reset` | §2.2 の 2 本 + §2.3.1 の `POST /mfa/totp/reset` | **`reset` は MFA 検証済み必須**に変更 (AA-D-8) |
 | 16 | 契約情報 `GET /contracts` | §2.3.3 `GET /contracts/me` | `sharing_settings` を落とす (AA-D-15) |
 | 17 | 会社情報 `GET` / `POST` / `PUT /companies` / `PUT /companies/mfa` | §2.3.3 `GET` / `PUT /companies/me` / `PUT /companies/me/mfa` | **POST を作らない。更新は `PUT` 1 本で、行が無ければ 404** (AA-D-14) |
@@ -341,19 +338,21 @@ Task-3i への是正要求として出している。本書は `account.auth_rol
 | **AA-D-6** | **リセット・招待の応答と乱数** | **①要求は 204 固定** (アカウント不存在でも成功応答) ②**秘密文字列を応答に含める型を作らない** ③トークン生成は `crypto/rand` ([../auth.md](../auth.md) §6.10) ④**トークン不正・期限切れ・使用済みをすべて 404 に統一** | (a) v2 のまま (未登録は 400 `AccountNotFoundByEmail`): **メールアドレスの列挙が成立する** (V2-D6 / [../auth.md](../auth.md) §5-9)。(b) 期限切れだけ専用コードで返す (v2 の `ResetPasswordRequestExpired` — `hassan-v2-backend/usecase/account/reset_password.go:49-50`): **トークンが存在したことが判る**ため、総当たりの当たり判定に使える。ユーザーが取れる行動は「再発行」の 1 つだけなので、文言を分ける利得が無い。(c) `410 Gone` を使う: [README.md](README.md) §2.5 に無いコードを 1 本のためだけに増やす |
 | **AA-D-7** | **`is_locked` を誰に見せるか** | **契約内の全メンバーに返す** (`GET /accounts` / `GET /accounts/{account_id}`) | (a) 契約内管理者にだけ返す: 同じ DTO が 2 形式になり orval の型が分岐する。v2 でも契約内メンバー一覧は全員に開いている (V2-F14) ため、**契約内のメンバー構成は既に相互可視**である。(b) v2 のまま返さない: **ロックされたことを管理者が知る経路が無く、解除操作に到達できない** ([../auth.md](../auth.md) §6.9 の「ロック状態の可視化」= BE-10 の読む側) |
 | **AA-D-8** | **`POST /mfa/totp/reset` の到達条件** | **MFA 検証済みを必須**にする (MFA 未検証で到達できるルートは §2.2 の 2 本だけ) | (a) v2 のまま `/mfa` 配下すべてを未検証で開放 (V2-F7): [../auth.md](../auth.md) §6.7 が**パス前方一致の判定を却下済み**。加えて reset は**有効な TOTP コードを要求する**ため未検証状態で使う意味がない (コードを出せるなら verify できる)。(b) reset を廃止して「管理者にリセットしてもらう」のみにする: 端末を移す度に管理者を巻き込むことになり、v2 でできていた自己解決の経路を失う |
-| **AA-D-9** | **資格情報エラーのステータス** | **「トークンを発行・昇格させるエンドポイント」の資格情報エラーだけを 401 + `CodedError` 本文**にする。対象は `POST /accounts/signin` / `POST /admin/signin` / `POST /mfa/totp/verify` / `POST /admin/mfa/totp/verify` の **4 本**。**認証済みセッションで本人確認のために添えた資格情報の不一致は 400** (AA-D-17)。**401 は「トークン自体の失効 (分類 T)」と「提示した資格情報の不一致 (分類 C)」の 2 分類**とし、FE が本文の `code` だけで機械判定できるようにする (**§3.1.1** が値域と判定規則の SSOT)。ロック・MFA 不一致は分類 C の専用コードで区別する ([../auth.md](../auth.md) §6.11-1) | (a) v2 の 400 (`hassan-v2-backend/controller/account.go:352-355`): [../frontend.md](../frontend.md) §9 が **400 を「フォームのフィールドエラー」**として扱うため、**サインインの「メールまたはパスワードが違います」はどちらのフィールドにも紐づかない** (AA-D-6 のマスクが目的なので紐づけてはいけない) のにフィールドエラーとして出る。加えて**バリデーション違反 (形式不正) と資格情報の誤りが同じステータスになり、O-4 の観測で区別するには結局コードが要る**。(b) 403: 認証されていないのだから 403 ではない。(c) **v2 の 500 (MFA 検証失敗 = V2-D2)**: 失敗が全部サーバエラーとして計上され、**総当たりが 500 の山として現れる** (O-4 の逆行)。(d) **401 のまま FE 側が「どのエンドポイントを叩いたか」で分岐する** (起草時の案): エンドポイントが増えるたびに FE が分岐表を更新することになり、**更新漏れが強制サインアウトとして現れる**。判定の入力を**応答本文の `code` 1 つ**に閉じる (§3.1.1)。**この判断は [README.md](README.md) §2.5 の「401 は本文なし」に対する明示の例外**であり、§5 の **R-AA-2a** ([../auth.md](../auth.md) §6.6 宛て) / **R-AA-2b** ([README.md](README.md) §2.5 宛て。実施済み) で SSOT へ是正要求を出す |
+| **AA-D-9** | **資格情報エラーのステータス** | **「トークンを発行・昇格させるエンドポイント」の資格情報エラーだけを 401 + `CodedError` 本文**にする。対象は `POST /accounts/signin` / `POST /admin/signin` / `POST /mfa/totp/verify` の **3 本** (2026-08-10 の AA-D-22 で `POST /admin/mfa/totp/verify` が消滅し 4 → 3)。**認証済みセッションで本人確認のために添えた資格情報の不一致は 400** (AA-D-17)。**401 は「トークン自体の失効 (分類 T)」と「提示した資格情報の不一致 (分類 C)」の 2 分類**とし、FE が本文の `code` だけで機械判定できるようにする (**§3.1.1** が値域と判定規則の SSOT)。ロック・MFA 不一致は分類 C の専用コードで区別する ([../auth.md](../auth.md) §6.11-1) | (a) v2 の 400 (`hassan-v2-backend/controller/account.go:352-355`): [../frontend.md](../frontend.md) §9 が **400 を「フォームのフィールドエラー」**として扱うため、**サインインの「メールまたはパスワードが違います」はどちらのフィールドにも紐づかない** (AA-D-6 のマスクが目的なので紐づけてはいけない) のにフィールドエラーとして出る。加えて**バリデーション違反 (形式不正) と資格情報の誤りが同じステータスになり、O-4 の観測で区別するには結局コードが要る**。(b) 403: 認証されていないのだから 403 ではない。(c) **v2 の 500 (MFA 検証失敗 = V2-D2)**: 失敗が全部サーバエラーとして計上され、**総当たりが 500 の山として現れる** (O-4 の逆行)。(d) **401 のまま FE 側が「どのエンドポイントを叩いたか」で分岐する** (起草時の案): エンドポイントが増えるたびに FE が分岐表を更新することになり、**更新漏れが強制サインアウトとして現れる**。判定の入力を**応答本文の `code` 1 つ**に閉じる (§3.1.1)。**この判断は [README.md](README.md) §2.5 の「401 は本文なし」に対する明示の例外**であり、§5 の **R-AA-2a** ([../auth.md](../auth.md) §6.6 宛て) / **R-AA-2b** ([README.md](README.md) §2.5 宛て。実施済み) で SSOT へ是正要求を出す |
 | **AA-D-17** | **認証済み経路で「本人確認のために添えた資格情報」が一致しないときのステータス** | **400 + `CodedError`**。対象は `PUT /accounts/me/password` の `old_password` / `PUT /accounts/me/email` の `password` / `POST /mfa/totp/reset` の `totp_code` の **3 本**。切り分け規則は「**そのエンドポイントの目的がトークンの発行・昇格なら 401 (AA-D-9)、それ以外 (認証済みの状態変更に本人確認を添えるもの) なら 400**」 | (a) **401 に統一する (起草時の採用案)**: 3 本とも**セッションを持つ経路**であり、[../frontend.md](../frontend.md) §9 の「401 → `/api/logout`」に流れると **TOTP を 1 文字打ち間違えただけで強制サインアウト**になる。§3.1.1 の分類 C で救えるが、**FE の共通層に「401 だが破棄しない」という例外経路を 3 本のためだけに常設する**ことになる。分類 C が必要なのは MFA 検証 2 本 (S2 セッションを持ちながら 401 を返さざるを得ない = トークン昇格そのもの) だけに絞れる。(b) **422 を使う**: [README.md](README.md) §2.5 に無いコードを増やす (AA-D-6 で `410 Gone` を却下したのと同じ理由)。(c) **403**: 権限の問題ではない。**AA-D-9 の却下 (a) との整合**: 却下 (a) が問題にしたのは「**どのフィールドにも紐づかない**マスク文言がフィールドエラーとして出る」ことであり、`old_password` / `password` / `totp_code` は**入力フィールドそのものに紐づく**ため同じ問題は起きない。O-4 の区別は §3.1.1 のコードで担保する |
 | **AA-D-20** | **公開系統ホワイトリストの SSOT をどちらに置くか** ([../auth.md](../auth.md) §6.7 と本書 §2 が現状**双方向参照**) | **2 段に分ける**: **①系統の定義と判定機構・CI 検査の仕組み = [../auth.md](../auth.md) §6.7 が SSOT** / **②どのエンドポイントがどの系統に属するか (公開ホワイトリストの中身) = 本書 §2 の節構成が元表**。auth.md §6.7 は**個別パスを再掲せず本書を参照する** (差し替えは §5 R-AA-15 で要求) | (a) **auth.md §6.7 側にパスを列挙し続ける** (現状): エンドポイントの増減のたびに 2 箇所を直すことになり、**実際に AA-D-4 のパス変更 (`GET /accounts/signup-links/:id` → `POST /accounts/signup-links/lookup`、`POST /accounts/reset-password/:hash` → `.../confirm`) で乖離した**。CI 検査の入力が旧パスのままなので、①実装が旧パスを作るか②新パスが未宣言として落ちるかのどちらかになる。(b) **系統の定義ごと本書へ移す**: 認証系以外のドメイン ([themes.md](themes.md) / [assets.md](assets.md) 等) も系統に属するため、**認証設計の SSOT が 1 ドメインの API 仕様書に移る**。(c) **両方に書いて CI で一致を検査する**: 検査は書けるが、**2 箇所を同時に直す運用**が残る (DR-8 の温床)。**帰結**: 本書 §2.0 の「この節構成がホワイトリストの元表になる」は②の意味に限定され、P-6 (系統の SSOT = auth.md §6.7) と矛盾しない |
 | **AA-D-19** | **403 と 404 の評価順序** | **①ロール判定 (R-1) → ②所有者条件による取得 (0 件なら 404) → ③不変条件ガード (R-3) の順に評価する**。したがって**一般メンバーが `{account_id}` を指定する管理者操作は、対象が自契約・他契約・不存在のいずれでも 403** になる (§3.1.2) | (a) **存在確認を先にする (404 優先)**: 「見えないリソースは常に 404」を徹底できるが、**ロール判定のためだけに Repository へ 1 往復増える**うえ、v2 は Controller でロールを見てから UseCase を呼ぶ (`hassan-v2-backend/controller/account.go:598` の削除経路 = V2-F12) ため実装順序を反転させることになる。**403 は対象の存在を示さない** (ロール不足を示すだけ) ので、404 を先に返す情報漏洩上の利得も無い。(b) **順序を決めず実装に委ねる**: [../auth.md](../auth.md) §6.6 の表は「他テナント = 404 / 権限不足 = 403」を並記するだけで**両方に当てはまる要求の答えにならず**、FE の分岐と §7.3 の UT が実装ごとに食い違う (DR-5) |
 | **AA-D-18** | **`CodedError.code` の値域を本書に書くか** | **401 / 400 のうち「FE の分岐を決める」コードに限り、本書 §3.1.1 で値域と接頭辞規則を確定する** (それ以外のコードは実装リポの `constants` パッケージが SSOT のまま) | (a) [README.md](README.md) §1.2 (`:315`-`:317`) の「**本ディレクトリでは個別コードを列挙しない (二重管理の防止)**」をそのまま守る: **セッションを破棄するかどうかの判定が FE と BE の共有契約**であるにもかかわらず契約がどこにも書かれず、**両側が別々に推測する** (BE-8「schema と handler の乖離」と同型)。二重管理のコストより、破棄判定を取り違える害 (強制サインアウト / 無効セッションのループ) が大きい。(b) 接頭辞規則だけ書き、コードは列挙しない: 実装リポが接頭辞を付け間違えても検出できない。**§3.1.1 の表を CI 検査の入力にする** (D-2) ことで機械照合できる形にする。**代償**: 実装リポでコードを追加・改名したら本書 §3.1.1 も同じ差分で直す必要がある (§7.2 に明記) |
-| **AA-D-10** | **認証済み経路のレート制限** | **①`POST /mfa/totp/verify` と `POST /admin/mfa/totp/verify`** に加え、**②資格情報を再提示させる 3 本 (`PUT /accounts/me/password` / `PUT /accounts/me/email` / `POST /mfa/totp/reset`)** もレート制限の対象に含める (キー = `account_id` / `admin_account_id` + エンドポイント)。**計 11 本** (§3.7) | (a2) **②の 3 本を対象外にする** (起草時): 同じ論拠がそのまま当てはまる — `old_password` / `password` はパスワードの、`totp_code` は 10^6 空間の総当たりであり、**`failed_sign_in_attempts` はどれでも増えない**。とくに `PUT /accounts/me/email` は「**セッションを盗んだ攻撃者がパスワードを総当たりしてメールアドレスを乗っ取り、リセット経路ごと奪う**」に直結する。「認証済みだから試行者を特定でき監査で追える」は事後の話であり、**①の MFA 検証も認証済み (S2) である**以上、認証済みを除外理由にすると①の判断と矛盾する。(a) ①を対象外にする ([../auth.md](../auth.md) §6.11-3 の現記述は「未認証で叩けるエンドポイント」のみ): **TOTP は 6 桁 = 10^6 の探索空間**で、パスワードを知る (= トークンを 1 本持つ) 攻撃者が総当たりできる。**`failed_sign_in_attempts` はパスワード失敗でしか増えない** (`hassan-v2-backend/db/queries/account.sql:56-64`) ため、ロック機構では止まらない。(b) MFA 失敗をロックカウンタに加算する: しきい値 1 つが 2 つの意味を持ち、[../auth.md](../auth.md) §10.2 R-4 の「ロックしきい値 < レート制限しきい値」の関係が壊れる。**§5 の R-AA-1 で SSOT へ追加要求** |
+| **AA-D-10** | **認証済み経路のレート制限** | **①`POST /mfa/totp/verify`** (**`POST /admin/mfa/totp/verify` は AA-D-22 で消滅**) に加え、**②資格情報を再提示させる 3 本 (`PUT /accounts/me/password` / `PUT /accounts/me/email` / `POST /mfa/totp/reset`)** もレート制限の対象に含める (キー = `account_id` / `admin_account_id` + エンドポイント)。**計 10 本** (§3.7。2026-08-10 の AA-D-22 で 11 → 10) | (a2) **②の 3 本を対象外にする** (起草時): 同じ論拠がそのまま当てはまる — `old_password` / `password` はパスワードの、`totp_code` は 10^6 空間の総当たりであり、**`failed_sign_in_attempts` はどれでも増えない**。とくに `PUT /accounts/me/email` は「**セッションを盗んだ攻撃者がパスワードを総当たりしてメールアドレスを乗っ取り、リセット経路ごと奪う**」に直結する。「認証済みだから試行者を特定でき監査で追える」は事後の話であり、**①の MFA 検証も認証済み (S2) である**以上、認証済みを除外理由にすると①の判断と矛盾する。(a) ①を対象外にする ([../auth.md](../auth.md) §6.11-3 の現記述は「未認証で叩けるエンドポイント」のみ): **TOTP は 6 桁 = 10^6 の探索空間**で、パスワードを知る (= トークンを 1 本持つ) 攻撃者が総当たりできる。**`failed_sign_in_attempts` はパスワード失敗でしか増えない** (`hassan-v2-backend/db/queries/account.sql:56-64`) ため、ロック機構では止まらない。(b) MFA 失敗をロックカウンタに加算する: しきい値 1 つが 2 つの意味を持ち、[../auth.md](../auth.md) §10.2 R-4 の「ロックしきい値 < レート制限しきい値」の関係が壊れる。**§5 の R-AA-1 で SSOT へ追加要求** |
 | **AA-D-11** | **ロック / 解除の表現** | **`POST /accounts/{account_id}/lock` / `DELETE /accounts/{account_id}/lock`** (契約内管理者)、**`DELETE /admin/accounts/{account_id}/lock`** (社内管理者・解除のみ)。テナント検証は Repository のクエリ条件 (`WHERE id = $1 AND contract_id = $2`) | (a) v2 の `POST /accounts/unlock` + ボディ (`hassan-v2-backend/controller/account.go:895-916`): AA-D-3 の理由。(b) `PATCH /accounts/{account_id}` の `is_locked` フィールドで表す: 一般更新と権限・ガードが違う操作が同じエンドポイントに同居し、**監査記録の粒度も落ちる** (O-6)。加えて v2 に `PATCH` の前例が無い ([themes.md](themes.md) D-TH-8 と同じ理由)。(c) 社内管理者側にもロックを持たせる: **回復手段がロックアウト手段を兼ねる** ([../auth.md](../auth.md) §6.9 の禁止事項) |
 | **AA-D-12** | **不変条件ガードのステータス (R-3)** | **403 に統一する** — 対象は ①最後の未ロック契約内管理者のロック ②自分自身のロック ③最後の契約内管理者の降格 ④最後の契約内管理者の削除 ⑤自分自身の削除 ⑥SuperAdmin が自分の MFA をリセット。**ロックのカウントは `AND last_locked_at IS NULL` を含める** | (a) v2 の 400 (`CannotDeleteLastAdmin` / `CannotDemoteLastAdmin` — `hassan-v2-backend/controller/account.go:621-624`, `:473-476`): [../frontend.md](../frontend.md) §11.1 が**この 2 ケースを「403 = 正常系」として操作前無効化 + 理由表示**で扱うと既に決めており、コードが分かれると FE が 2 系統の分岐を持つ。(b) 409: 意味は近いが [../auth.md](../auth.md) §6.9 が**ロックのガードを 403 と確定済み**で、同種のガードが 2 コードに分かれる。**代償**: [README.md](README.md) §2.5 の「403 は R-1 / R-2 の 2 系統のみ」に**第 3 系統 (R-3) が増える** → §5 の R-AA-2a (auth.md §6.6) / R-AA-2b (README.md §2.5。実施済み) |
-| **AA-D-13** | **メンバー削除の同期性** | **202 + `deletion_id`** の非同期ジョブにし、`GET /account-deletions/{deletion_id}` で状態を返す。**冪等キー = 対象 `account_id`** (実行中の同一対象は新規作成せず既存を 200 で返す) | (a) 同期 (200) で完結: [../data-model.md](../data-model.md) §3.4.3-4 が「**移管は同期 API で完結させない**」「残件 0 の後にのみ `accounts` を物理削除する」と確定済みで、対象は最大 29 テーブル・行数は伸びる系列を含む。(b) v2 のまま CASCADE で消す: 同 DM-6 が却下済み (契約の資産が消える)。(c) ジョブ行を持たず `GET /accounts/{account_id}` に進捗を載せる: `accounts` に列を足すことになり [../data-model.md](../data-model.md) §4.2 の「v2 の列を変えない」に反する。**帰結**: 状態を持つテーブルが必要 → §5 の R-AA-4 (`account_deletions` の追加要求) |
+| **AA-D-13** | **メンバー削除の既定挙動** | **削除せず無効化のみ** (2026-08-10 のユーザー回答 = DM-Q2)。`DELETE /accounts/{account_id}` は **204 の同期 API**とし、`accounts` の行を物理削除しない。**所有物の移管を行わない**ため、非同期ジョブ・`account_deletions` テーブル・`GET /account-deletions/{deletion_id}` はいずれも**作らない** | (a) **202 + 非同期ジョブで所有物を移管してから物理削除** (2026-07-31 までの本書の設計): [../data-model.md](../data-model.md) §3.4.3 の移管方式を要し、対象は最大 29 テーブル・ジョブの状態テーブル・冪等キー・heartbeat 回収が付随する。**無効化のみなら所有物の帰属が変わらない**ため、これらがすべて不要になる。(b) v2 のまま CASCADE で消す: 同 DM-6 が却下済み (契約の資産が消える)。**帰結**: §5 の **R-AA-27** (`accounts` に無効化列) を出し、**R-AA-4** (`account_deletions`) を取り下げる |
 | **AA-D-14** | **会社情報の作成と更新** | **`PUT /companies/me` の 1 本にし、行が無ければ 404 を返す** (upsert しない) | (a) v2 の `POST` / `PUT` 2 本 (`hassan-v2-backend/router/router.go:95-96`): クライアントが「行があるか」を知って呼び分ける必要がある (v2 の `GET /companies` は行が無いとき 404 — `hassan-v2-backend/controller/company.go:80-83`)。(b) **upsert にする (起草時の採用案。2026-07-31 のレビュー S-6 で撤回)**: 採用理由が「クライアントが呼び分けなくてよい」だったが、**同じ理由づけの中で「契約と会社は移行スクリプトで同時に投入するため行が無い状態は通常発生しない」と書いており** ([../data-model.md](../data-model.md) §6.5。新規契約の作成経路も移行スクリプトのみ = §6.3-2 の仮定)、**upsert が救うケースが存在しない**。加えて `GET /companies/me` は 404 を返すため、**GET は「無い」と言うのに PUT は黙って作る**非対称が残る。**行が無い = 移行の失敗**なので、静かに作らず **404 として観測できる方がよい** (静かなデータ生成で移行漏れを隠さない = BE-5 の型)。**帰結**: §2.3.3 の `PUT /companies/me` に 404 を追加し、§2.6 の 17 行目を「POST を作らない」に読み替える |
 | **AA-D-15** | **契約情報から `sharing_settings` を落とす** | `GET /contracts/me` は `sharing_settings` を返さない。代わりに `member_count` (在籍数) を返す | (a) v2 の応答をそのまま維持 (`hassan-v2-backend/controller/dto/contract.go:31-42`): **v3 は契約 × カテゴリの共有スイッチを持たない** ([settings.md](settings.md) D-ST-3 / [README.md](README.md) D-API-8')。返しても読み手がおらず、**「設定できるように見えて効かない」** 形になる (BE-10)。**`member_count` を足す理由**: `POST /accounts` が契約の人数上限で 409 を返す (V2-F4) ため、**残枠を画面に出せないと管理者は上限に当たるまで分からない** |
 | **AA-D-16** | **アイコンの保存と配布** | **非公開バケット + 署名付き URL**。応答は `icon_url` + `icon_url_expires_at` ([README.md](README.md) D-API-14') | (a) v2 方式 (`ACL: ObjectCannedACLPublicRead` + 恒久 URL — `hassan-v2-backend/aws/s3.go:46`, `:58`): D-API-14' が明示的に禁止している。**アイコンだけ例外にすると「公開バケットが 1 つ存在する」状態**になり、次の実装者が置き場所を判断する余地が生まれる。(b) `GET /accounts/{account_id}/icon` で 302 リダイレクトを返す: エンドポイントが 1 本増え、一覧の N 行に対して N 回の往復が発生する。**代償**: 一覧 1 回で N 件の署名を生成する (HMAC のみでネットワーク往復は無い) |
 | **AA-D-21** | **actor / contract が確定しない認証イベント (未登録メールへのサインイン失敗など) をどこに記録するか**。**経緯**: 起草時点の [../data-model.md](../data-model.md) §4.10 は `audit_logs.actor_id uuid` / `contract_id NOT NULL` を維持すると書いており、**そのスキーマでは `signin_failed` が書けない** (BE-10) ことを本書が指摘した。**同節は 2026-07-31 に改訂され、本判断と同じ方向で NULL 可 + `CHECK` を採用済み** (同 §4.10 の「主体も対象契約も確定しない認証イベントだけは NULL を許す」)。**本行は改訂後のスキーマに合わせた確定版である** | **`audit_logs` に書けるようにする** (**[../data-model.md](../data-model.md) §4.10 の採用形に合わせる**。スキーマの SSOT は同節): ①**`actor_type` に 3 番目の値 `unauthenticated` を追加**し、**`actor_id` / `contract_id` を NULL 可**にする。**NULL を許す条件は `action` ではなく `actor_type` を基準に `CHECK` で表明する** — `CHECK ((actor_type = 'unauthenticated' AND actor_id IS NULL AND contract_id IS NULL) OR (actor_type <> 'unauthenticated' AND actor_id IS NOT NULL AND contract_id IS NOT NULL))` (同 §4.10 が採用した形。**`action` 基準にすると `action` の値域の追加ごとに `CHECK` の書き換えが必要**になり、値域を Go 定数 + CI 照合で持つ決定 ([../observability.md](../observability.md) §4.5.1) と噛み合わない) ②**アカウントが解決できた失敗は `actor_type = 'account'` / `'admin_account'` として両列を埋める**。`actor_type = 'unauthenticated'` になるのは未登録メール・存在しない管理者アカウントへの試行のみ ③**メールアドレスは平文で保存せず `detail.email_hash` に入れる** — **HMAC-SHA256 (サーバ側 pepper `AUDIT_EMAIL_HMAC_KEY`)**。同一アドレスへの試行を突き合わせられ、かつ辞書攻撃で復元されない (**pepper 無しの SHA-256 は既知アドレスの総当たりで復元できるため採らない** — メールアドレスは低エントロピーで候補が有限であり、ハッシュだけでは「監査ログを見られてもアドレスが分からない」が成立しない。**2026-07-31 ユーザー決定**)。pepper は §4 の D-5 で棚卸し対象に加える。**[../observability.md](../observability.md) §4.5.2 は既に HMAC + pepper で確定済み**だが、**[../data-model.md](../data-model.md) §4.10 の `detail` の例が pepper 無しの SHA-256 のまま**であり、**是正は §5 R-AA-19** (同節自身が「値域と記録項目の SSOT は observability.md §4.5」と書いているため、参照先と例が矛盾している) | (a) **認証失敗を `audit_logs` に書かず、構造化ログ + レート制限カウンタだけで観測する**: **v2 でできていた `signin_failed` / `mfa_verify_failed` (V2-F17) が監査記録から落ちる** — [../auth.md](../auth.md) §9.3 Q-A2 の「v2 でできていたことは満たす」に対する明示の後退になる。加えて §6.11-3 が名指しで防ぐと宣言した**パスワードスプレー (多数アカウントに 1 回ずつ) の検知は「失敗の分布」でしか行えず**、保持期間の短いログでは月次の突き合わせができない。(b) **認証イベント専用の append-only テーブルを新設する**: 監査記録が 2 本になり、[../data-model.md](../data-model.md) DM-15 が却下した v2 の 2 本構成 (`activity_logs` + `event_logs`) に戻る。`GET /usage-summary` の集計も 2 本の UNION になる。(c) **`actor_type` に値を足さず NULL だけで表現する** (**起草時の採用案。2026-07-31 に撤回し、値を足す形へ転じた**): 起草時の却下理由は「値を増やすと『`actor_type` ごとに `actor_id` が何を指すか』が 3 通りになる」だったが、**[../data-model.md](../data-model.md) §4.10 が `unauthenticated` を追加する形を採用済み**であり、**そちらの方が `CHECK` の条件を `action` の値域から切り離せる** (①の理由)。3 通りになる懸念は「`unauthenticated` のとき `actor_id` は常に NULL」という 1 行の規則で閉じ、`CHECK` がそれを機械的に強制する。**スキーマの SSOT は data-model 側**なので本書が独自案を維持しない (ルート `CLAUDE.md`「判断が割れたら既存の規約・SSOT に寄せる」)。(d) **`detail` にメールアドレスを平文で入れる**: v2 が `activity_logs.account_email` で採った方式 (V2-F17) だが、**監査ログ閲覧権限が「どのアドレスが本製品を使っているか」の名簿になる**。AA-D-4 (秘密を ALB ログに残さない) と同じ論法を DB にも適用する。**代償 (採用案の)**: ①[../data-model.md](../data-model.md) §4.10 の「`contract_id` は NOT NULL を維持できる」という決定の**明示の反転**になる (**同節が 2026-07-31 に反転済み。反転理由も同節に記録された**) ②`(contract_id, occurred_at DESC)` インデックスに NULL 行が集まる。**補償の形は data-model §4.10 の採用形に従う** = `(contract_id, …)` は部分化せず、認証イベント用に **`(action, occurred_at DESC) WHERE actor_type = 'unauthenticated'`** を持つ。**本書が起草時に要求した「`(contract_id, …)` を `WHERE contract_id IS NOT NULL` で部分化する」は採らない** — 認証イベントを引く経路が専用の部分インデックスに閉じるため、`(contract_id, …)` 側の NULL 行は読まれず、部分化の利得が「インデックスサイズの節約」だけになる (SSOT 側の形を変える理由に足りない) |
+| **AA-D-22** | **社内管理者の MFA** | **課さない** (2026-08-10 のユーザー決定)。`POST /admin/mfa/totp/generate` / `verify` / `POST /admin/admins/{admin_account_id}/mfa/reset` を**作らず**、`admin_mfa_configs` も**作らない**。`GET /admin/admins` は残すが `mfa_registered` を返さない。**帰結として認証系統は 4 → 3 になる** ([../auth.md](../auth.md) §6.7) | (a) 4 系統のまま社内管理者にも TOTP を課す (2026-08-05 までの本書の設計): **v2 に実体が無い機能**であり (移植元はいずれもユーザー側 — `hassan-v2-backend/router/router.go:231-233`, `:83`)、C-16 の「v2 にある操作は落とさない」の対象外。**実装ブランチ `feat/6` の `16da244` が既に 3 系統化しており** (スケジュールの P-5)、設計を実装に合わせることで差し戻しが不要になる。(b) 設計に残して実装スコープ外にする: 手動ロック (AA-Q13) と同じ扱いだが、**系統数が 4 のままだと `check-route-auth.sh` の系統宣言に到達不能な 4 番目が残り**、CI が「宣言はあるが実装が無い」を検出できない |
+| **AA-D-23** | **監査ログの拡張** | **行わない** (2026-08-10 のユーザー決定)。§3.7 の記録対象を **v2 に前例のある事象のみ**に限定する。v3 独自の対象 (`POST /admin/signin` の成否 / ロック・解除 / メンバー作成・権限変更・削除 / 招待の発行・受諾 / リセットの実行・パスワード / メール変更 / `PUT /companies/me/mfa`) は**記録しない** | (a) 10 行すべてを記録する (2026-07-31 までの本書の設計): [../observability.md](../observability.md) §4.5.1 の値域に 7 値を追加する必要があり、各 UseCase への `audit_logs` 書き込みが実装量として全 issue に薄く広がる。**失うもの**: ①O-7 のアラート入力「社内管理者のサインイン失敗」が成立しない (§5 R-AA-26) ②不可逆操作の実行者が追跡できない。**再開の入口は §6.1 の AA-Q14** |
 
 ### 3.1.1 401 / 400 の分類と `CodedError` の値域 (AA-D-9 / AA-D-17 / AA-D-18)
 
@@ -392,9 +391,10 @@ Task-3i への是正要求として出している。本書は `account.auth_rol
 | `AU-T-00005` | T | 401 | MFA ゲート (S2 で §2.2 以外へ到達) | **他の分類 T と同じ扱い** — `/api/logout?next=<元の URL>` へ流し、`/login?next=…` へ送る ([../frontend.md](../frontend.md) §9 の分類 T 行。**`code` ごとの例外を作らない**) |
 | `AU-C-00001` | C | 401 | `POST /accounts/signin` / `POST /admin/signin` (資格情報不一致) | 「メールアドレスまたはパスワードが違います」(**どちらが違うかを出さない** = AA-D-6 のマスク。フィールドに紐づけずフォーム全体のエラーとして描く) |
 | `AU-C-00002` | C | 401 | `POST /accounts/signin` (**アカウントがロックされている**) | 「アカウントがロックされています。契約内管理者に解除を依頼してください」([../auth.md](../auth.md) §6.11-1 の「ロックは伝える」) |
-| `AU-C-00003` | C | 401 | `POST /mfa/totp/verify` / `POST /admin/mfa/totp/verify` (コード不一致) | `totp_code` フィールドのエラー。**サインイン画面に戻さない** |
+| `AU-C-00003` | C | 401 | `POST /mfa/totp/verify` (コード不一致。**`POST /admin/mfa/totp/verify` は AA-D-22 で消滅**) | `totp_code` フィールドのエラー。**サインイン画面に戻さない** |
 | `AU-C-00004` | C | **400** | `PUT /accounts/me/password` (`old_password`) / `PUT /accounts/me/email` (`password`) | 当該フィールドのエラー (「現在のパスワードが違います」) |
 | `AU-C-00005` | C | **400** | `POST /mfa/totp/reset` (`totp_code`) | `totp_code` フィールドのエラー |
+| `AU-C-00006` | C | 401 | `POST /accounts/signin` (**アカウントが無効化されている**。2026-08-10 の DM-A5 補足 1) | 「このアカウントは利用できません。契約内管理者にお問い合わせください」。**`AU-C-00002` (ロック) と分ける理由**: ロックは解除 API で回復するが、**無効化は本増分に回復手段が無い** (再有効化 API を作らない = DM-A5 補足 7) ため、FE の案内文と O-4 の集計が別になる |
 
 - **`AU-T-00004` と `AU-C-00002` を分ける理由**: 前者は「トークンを持って操作中にロックされた」
   (セッション破棄が必要)、後者は「未認証でサインインを試みた」(破棄するセッションが無い) であり、
@@ -525,9 +525,9 @@ Task-3i への是正要求として出している。本書は `account.auth_rol
 |---|---|---|
 | **書く側 (自動)** | サインイン失敗回数の加算としきい値超過でのロック | `POST /accounts/signin` の副作用 (v2 踏襲: `hassan-v2-backend/db/queries/account.sql:56-64`。しきい値は設定 SSOT — [../auth.md](../auth.md) §10.2 R-4) |
 | **書く側 (手動)** | 手動ロック | §2.3.2 `POST /accounts/{account_id}/lock` (v3 新設) |
-| **読む側** | ロック状態の可視化 | §2.3.2 `GET /accounts` の `is_locked` / `locked_at` (AA-D-7)、§2.4.2 `GET /admin/accounts` の `is_locked` フィルタ |
+| **読む側** | ロック状態の可視化 | §2.3.2 `GET /accounts` の `is_locked` / `locked_at` (AA-D-7)、§2.4 `GET /admin/accounts` の `is_locked` フィルタ |
 | **解除側** | 契約内管理者による解除 | §2.3.2 `DELETE /accounts/{account_id}/lock` |
-| **回復側** | 契約内管理者が全員ロックされたときの回復 | §2.4.2 `DELETE /admin/accounts/{account_id}/lock` (社内管理者・全契約横断) |
+| **回復側** | 契約内管理者が全員ロックされたときの回復 | §2.4 `DELETE /admin/accounts/{account_id}/lock` (社内管理者・全契約横断) |
 | **回復側 (追加)** | ~~本人による回復~~ → **採用しない** (AA-Q3=b。2026-07-31 ユーザー回答) | パスワードリセットはロックを解除しない (v2 = V2-F10 と同じ)。**パスワード忘れ + 連続失敗ロックの複合ケースは「リセット後に契約内管理者へ解除を依頼」が正規手順** — 案内を出す場所は**リセット完了画面ではなく、リセット後のサインインで `AU-C-00002` (ロック) を受けた `/login` 画面**である (§3.1.1)。`POST /accounts/reset-password/confirm` は **204 固定・本文なし**で、**未認証の FE がロック状態を知る手段は無い** (知らせると AA-D-6 のマスクが破れる) |
 
 **ガード (403 が正常系。AA-D-12)**:
@@ -538,7 +538,7 @@ Task-3i への是正要求として出している。本書は `account.auth_rol
 | 最後の未ロック契約内管理者をロックできない | `COUNT(*) WHERE contract_id = $1 AND auth_role_id = 1 AND last_locked_at IS NULL <= 1` | 同上 |
 | 最後の契約内管理者を降格できない | `COUNT(*) …auth_role_id = 1 <= 1` (v2 踏襲) | `PUT /accounts/{account_id}` |
 | 最後の契約内管理者を削除できない / 自分自身を削除できない | 同上 + `target == caller` | `DELETE /accounts/{account_id}` |
-| 自分の MFA をリセットできない | `target == caller` | `POST /admin/admins/{admin_account_id}/mfa/reset` |
+| ~~自分の MFA をリセットできない~~ (**AA-D-22 で消滅**) | ~~`target == caller`~~ | ~~`POST /admin/admins/{admin_account_id}/mfa/reset`~~ |
 
 > **`AND last_locked_at IS NULL` を足す理由**: v2 の `CountAdminsByContractID` はロック状態を見ないため、
 > **管理者 3 名の契約で 2 名を順にロックするとカウントは 3 のまま全員ロックに到達する**
@@ -568,10 +568,10 @@ Task-3i への是正要求として出している。本書は `account.auth_rol
 | `ExistsAccountByEmail` | ③ グローバル一意性 | メール重複確認。**bool のみを返す** (メンバー作成・メール変更・権限変更の 3 経路が使う) | — |
 | `GetAuthRoleByID` | ④ マスタ参照 | `auth_roles` はテナントに属さない | — |
 | `GetContractByID` | ⑤ 頂点テーブル | `GET /contracts/me` とメンバー作成時の人数上限確認 | 引数は認証コンテキスト由来の `ContractID` のみ |
-| `ListAccountsForAdmin` / `SearchAccountsForAdmin` | ⑦ 全契約横断の運用操作 | 社内管理者のアカウント検索 (§2.4.2) | 認可は §6.7 の系統で担保 |
-| **`UnlockAccountByIDForAdmin`** (`WHERE id = $1`) | ⑦ 全契約横断の運用操作 | 社内管理者による解除 (§2.4.2。v2 の実例と同一 — `hassan-v2-backend/db/queries/account.sql:73-78`)。**契約内管理者の解除は別クエリ `UnlockAccountByIDInContract` を使う** (下の「載せないもの」) | 同上 |
-| **`DeleteAccountMfaConfigForAdmin`** (`WHERE account_id = $1`) | ⑦ 全契約横断の運用操作 | 社内管理者による一般アカウントの MFA リセット (§2.4.2。AA-Q2)。**契約内管理者の MFA リセットは別クエリ `DeleteAccountMfaConfigByAccountID`** (下の「載せないもの」+ 脚注の 2 段検証) | 同上 |
-| `admin_accounts` / `admin_mfa_configs` / `admin_auth_roles` の全クエリ | ⑦ 全契約横断の運用操作 | **社内管理者系テーブルは契約に属さない** ([../auth.md](../auth.md) §6.3 の例外)。`admin_account_id` は所有者列として認識されない。**`admin_mfa_configs` の定義は [../data-model.md](../data-model.md) §4.2 に反映済み** (2026-07-31。§5 R-AA-18 = 実施済み) | 同上 |
+| `ListAccountsForAdmin` / `SearchAccountsForAdmin` | ⑦ 全契約横断の運用操作 | 社内管理者のアカウント検索 (§2.4) | 認可は §6.7 の系統で担保 |
+| **`UnlockAccountByIDForAdmin`** (`WHERE id = $1`) | ⑦ 全契約横断の運用操作 | 社内管理者による解除 (§2.4。v2 の実例と同一 — `hassan-v2-backend/db/queries/account.sql:73-78`)。**契約内管理者の解除は別クエリ `UnlockAccountByIDInContract` を使う** (下の「載せないもの」) | 同上 |
+| **`DeleteAccountMfaConfigForAdmin`** (`WHERE account_id = $1`) | ⑦ 全契約横断の運用操作 | 社内管理者による一般アカウントの MFA リセット (§2.4。AA-Q2)。**契約内管理者の MFA リセットは別クエリ `DeleteAccountMfaConfigByAccountID`** (下の「載せないもの」+ 脚注の 2 段検証) | 同上 |
+| `admin_accounts` / `admin_auth_roles` の全クエリ | ⑦ 全契約横断の運用操作 | **社内管理者系テーブルは契約に属さない** ([../auth.md](../auth.md) §6.3 の例外)。`admin_account_id` は所有者列として認識されない。**`admin_mfa_configs` の定義は [../data-model.md](../data-model.md) §4.2 に反映済み** (2026-07-31。§5 R-AA-18 = 実施済み) | 同上 |
 
 **許可リストに載せないもの (誤登録を防ぐため明記する)**:
 
@@ -642,11 +642,10 @@ V2-F5) で決まるため、**E2E 専用契約の `companies.mfa_type = 'none'` 
 > **委譲先の受け皿の状態 (2026-07-31 再確認。前回確認時から前進した)**:
 > ①**`action` の値域表は [../observability.md](../observability.md) §4.5.1 として新設済み**
 > (Go の定数 1 箇所を SSOT + CI 照合。`audit_logs.action` は [../data-model.md](../data-model.md) §4.10 のとおり
-> `text` のままで `CHECK` は張らない = DM-15 と整合)。**ただし本表の 10 行のうち 7 事象に対応する値が
-> §4.5.1 の表に無い** (招待発行 / 招待受諾 / リセット要求 / リセット実行 / パスワード変更 / メール変更 /
-> `PUT /companies/me/mfa`)。**値域が無いまま実装すると各 UseCase が自由な文字列を書き、
-> 集計側 (`GET /usage-summary` の「メンバー × 活動種別」クロス集計) が拾えない** (BE-8 と同型の黙って落ちる失敗)
-> ため、**不足 7 値の追加を §5 R-AA-7③ で継続要求する**
+> `text` のままで `CHECK` は張らない = DM-15 と整合)。**2026-08-10 の AA-D-23 で本表を v2 相当の 5 行に絞ったため、
+> §4.5.1 の値域に不足は無くなった** — 残る 5 事象の値 (`signin_success` / `signin_failed` / `mfa_verify_success` /
+> `mfa_verify_failed` / `mfa_reset_by_admin` / `mfa_reset_by_aillio_admin` とリセット要求) はいずれも v2 の前例を持つ。
+> **§5 R-AA-7③ (不足 7 値の追加要求) は取り下げる**
 > ②**actor / contract が確定しない事象 (未登録メールへのサインイン失敗) を書けるスキーマは
 > [../data-model.md](../data-model.md) §4.10 に反映済み** (`actor_type = 'unauthenticated'` + `CHECK`)。
 > 判断は **AA-D-21**、**残る差分は `detail.email_hash` の方式のみ** (同節の例が pepper 無しの SHA-256。
@@ -655,31 +654,34 @@ V2-F5) で決まるため、**E2E 専用契約の `companies.mfa_type = 'none'` 
 | エンドポイント | 記録する事象 | v2 の前例 |
 |---|---|---|
 | `POST /accounts/signin` | 成功 / 失敗。**失敗はメールアドレスを平文で保存せず `detail.email_hash` (HMAC-SHA256 + pepper) に入れる**。**アカウントが解決できない失敗は `actor_type = 'unauthenticated'` として `actor_id` / `contract_id` を両方 NULL にする** (AA-D-21。スキーマは [../data-model.md](../data-model.md) §4.10 に反映済み。残る要求 = R-AA-19 の `email_hash` 方式) | `signin_success` / `signin_failed` (V2-F17) |
-| `POST /admin/signin` | 成功 / 失敗 (解決できた場合は `actor_type = 'admin_account'`。**存在しない管理者アカウントへの試行は `actor_type = 'unauthenticated'` + 両列 NULL** = AA-D-21)。**O-7 のアラート入力「社内管理者のサインイン失敗」の記録元がこれである** ([../auth.md](../auth.md) §10.2 R-6) | v2 に無い (**追加要求 R-AA-7**) |
-| `POST /mfa/totp/verify` / `/admin/mfa/totp/verify` | 成功 / 失敗 | `mfa_verify_success` / `mfa_verify_failed` |
+| `POST /mfa/totp/verify` | 成功 / 失敗 | `mfa_verify_success` / `mfa_verify_failed` |
 | `POST /accounts/{id}/mfa/reset` | 実行 (actor = 契約内管理者) | `mfa_reset_by_admin` |
-| `POST /admin/accounts/{id}/mfa/reset` / `POST /admin/admins/{id}/mfa/reset` | 実行 (actor = `admin_accounts.id`) | `mfa_reset_by_aillio_admin` |
-| `POST` / `DELETE /accounts/{id}/lock`、`DELETE /admin/accounts/{id}/lock` | 実行 (対象 `account_id` を「何を」として記録) | **v2 に無い** ([../observability.md](../observability.md) §4.5 に既に登録済み) |
-| `POST` / `PUT` / `DELETE /accounts/{account_id}` | メンバー作成 / 権限変更 / 削除 | v2 に無い (**追加要求 R-AA-7**) |
-| `POST /accounts/{id}/signup-links`、`POST /accounts/signup` | 招待発行 / 受諾 | 同上 |
-| `POST /accounts/reset-password`、`.../confirm`、`PUT /accounts/me/password`、`PUT /accounts/me/email` | 要求 / 実行 / 変更 | v2 は `event_logs` に要求のみ (`hassan-v2-backend/usecase/account/request_reset_password.go:56`) |
-| `PUT /companies/me/mfa` | MFA 方式の変更 (契約全体に影響する) | v2 に無い |
+| `POST /admin/accounts/{id}/mfa/reset` | 実行 (actor = `admin_accounts.id`) | `mfa_reset_by_aillio_admin` |
+| `POST /accounts/reset-password` | 要求 | v2 は `event_logs` に要求のみ (`hassan-v2-backend/usecase/account/request_reset_password.go:56`) |
 
-**レート制限の対象 (計 11 本。AA-D-10)**:
+> **2026-08-10 (AA-D-23): 監査ログを v2 相当に留め、v3 での拡張を行わない** (ユーザー決定)。
+> **削除した対象**: `POST /admin/signin` の成否 / ロック・解除 (`POST`・`DELETE /accounts/{id}/lock`、`DELETE /admin/accounts/{id}/lock`) /
+> メンバー作成・権限変更・削除 / 招待の発行・受諾 / パスワードリセットの**実行**とパスワード・メール変更 / `PUT /companies/me/mfa`。
+> **いずれも v2 に前例が無い事象**であり、C-16 (v2 にある操作は落とさない) の対象外。
+> **帰結として §5 の R-AA-7③ (不足 7 値の追加要求) は取り下げる** — 追加する `action` 値が無くなったため。
+> **失うもの (先送り先を明示する)**: ①**`POST /admin/signin` の失敗が記録されないため、O-7 のアラート入力
+> 「社内管理者のサインイン失敗」が成立しない** — 是正要求は §5 **R-AA-26** ([../observability.md](../observability.md) §4.6 の AL-7 は有効なまま)。
+> ②**ロック・削除・権限変更という不可逆操作の実行者が追跡できない**。再開する場合は本表に行を戻すだけでよい (§6.1 の AA-Q14)。
+
+**レート制限の対象 (計 10 本。AA-D-10)**:
 
 | # | 対象 | キー |
 |---|---|---|
 | 1-6 | §2.1 の**公開 6 本** | IP + エンドポイント (リセット要求・サインインはメールアドレス単位も併用。[../auth.md](../auth.md) §6.11-3) |
 | 7 | §2.2 `POST /mfa/totp/verify` | `account_id` + エンドポイント |
-| 8 | §2.4.1 `POST /admin/mfa/totp/verify` | `admin_account_id` + エンドポイント |
-| 9 | §2.3.1 `PUT /accounts/me/password` (`old_password` の総当たり) | `account_id` + エンドポイント |
-| 10 | §2.3.1 `PUT /accounts/me/email` (`password` の総当たり。**成功するとリセット経路ごと奪われる**) | 同上 |
-| 11 | §2.3.1 `POST /mfa/totp/reset` (`totp_code` の総当たり) | 同上 |
+| 8 | §2.3.1 `PUT /accounts/me/password` (`old_password` の総当たり) | `account_id` + エンドポイント |
+| 9 | §2.3.1 `PUT /accounts/me/email` (`password` の総当たり。**成功するとリセット経路ごと奪われる**) | 同上 |
+| 10 | §2.3.1 `POST /mfa/totp/reset` (`totp_code` の総当たり) | 同上 |
 
 **しきい値・保管先・fail-closed 時の挙動は [../auth.md](../auth.md) §6.11-3 が SSOT** (本書では決めない)。
-**9-11 は 2026-07-31 のレビュー指摘 (S-3) で追加**した (8 本 → 11 本)。**転記先 2 箇所
-([README.md](README.md) §0 の差分注記と §2.5 の 429 行) は同日に 11 本へ更新済み** (§5 R-AA-2b ②)。
-**この 11 という数は現時点では機械照合の対象外**なので、照合の追加を §5 **R-AA-25** で要求する。
+**8-10 は 2026-07-31 のレビュー指摘 (S-3) で追加**した。**2026-08-10 に `POST /admin/mfa/totp/verify` が
+AA-D-22 で消滅したため 11 本 → 10 本**。**転記先 2 箇所 ([README.md](README.md) §0 の差分注記と §2.5 の 429 行)
+を同じ差分で更新した** (§5 R-AA-2b ②)。**この数は現時点では機械照合の対象外**なので、照合の追加を §5 **R-AA-25** で要求する。
 
 **O-4 として観測する失敗**: 429 の発生件数 / **401 と 400 の内訳を §3.1.1 の `code` 単位で数える**
 (`AU-T-*` = トークン失効の内訳 / `AU-C-*` = 資格情報不一致の内訳。**分類 T と C を混ぜて数えない** —
@@ -694,20 +696,20 @@ v2 は招待メール送信失敗時にリンクを保存しないまま 500 を
 
 | ID | 状態 | 回答 |
 |---|---|---|
-| **A-1** 認証方式 | **回答** | §2 の全 37 本に**要求する認証系統を宣言**した (§2.1〜§2.4 の節構成 = ホワイトリストの元表)。方式の SSOT は [../auth.md](../auth.md) §6.1、系統の機械検査は同 §6.7。**公開は 6 本のみ**で、うち 4 本は v2 と同一の公開範囲、`POST /admin/signin` は同 §6.2 の例外、`POST /accounts/signup-links/lookup` は v2 の `GET …/:id` の置き換え (AA-D-4)。**AC-1.1** |
-| **A-2** ロールと適用範囲 | **回答** | ①**一般ユーザー** (`AuthRoleUser`) = §2.2 / §2.3 ②**契約内管理者** (R-1) = §2.3 の 9 本が 403 ③**社内管理者** (`X-Admin-Token`) = §2.4 の 8 本 ④**SuperAdmin** = `POST /admin/admins/{id}/mfa/reset` の 1 本。**v2 で管理者限定だった操作 (V2-F12) をすべて維持し、新しいロール差を作っていない** ([../auth.md](../auth.md) §9.3 Q-A2) |
+| **A-1** 認証方式 | **回答** | §2 の全エンドポイント (**本数は同書 §2 の見出しが正** — 2026-08-10 に 37 → 33。DR-9) に**要求する認証系統を宣言**した (§2.1〜§2.4 の節構成 = ホワイトリストの元表)。方式の SSOT は [../auth.md](../auth.md) §6.1、系統の機械検査は同 §6.7。**公開は 6 本のみ**で、うち 4 本は v2 と同一の公開範囲、`POST /admin/signin` は同 §6.2 の例外、`POST /accounts/signup-links/lookup` は v2 の `GET …/:id` の置き換え (AA-D-4)。**AC-1.1** |
+| **A-2** ロールと適用範囲 | **回答** | ①**一般ユーザー** (`AuthRoleUser`) = §2.2 / §2.3 ②**契約内管理者** (R-1) = §2.3 の 8 本が 403 ③**社内管理者** (`X-Admin-Token`) = §2.4 の 5 本 ④**SuperAdmin** = `POST /admin/admins/{id}/mfa/reset` の 1 本。**v2 で管理者限定だった操作 (V2-F12) をすべて維持し、新しいロール差を作っていない** ([../auth.md](../auth.md) §9.3 Q-A2) |
 | **A-3** テナント境界 | **参照** | スキーマは [../data-model.md](../data-model.md) §4.2 が SSOT。本書が前提にするのは **`signup_links.contract_id NOT NULL`** (P-2) と **`accounts.email` のグローバル一意** (V2-F4) の 2 点。**スキーマへの追加要求は 4 件で、うち 3 件は反映済み** (2026-07-31): 新テーブル 2 件 = `account_deletions` (§5 R-AA-4。**未対応 = DM-Q2 待ちの条件付き**) / **`admin_mfa_configs`** (**R-AA-18 = 実施済み**。§4.1.2 (a) 側 = 所有者列を持たない例外。除外リストも 9 件へ連動済み)、列の追加・変更 2 件 = **`signup_links.token_hash` / `reset_password_requests.hash` → `token_hash`** (R-AA-21 = 実施済み) / **`audit_logs` の `actor_type` に `unauthenticated` を追加 + `actor_id` / `contract_id` の NULL 可 + CHECK** (R-AA-19 = **スキーマは実施済み。残るは `detail.email_hash` の方式**) |
 | **A-4** 絞り込みの層 | **回答** | ①対象は常に path param (AA-D-3) で、**[../auth.md](../auth.md) §6.4 の②コンストラクタ `NewAccountIDInContract` を通してからでないと型が作れない** ②テナント検証は Repository のクエリ条件 (`WHERE id = $1 AND contract_id = $2`) ③**許可リストに載せる認証系クエリを §3.5 で全件確定** (R-3 の必須事項②) ④**全契約横断クエリと契約内クエリはクエリ名を分ける** (`…ForAdmin` / `…InContract`。§3.5 の脚注 1) ⑤**`contract_id` を持たないテーブル (`account_mfa_configs` 等) は「親を契約条件で引いて 404 判定 → その戻り値から作った ID で子を操作」の 2 段**を必須手順とする (§3.5 の脚注 2。**存在確認は所有権の検証にならない**)。**AC-1.2 の補完** |
-| **A-5** ステータスコード | **回答** | §2 の各表の「固有ステータス」列 + §3.1 + **§3.1.1 (401/400 の分類とコード値域)**。判定規則の SSOT は [../auth.md](../auth.md) §6.6。**403 と 404 の評価順序は §3.1.2 で固定**。**同節・[README.md](README.md) §2.5 に対する差分 3 点**: ①**401 に本文を持ち、分類 T / C を `code` の接頭辞で表す** (AA-D-9 / AA-D-18。**認証済み経路の資格情報不一致は 400** = AA-D-17) ②**429 を返す 11 本** (§3.7。AA-D-10) ③**不変条件ガードの 403 (R-3。6 ケース)** (AA-D-12)。差分は §5 **R-AA-2a** (auth.md §6.6。未対応) / **R-AA-2b** (README.md §2.5。実施済み) で SSOT へ是正要求。**AC-1.4** |
+| **A-5** ステータスコード | **回答** | §2 の各表の「固有ステータス」列 + §3.1 + **§3.1.1 (401/400 の分類とコード値域)**。判定規則の SSOT は [../auth.md](../auth.md) §6.6。**403 と 404 の評価順序は §3.1.2 で固定**。**同節・[README.md](README.md) §2.5 に対する差分 3 点**: ①**401 に本文を持ち、分類 T / C を `code` の接頭辞で表す** (AA-D-9 / AA-D-18。**認証済み経路の資格情報不一致は 400** = AA-D-17) ②**429 を返す 10 本** (§3.7。AA-D-10) ③**不変条件ガードの 403 (R-3。6 ケース)** (AA-D-12)。差分は §5 **R-AA-2a** (auth.md §6.6。未対応) / **R-AA-2b** (README.md §2.5。実施済み) で SSOT へ是正要求。**AC-1.4** |
 | **A-6** LLM への越境 | **対象外 (理由あり)** | **本書のエンドポイントに LLM 経路は無い**。唯一の候補 `GET /companies/genai` は §2.7 のとおり [../llm-migration.md](../llm-migration.md) へ先送り。**移植する場合も `gateway/` 経由必須** ([../architecture.md](../architecture.md) §3.8) |
 | **A-7** 共有・公開 | **回答** | 本書は共有機能を持たない。**v2 の `sharing_settings` を応答から落とす** (AA-D-15) ことで、[../auth.md](../auth.md) §6.12 の「契約単位の共有既定は `/settings/workspace` が持ち、per-resource の可視性は各リソースが持つため、契約情報の応答に共有設定を載せる必要が無い」と整合させた (旧根拠「§7 の共有機能なし」は §6.12 の新設で撤回済み — [../auth.md](../auth.md) §10.4 R-11)。テーマ・アセットの `visibility` (列・書き込み API とも) は**増分 1** ([README.md](README.md) D-API-8'。2026-08-02 に C-16 で「増分 2」から改訂) |
 | **O-1** 構造化ログ | **参照 + 回答** | フィールド定義は [../observability.md](../observability.md) §4.1。本書の要件は**エラー本文に `request_id` を含める** ([README.md](README.md) D-API-6) と、**秘密文字列を URL に置かない** (AA-D-4。ログに残さないための構造) |
 | **O-2** LLM 計測 | **対象外 (理由あり)** | LLM 経路が無い (A-6 と同じ)。計測対象 3 本は [README.md](README.md) §4 の O-2 行のまま**増えない** |
-| **O-4** 失敗の可観測性 | **回答** | §3.7 の末尾。**401 / 400 の内訳を §3.1.1 の `code` 単位で数える** (v2 は MFA 失敗が 500 = V2-D2)、**メール送信の失敗を握り潰さない**。**AC-1.6** (認証エンドポイントの濫用対策) に対する本書の貢献は**適用対象の列挙** (P-7): §3.7 の**レート制限 11 本**と、その超過を **429 の発生件数として観測する**こと。しきい値・保管先・fail-closed の挙動は [../auth.md](../auth.md) §6.11-3 が SSOT |
-| **O-5** SSE / 長時間処理 | **回答 (一部先送り)** | **SSE は無い**。長時間処理は**メンバー削除の非同期ジョブ 1 本のみ** (AA-D-13) で、[README.md](README.md) §1.3 の J-2 (状態は DB) / J-3 (heartbeat による回収) / J-5 (冪等キー) / J-7 (状態 GET で回復) に従う。**進捗の SSE は持たない** (残件数のポーリングで足りる — [../data-model.md](../data-model.md) §3.4.3-3) |
-| **O-6** 監査ログ | **回答 (受け皿は反映済み。残差 2 点)** | §3.7 の表で**エンドポイント別に記録事象を確定**した (10 行)。**委譲先の受け皿は 2026-07-31 に両方とも整備された**: ①[../observability.md](../observability.md) に **§4.5.1 (`action` の値域表) / §4.5.2 (actor / contract が NULL になる認証イベントの記録規約)** が新設され、認証系 6 種が §4.5 の記録対象に入った (R-AA-7) ②[../data-model.md](../data-model.md) §4.10 が **`actor_type = 'unauthenticated'` + `CHECK`** を採用し、**`signin_failed` が書けるようになった** (AA-D-21 / R-AA-19)。**したがって「v2 (`activity_logs` の 6 種) より後退した状態」は解消した**。**残差 2 点**: (i) §4.5.1 の値域表に**本書 §3.7 の 7 事象が未収録** (R-AA-7③ で継続要求) (ii) [../data-model.md](../data-model.md) §4.10 の `detail` の例が**pepper 無しの SHA-256** で、本書と [../observability.md](../observability.md) §4.5.2 の **HMAC-SHA256 + pepper** と割れている (R-AA-19 で是正要求)。**失敗サインインでメールアドレスを平文保存しない**点は v2 との差 (V2-F17) |
+| **O-4** 失敗の可観測性 | **回答** | §3.7 の末尾。**401 / 400 の内訳を §3.1.1 の `code` 単位で数える** (v2 は MFA 失敗が 500 = V2-D2)、**メール送信の失敗を握り潰さない**。**AC-1.6** (認証エンドポイントの濫用対策) に対する本書の貢献は**適用対象の列挙** (P-7): §3.7 の**レート制限 10 本**と、その超過を **429 の発生件数として観測する**こと。しきい値・保管先・fail-closed の挙動は [../auth.md](../auth.md) §6.11-3 が SSOT |
+| **O-5** SSE / 長時間処理 | **対象外 (理由あり)** | **SSE も長時間処理も無い**。2026-08-10 の DM-Q2 回答 (削除せず無効化のみ) で **AA-D-13 の非同期削除ジョブが消滅**したため、[README.md](README.md) §1.3 の J-2 / J-3 / J-5 / J-7 を適用する対象が本書に無くなった |
+| **O-6** 監査ログ | **回答 (v2 相当に限定)** | §3.7 の表で**エンドポイント別に記録事象を確定**した (**5 行**。2026-08-10 の **AA-D-23** で v3 独自の拡張を行わないと決めたため 10 行 → 5 行)。値域は [../observability.md](../observability.md) §4.5.1 に既にある v2 由来の 6 種で足り、追加要求 (R-AA-7③) は取り下げた。**先送りしたもの**: ロック・削除・権限変更・招待の実行者追跡と `POST /admin/signin` の成否 — 再開の入口は §6.1 の **AA-Q14** |
 | **O-3** コスト集計 | **対象外** | LLM 経路が無いため該当なし |
-| **O-7** アラート | **対象外 (先送り)** | しきい値と通知先は [../observability.md](../observability.md) §4.6 / [../operations.md](../operations.md)。**本書からの入力は「429 の急増」「レート制限ストア障害による 503」「社内管理者のサインイン失敗」の 3 つ** ([../auth.md](../auth.md) §10.2 R-6 と同じ経路) |
+| **O-7** アラート | **対象外 (先送り)** | しきい値と通知先は [../observability.md](../observability.md) §4.6 / [../operations.md](../operations.md)。**本書からの入力は「429 の急増」「レート制限ストア障害による 503」の 2 つ** — **「社内管理者のサインイン失敗」は AA-D-23 で記録自体を行わないことにしたため入力から外れた** (是正要求は §5 **R-AA-26**。[../observability.md](../observability.md) §4.6 の **AL-7** は `POST /admin/signin` のレート制限発動を見るので引き続き有効) |
 | **D-5** シークレット管理 | **参照** | `JWT_KEY` / `ADMIN_JWT_KEY` は [../auth.md](../auth.md) §6.8。**本書の移植で新たに必要になる資格情報 3 件**: **Resend の API キー** (V2-F11) / **S3** (アイコン) / **`AUDIT_EMAIL_HMAC_KEY`** (監査記録の `detail.email_hash` の pepper。AA-D-21③。**失われると過去の失敗サインインと新しい記録が突き合わせ不能になる**ため、ローテーションはしない前提で棚卸しに載せる)。**棚卸し先は [../operations.md](../operations.md) §4.5 の棚卸し表** (2026-07-31 訂正。**[../infrastructure.md](../infrastructure.md) §3.4 は「器」= Secrets Manager / SSM の構成を定義するが棚卸し表を持たない** — 同書に「棚卸し」の語は 0 件)。**3 件はまだ同表に載っていないため §5 R-AA-23 で起票した** — 載らないまま RL-2 (prod 基盤構築) を通すと、同書 §6.1 の完了条件② (「§4.5 の棚卸し表の全行に prod の値が投入済み」) が**空振りして pepper 未投入のまま prod が立つ**。**招待・リセットのトークンは DB に平文で保存しない** (AA-D-5④ = 秘密の保管場所を増やさない)。**AC-1.5** (鍵の管理と失効手段は [../auth.md](../auth.md) §6.8 が SSOT。**本書の貢献は「本書の移植で増える秘密の列挙」に限る**) |
 | **D-4** マイグレーション | **参照** | 本書はスキーマを直接定義せず、[../data-model.md](../data-model.md) への**追加要求 4 件** (R-AA-4 / R-AA-18 / R-AA-19 / R-AA-21。A-3 行の内訳) に委ねる。方式は同 §6.1。**RL-2 (初期スキーマ投入) より前に確定が要るのは R-AA-19 (既存列の NULL 可化 + `actor_type` の値追加) / R-AA-21 (`signup_links` の列追加と `reset_password_requests.hash` の改名) / R-AA-17 (`signup_links` の `UNIQUE`) の 3 件** — 投入後の変更は移行手順 (§6.5) の対象になる。**R-AA-19 / R-AA-21 は 2026-07-31 に反映済み** (R-AA-19 は `email_hash` の方式のみ残る = 列定義には影響しない)。**R-AA-17 が唯一 RL-2 前に未対応で残っている DB 制約**である |
 | **D-6** Managed Agent | **対象外** | 本書に Agent / custom tool は無い |
@@ -738,25 +740,25 @@ v2 は招待メール送信失敗時にリンクを保存しないまま 500 を
 
 | # | 対象 | 内容 | 状態 (2026-07-31) |
 |---|---|---|---|
-| **R-AA-1** | [../auth.md](../auth.md) §6.11-3 | **レート制限の対象に MFA 検証 (`POST /mfa/totp/verify` / `POST /admin/mfa/totp/verify`) を追加する**。現記述は「未認証で叩けるエンドポイント」に限定しており、**TOTP 6 桁への総当たりが対象外になる** — `failed_sign_in_attempts` はパスワード失敗でしか増えない (`hassan-v2-backend/db/queries/account.sql:56-64`) ため、ロック機構では止まらない (AA-D-10)。キーは `account_id` + エンドポイント | **実施済み・ただし 1 本不足 (2026-07-31 実測)** — [../auth.md](../auth.md) §6.11-3 に**対象② (認証済み)** が新設され、`POST /mfa/totp/verify` / `POST /admin/mfa/totp/verify` / `PUT /accounts/me/password` / `PUT /accounts/me/email` が入った (同 §10.3 の受信欄も「実施済み」)。**`POST /mfa/totp/reset` (`totp_code` の総当たり) が対象②の列挙から漏れている** — 本書 §3.7 のレート制限は **11 本**で、対象②の 4 本 + 公開 6 本 = 10 本しか宣言されていない。**§6.11-3 の対象②に 1 本追加する**のが残作業 (AA-D-10②) |
-| **R-AA-2a** | [../auth.md](../auth.md) §6.6 | **4 点**: ①**401 は `CodedError` 本文を持ち、`code` の接頭辞で分類 T (トークン自体の失効) / 分類 C (提示した資格情報の不一致) を表す**という例外を明記する (現記述は「401 は本文なし」。AA-D-9 / AA-D-18。値域の SSOT は本書 §3.1.1)。**FE の書き分けの軸は「セッションを持つ経路か」ではなく「本文の `code` が `AU-T-` か `AU-C-` か」**である — 経路で分けると MFA 検証 (セッションを持つが分類 C) を取り違えて**強制サインアウトを再生産する**。併せて**認証済み経路の資格情報不一致は 400** (AA-D-17) を §6.6 の表に反映する ②**429 を返す 11 本**を一覧に載せる (README §2.5 の 429 行は「本ディレクトリの対象外」と書いており、本書が同ディレクトリに入ったことで不正確になった。**[README.md](README.md) 側の「8 本」→「11 本」は R-AA-2b ② で実施済み** — S-3 で認証済み 3 本を追加したため) ③**403 の第 3 系統 (R-3 = 契約の不変条件ガード。6 ケース)** を追加する (現記述は「403 は R-1 / R-2 の 2 系統のみ・合計 11 本」)。**403 と 404 の評価順序 (AA-D-19)** も併記する ④**§6.6 の表の「MFA 必須かつ未検証」行の備考「`/mfa` 配下のみ許可」を削除し、「§6.7 のホワイトリストに載せた 2 本 (`POST /mfa/totp/generate` / `POST /mfa/totp/verify`) のみ許可。前方一致判定を使わない」に書き換える** — 同 §6.7 が前方一致を却下済みであるにもかかわらず、**判定規則の SSOT を自称する §6.6 に v2 の前方一致 (V2-F7) が残っており**、[../frontend.md](../frontend.md) の `/mfa` 行が既にこの文言を「根拠」として転記している (波及済み。R-AA-11 と同じ差分で直す) | **①④ 実施済み / ③ 未対応 / ② は R-AA-2b へ移設 (2026-07-31 実測)** — ①[../auth.md](../auth.md) §6.6 に「公開エンドポイントの資格情報エラーは 401 + `CodedError` 本文。値域の SSOT は本書 §3.1.1」の例外行が入った ④同 §6.6 の「MFA 必須かつ未検証」行が「§6.7 のホワイトリストに載せたルートのみ許可」へ書き換わり、`/mfa` 前方一致の記述は消えた (同 §10.3 の受信欄も両方「実施済み」)。**③ (403 の第 3 系統 = R-3 の不変条件ガード 6 ケース) は未対応** — §6.6 の 403 の行は R-1 (契約内管理者限定) と R-2 (リソース単位ロール) の 2 系統しか挙げていない。**403 と 404 の評価順序 (AA-D-19) も未記載**のままである |
-| **R-AA-2b** | [README.md](README.md) §2.5 / §0 | **3 点**: ①401 に本文を持つ例外 ②**429 を返す 11 本** (§0 の差分注記と §2.5 の 429 行に残っていた「8 本」を 11 本へ) ③**403 の第 3 系統 (R-3)** を §2.5 の適用一覧に反映する。**内容は R-AA-2a と同じ差分で、宛先だけが違う** (§5 冒頭の運用 3 に従って行を分けた) | **実施済み (2026-07-31。メインセッションが同差分で対応 — [README.md](README.md) §0 の差分 3 点注記 / §2.5 の 401 行・429 行 / §2.5 の「403 は 10 本」)** |
+| **R-AA-1** | [../auth.md](../auth.md) §6.11-3 | **レート制限の対象に MFA 検証 (`POST /mfa/totp/verify`。**`/admin/mfa/totp/verify` は AA-D-22 で消滅**) を追加する**。現記述は「未認証で叩けるエンドポイント」に限定しており、**TOTP 6 桁への総当たりが対象外になる** — `failed_sign_in_attempts` はパスワード失敗でしか増えない (`hassan-v2-backend/db/queries/account.sql:56-64`) ため、ロック機構では止まらない (AA-D-10)。キーは `account_id` + エンドポイント | **実施済み・ただし 1 本不足 (2026-07-31 実測)** — [../auth.md](../auth.md) §6.11-3 に**対象② (認証済み)** が新設され、`POST /mfa/totp/verify` / `POST /admin/mfa/totp/verify` / `PUT /accounts/me/password` / `PUT /accounts/me/email` が入った (同 §10.3 の受信欄も「実施済み」)。**`POST /mfa/totp/reset` (`totp_code` の総当たり) が対象②の列挙から漏れている** — 本書 §3.7 のレート制限は **10 本**で、対象②の 4 本 + 公開 6 本 = 10 本と一致する (**2026-08-10 に是正済み** — `POST /mfa/totp/reset` を §6.11-3 の対象②へ追加し、AA-D-22 で消滅した `POST /admin/mfa/totp/verify` を外した) |
+| **R-AA-2a** | [../auth.md](../auth.md) §6.6 | **4 点**: ①**401 は `CodedError` 本文を持ち、`code` の接頭辞で分類 T (トークン自体の失効) / 分類 C (提示した資格情報の不一致) を表す**という例外を明記する (現記述は「401 は本文なし」。AA-D-9 / AA-D-18。値域の SSOT は本書 §3.1.1)。**FE の書き分けの軸は「セッションを持つ経路か」ではなく「本文の `code` が `AU-T-` か `AU-C-` か」**である — 経路で分けると MFA 検証 (セッションを持つが分類 C) を取り違えて**強制サインアウトを再生産する**。併せて**認証済み経路の資格情報不一致は 400** (AA-D-17) を §6.6 の表に反映する ②**429 を返す 11 本**を一覧に載せる (README §2.5 の 429 行は「本ディレクトリの対象外」と書いており、本書が同ディレクトリに入ったことで不正確になった。**[README.md](README.md) 側の「8 本」→「11 本」は R-AA-2b ② で実施済み** — S-3 で認証済み 3 本を追加したため) ③**403 の第 3 系統 (R-3 = 契約の不変条件ガード。6 ケース)** を追加する (現記述は「403 は R-1 / R-2 の 2 系統のみ・合計 16 本」— **本数は `make check-endpoint-mapping` の実測が正**)。**403 と 404 の評価順序 (AA-D-19)** も併記する ④**§6.6 の表の「MFA 必須かつ未検証」行の備考「`/mfa` 配下のみ許可」を削除し、「§6.7 のホワイトリストに載せた 2 本 (`POST /mfa/totp/generate` / `POST /mfa/totp/verify`) のみ許可。前方一致判定を使わない」に書き換える** — 同 §6.7 が前方一致を却下済みであるにもかかわらず、**判定規則の SSOT を自称する §6.6 に v2 の前方一致 (V2-F7) が残っており**、[../frontend.md](../frontend.md) の `/mfa` 行が既にこの文言を「根拠」として転記している (波及済み。R-AA-11 と同じ差分で直す) | **①④ 実施済み / ③ 未対応 / ② は R-AA-2b へ移設 (2026-07-31 実測)** — ①[../auth.md](../auth.md) §6.6 に「公開エンドポイントの資格情報エラーは 401 + `CodedError` 本文。値域の SSOT は本書 §3.1.1」の例外行が入った ④同 §6.6 の「MFA 必須かつ未検証」行が「§6.7 のホワイトリストに載せたルートのみ許可」へ書き換わり、`/mfa` 前方一致の記述は消えた (同 §10.3 の受信欄も両方「実施済み」)。**③ (403 の第 3 系統 = R-3 の不変条件ガード 6 ケース) は未対応** — §6.6 の 403 の行は R-1 (契約内管理者限定) と R-2 (リソース単位ロール) の 2 系統しか挙げていない。**403 と 404 の評価順序 (AA-D-19) も未記載**のままである |
+| **R-AA-2b** | [README.md](README.md) §2.5 / §0 | **3 点**: ①401 に本文を持つ例外 ②**429 を返す 10 本** (2026-08-10 に 11 → 10) (§0 の差分注記と §2.5 の 429 行に残っていた「8 本」を 11 本へ) ③**403 の第 3 系統 (R-3)** を §2.5 の適用一覧に反映する。**内容は R-AA-2a と同じ差分で、宛先だけが違う** (§5 冒頭の運用 3 に従って行を分けた) | **実施済み (2026-07-31。メインセッションが同差分で対応 — [README.md](README.md) §0 の差分 3 点注記 / §2.5 の 401 行・429 行 / §2.5 の「403 は 10 本」)** |
 | **R-AA-3** | [settings.md](settings.md) §5 (①②) / 同 §2 の `:35` (③) | **3 点**: ①**社内管理者向けのアカウント検索 (`GET /admin/companies/accounts` = `hassan-v2-backend/router/router.go:216`) が移植リストに無い** — これが無いと `/admin/accounts` 画面 ([../frontend.md](../frontend.md) §11.1) がロック対象を探せず、**解除操作に到達できない** (BE-10) ②**社内管理者による一般アカウントの MFA リセット (`同:217`) も無い** (AA-Q2 の対象) ③**[settings.md](settings.md)`:35` (§2 のプロトタイプ棚卸し表。§5 ではない) の「変更フローは検証メール等を含む」は誤り** — v2 の `UpdateEmailUseCase` はメール送信を行わず、パスワード確認のみで即時更新する (`hassan-v2-backend/usecase/account/update_email.go:35-66`。EmailService への依存を持たない) ④**§2 冒頭 (`:30`) と §5 冒頭 (`:158`) の「入出力仕様の起草は未着手」を「入出力仕様は [auth-accounts.md](auth-accounts.md) が確定 (2026-07-31)」へ書き換える** — [settings.md](settings.md) から入る読者 (設定画面の実装者) が「仕様が無い」と読み、着手不可と判断する (`.claude/rules/06-delegation-prompts.md` の「機構を直したら、その機構を語る文書を同じ差分で直す」)。同書 `:220` (ST-Q6) の「[../data-model.md](../data-model.md) (**未着手**)」も同じ差分で直せる ⑤**§5 の `POST /admin/signin` の出典を `同:194` → `同:195` に訂正する** — 実測 `hassan-v2-backend/router/router.go:195` = `adminRoute.POST("/signin", ...)` で、**`:194` は `adminRoute := r.Group("/admin")`**。[../auth.md](../auth.md) §6.2 と本書 §2.1 は既に `:195` と正しく書いており、**[settings.md](settings.md) だけが誤ったまま残っている** (DR-1)。行番号がずれると実装者が `r.Group` の行を見て「middleware が付いていない理由」を誤解する | **④⑤ 実施済み / ①②③ 未対応 (2026-07-31 実測)** — ④[settings.md](settings.md) §2 冒頭・§5 冒頭とも「**入出力仕様は [auth-accounts.md](auth-accounts.md) が確定 (2026-07-31)**」に更新され、同書に「未着手」の語は 0 件 ⑤§5 の `POST /admin/signin` の出典が `同:195` に訂正され、訂正理由も併記された。**①② (社内管理者向けのアカウント検索 `GET /admin/companies/accounts` と一般アカウントの MFA リセット) は §5 の移植リストに依然無い** (実測: 同書に該当パスの行が無い) / **③ (§2 の「変更フローは検証メール等を含む」) も未訂正** |
-| **R-AA-4** | [../data-model.md](../data-model.md) **§4.2** (アイデンティティ・テナント基盤) | **`account_deletions` (メンバー削除ジョブの状態) を追加する**。同 §3.4.3-4 が「移管は同期 API で完結させない」と決めた一方、**ジョブの状態を持つテーブルが無く `GET /account-deletions/{id}` の実装先が無い** (AA-D-13)。§4.2 を置き場に選ぶ理由: DM-16 が「非同期ジョブはドメインごとに独立テーブルか列で持つ」を規約化しており、`accounts` に列を足さない (AA-D-13 却下 (c)) 以上、**同じドメイン (アイデンティティ基盤) の独立テーブル**が規約どおりの帰結になる。**列**: **`id uuid`** (**型を uuid で確定する** — 応答の `deletion_id` は FE の生成型に出る。`bigserial` だと連番から他契約のジョブ発生数が推測できるため採らない。§2.0 の ID 型の列挙に `account_deletions` を加える) / `contract_id` (所有者列。`NOT NULL` + FK) / `target_account_id` (**FK を張らない**) / `status` / `failure_code` / `failure_message` / `heartbeat_at` (DM-17) / `idempotency_key` (= `target_account_id`) / タイムスタンプ。**①`remaining_aggregates` を列に持たない** — 同 §3.4.3-3 が「進捗は残件数で表す」「**別途の進捗テーブルを持たない**」と確定しており、列に持つと二重管理になってジョブ異常終了時に列と実体が食い違う (BE-4 / BE-10)。**応答の `remaining_aggregates` は `WHERE account_id = <target>` を数えて算出する**。**②`target_account_id` に FK を張らない理由**: 完了時に `accounts` の行を物理削除する (同 §3.4.3-4) ため、FK があると**完了直後に削除できない**か、`CASCADE` にすると**ジョブ行ごと消えて完了記録が残らない**。先例は同 §4.10 (`audit_logs.actor_id` / `llm_call_records.account_id` は append-only を理由に FK を張らない)。**③既存決定との読み替えを明記すること**: 同 §3.4.3-3 の「進捗は残件数で表す・**別途の進捗テーブルを持たない**」は**集約単位の進捗表**を否定したものであり、**DM-16 (非同期ジョブはドメインごとに独立テーブルか列で持つ) に従う「ジョブ 1 行」とは両立する**。§3.4.3-3 にその旨の脚注を足さないと、data-model 側で「既に決めた方針と矛盾する」として却下されうる。**④件数の連動を同じ差分で更新すること**: 機能テーブルとして追加するため **§4.1.1 の機能テーブル 40 → 41 / 契約境界 8 → 9** となり、`make check-table-counts` が照合する **22 箇所**の該当分が動く (検算があるので事故にはならないが、要求に書かないと起草側が 1 巡余計に回る) | **未対応。ただし [../data-model.md](../data-model.md) DM-Q2 の回答待ちの条件付き要求** — 「削除せず無効化のみ」に決まれば本テーブルと `GET /account-deletions/{id}` ごと不要になる (AA-Q8)。**DM-Q2 が確定するまで実装リポへ渡さない** |
+| **R-AA-4** | — | **取り下げ (2026-08-10)**。DM-Q2 が「削除せず無効化のみ」に確定したため、`account_deletions` テーブルも `GET /account-deletions/{deletion_id}` も不要になった (AA-D-13 の改訂)。**代わりに R-AA-27 (`accounts` の無効化列) を出す** |
 | **R-AA-5** | [../data-model.md](../data-model.md) §4.2 | **`register_admin_password_requests` を v3 のテーブル一覧から外すか、使う経路を定義する**。[../auth.md](../auth.md) §6.2 が社内管理者の投入を移行スクリプトに限定した (API を作らない) ため、**v3 に読み手も書き手も無い** (BE-10 の形。§2.7)。パスワードハッシュも移行スクリプトが投入するため登録フローは不要 | **未対応** |
 | **R-AA-6** | [../data-model.md](../data-model.md) §6.4 (DM-A2) | **`company_missions` の既存データの扱いを移行対象の判断に含める** (AA-D-1 で API を作らない判断をしたため、`v2 の既定ミッション文` を v3 のどこにも写さないと消える)。**候補**: 移行しない / テーマ作成時の初期値として 1 回だけ写す | **未対応** |
-| **R-AA-7** | [../observability.md](../observability.md) §4.5 | **監査対象に認証系の事象を追加する** (§3.7 の表)。**v2 に既に存在する 6 種** (`signin_success` / `signin_failed` / `mfa_verify_success` / `mfa_verify_failed` / `mfa_reset_by_admin` / `mfa_reset_by_aillio_admin` — `hassan-v2-backend/db/schema.sql:467-479`) を落とすと「v2 でできていたことを満たす」に反する。併せて**失敗サインインの記録でメールアドレスを平文で保存しない** (v2 は `activity_logs.account_email` に平文 — `同:482-489`)。**代わりに `detail.email_hash` = HMAC-SHA256 (pepper `AUDIT_EMAIL_HMAC_KEY`) を規約として書く** (AA-D-21③)。**③`action` の値域表 (ドメイン別) を §4.5 に新設する** — 現状 §4.5 には**記録対象の散文と記録項目のリストしかなく値域が無い**のに、本書と [settings.md](settings.md) `:68` / `:131` (D-ST-6) の**3 文書が同じ節を値域の SSOT として参照している** (BE-10)。初期値は**本書 §3.7 の 10 行 + [settings.md](settings.md) の活動種別 6 種 + [../auth.md](../auth.md) §6.9 のロック / 解除**。**2026-07-31 の実測で §4.5.1 に不足している 7 値を名指しで追加する**: `signup_link_issued` (`POST /accounts/{id}/signup-links`) / `signup_completed` (`POST /accounts/signup`) / `password_reset_requested` (`POST /accounts/reset-password`) / `password_reset_completed` (`.../confirm`) / `password_changed` (`PUT /accounts/me/password`) / `email_changed` (`PUT /accounts/me/email`) / **`company_mfa_type_changed`** (`PUT /companies/me/mfa`)。**とくに最後の 1 件は契約全体の MFA を無効化できる操作**であり、値域に無いと「いつ誰が MFA を切ったか」が追えない。**`audit_logs.action` に `CHECK` を張るか、Go の定数 1 箇所を SSOT にするかも同時に決める** ([../data-model.md](../data-model.md) DM-15 は `action text` を採り enum を却下しているため、既定は「Go の定数 1 箇所 + CI 照合」が整合する)。**④actor / contract が確定しない認証イベントの記録規約** (AA-D-21) を §4.5 に書く — スキーマ側の要求は R-AA-19 | **部分対応 (2026-07-31)** — メインセッションが [../observability.md](../observability.md) に **§4.5.1 (`action` の値域表。Go の定数 1 箇所 + CI 照合。`CHECK` は DM-15 と整合しないため却下)** と **§4.5.2 (actor/contract が NULL になる認証イベントの記録規約 + `detail.email_hash` = HMAC-SHA256 + pepper)** を新設し、§4.5 の記録対象に認証系 6 種を追加した。**①②④ は充足。③ が未充足** — §4.5.1 の値域表は認証 6 種 / アカウント・ロック 5 種 / 利用状況 6 種のみで、**本書 §3.7 の 7 事象 (上記の名指し 7 値) に対応する値が 1 つも無い**。この 7 値が入るまで、該当 UseCase は自由な文字列を書く余地が残る (BE-8) |
+| **R-AA-7** | [../observability.md](../observability.md) §4.5 | **①②のみ有効 (③は取り下げ)**。①**v2 に既に存在する 6 種** (`signin_success` / `signin_failed` / `mfa_verify_success` / `mfa_verify_failed` / `mfa_reset_by_admin` / `mfa_reset_by_aillio_admin` — `hassan-v2-backend/db/schema.sql:467-479`) を落とさないこと ②**失敗サインインのメールアドレスは平文で保存せず HMAC-SHA256 + pepper のハッシュにする** (AA-D-21)。**③ v3 独自事象の値域追加は AA-D-23 で取り下げ** |
 | **R-AA-8** | [../auth.md](../auth.md) §6.3 の例外表 (`account_mfa_configs` の行) | **「引くときの条件がトークン検証済みの `account_id` であるため §6.4 の許可リスト側で扱う」の記述を見直す** — §6.4 の SQL 検査は**所有者条件 (`account_id` を含む) の有無**を見るため、`WHERE account_id = $1` を持つクエリは検査を通り、**許可リストへの登録は不要**である (§3.5 の「載せないもの」)。必要なのは**スキーマ検査 (`contract_id` 必須) の除外**だけで、それは [../data-model.md](../data-model.md) §4.1.2 (b) に登録済み。現記述のままだと実装リポが不要な例外を許可リストに積む | **実施済み (2026-07-31)** — [../auth.md](../auth.md) §6.3 の該当行が「スキーマ検査の例外であり許可リストには載せない」に訂正された (同 §10.3 の受信欄) |
-| **R-AA-9** | [../auth.md](../auth.md) §6.7 の 4 系統表 | **ユーザー側の「MFA 未検証で到達可」が系統表に現れていない** — 表の「ユーザー認証」行は「上記と管理者系を除く全ルート」であり、`POST /mfa/totp/generate` / `verify` の 2 本が**同節後半の別機構 (許可ルートのホワイトリスト)** で表現されている。**管理者側は 4 番目の系統として表に載っているのに、ユーザー側は載っていない**という非対称。本書 §2.2 / §2.3 は系統を 5 分類 (公開 / ユーザー MFA 未検証可 / ユーザー / 管理者 MFA 未検証可 / 管理者) として表を分けた。**表側を 5 系統に揃えるか、脚注で 2 本を明示するかを SSOT 側で決める** | **実施済み (2026-07-31)** — [../auth.md](../auth.md) §6.7 の系統表が非対称を解消した (同 §10.3 の受信欄) |
+| **R-AA-9** | [../auth.md](../auth.md) §6.7 の系統表 | **ユーザー側の「MFA 未検証で到達可」が系統表に現れていない** — 表の「ユーザー認証」行は「上記と管理者系を除く全ルート」であり、`POST /mfa/totp/generate` / `verify` の 2 本が**同節後半の別機構 (許可ルートのホワイトリスト)** で表現されている。**管理者側は 4 番目の系統として表に載っているのに、ユーザー側は載っていない**という非対称。本書 §2.2 / §2.3 は系統を 5 分類 (公開 / ユーザー MFA 未検証可 / ユーザー / 管理者 MFA 未検証可 / 管理者) として表を分けた。**表側を 5 系統に揃えるか、脚注で 2 本を明示するかを SSOT 側で決める** | **実施済み (2026-07-31)** — [../auth.md](../auth.md) §6.7 の系統表が非対称を解消した (同 §10.3 の受信欄) |
 | **R-AA-10** | [../frontend.md](../frontend.md) §5.2.2 / §16.2-6 | **是正要求への回答が本書 §2.5 で揃った** (`SignInResult` に `auth_role` / `mfa.required_type` / `mfa.verified` / `account.id` / `name` / `company_name` を含む)。同節の「応答に入るまでは導線を全員に出す」暫定挙動を**解除できる**。併せて **§9 の「401 → `/api/logout`」を §3.1.1 の分類で書き換える** — **`code` が `AU-T-` で始まるときだけ破棄し、`AU-C-` はフォーム内エラーとして扱う。本文なし・未知の接頭辞は分類 T (fail-safe)**。**エンドポイントやセッションの有無で分岐しない** (MFA 検証はセッションを持つが分類 C。AA-D-9 / AA-D-17) | **実施済み (2026-07-31)** — [../frontend.md](../frontend.md) §5.2.2 の暫定挙動 (「応答に入るまでは導線を全員に出す」) が解除され、**§9 に分類 T / C の 2 行 + 判定 3 行 (`AU-T-` → 破棄 / `AU-C-` → フォーム内 / それ以外 → 破棄)** が反映済み。本書 §3.1.1 と同一の契約になっている |
 | **R-AA-11** | [../frontend.md](../frontend.md) §11.1 / §11.3.1 | **2 点**: ①**根拠列が `[未確定] (Task-3i)` のままの 11 行** (`/login` / `/mfa` / `/mfa/setup` / `/signup` / `/reset-password` / `/settings/members` / `/admin/signin` / `/admin/mfa/setup` / `/admin/mfa` / `/admin/accounts` / `/admin/admins`。**実測 11 行** — うち文字列 `Task-3i` を含む行は 9 なので、**grep だけで拾うと 2 行落ちる**) を **`[API]` + 本書への参照**に更新する — **読者 (FE 実装者) は「仕様が無い」と読み、着手不可と判断する** ②**§11.3.1 の「セッションの寿命」行**は「値は Task-3i が管理者トークンの有効期間を決めた後に一致させる」としているが、**P-3 (FE-Q8 = 7 日) で確定済み**であり、本書 §2.4 の管理者トークンも 7 日である。**「7 日」に確定させる** ③**`/login` に「ロック時の案内」を持たせる** — サインイン応答が `AU-C-00002` (ロック) のとき「契約内管理者に解除を依頼してください」を表示する。**`/reset-password` の完了画面には置けない** (204 固定・未認証ではロック状態を知れない = §3.4 / S-7) | **①②③ すべて実施済み (2026-07-31)** — ①[../frontend.md](../frontend.md) §11.1 に `[未確定] (Task-3i)` の行は残っていない (実測 0 件) ②§11.3.1 のセッション寿命が 7 日に確定 ③§9 の分類 C 行と §11.1 の `/login` 行に「`AU-C-00002` を受けたら管理者へ解除を依頼と案内」が入った |
-| **R-AA-12** | [../auth.md](../auth.md) §6.2 | **本増分に含める社内管理者機能の列挙に「一般アカウントの MFA リセット」(`POST /admin/accounts/{account_id}/mfa/reset` — §2.4.2) を追加する** (2026-07-31 の AA-Q2=a で確定。MFA 必須契約で契約内管理者が全員デバイスを失った場合の製品内で唯一の回復経路)。**採番の経緯**: 当初 R-AA-10 として追記したが起草時の R-AA-10 と ID が衝突したため 2026-07-31 のレビュー指摘 (S-10) で R-AA-12 へ改番。その結果**既存の R-AA-12 ([../testing.md](../testing.md) §7.3) と再衝突した**ため、後者を **R-AA-14** へ改番して解消した (同日) | **実施済み (2026-07-31)** — [../auth.md](../auth.md) §6.2 の「本増分に含める範囲」表に `POST /admin/accounts/{account_id}/mfa/reset` の行が入り、回復経路が無い場合の帰結も併記された (同 §10.3 の受信欄) |
-| **R-AA-13** | [plan.md](../../../aidlc-docs/inception/productionization/plan.md) / `aidlc-docs/aidlc-state.md` / `todo.html` | **Task-3i の状態を「完了」に更新する** (成果物 = 本書 + [README.md](README.md) §0 / §3 の更新)。併せて **aidlc-state.md の「④Task-3i は DM-A3 / DM-A4 の回答が前提」の行**と、**todo.html の be / fe「認証機能設計」(現在 進行中 = 1。理由が「入出力仕様は Task-3i 未着手」)** を実態へ同期する。**本書からは編集しない** (状態管理はメインセッションの担当)。**更新は 2026-07-31 のレビューが挙げた重大指摘 (本書側の反映 = R-AA-18〜R-AA-22 の起票を含む) が解消し、再レビューで重大ゼロを確認した後に行う** — 現時点で「Task-3i 完了」にすると、受け皿の無い委譲先 (`admin_mfa_configs` / `audit_logs` / `action` 値域 / トークン列) が未整備のまま実装リポへ渡る | **未対応 (重大指摘の解消が前提)** |
+| **R-AA-12** | [../auth.md](../auth.md) §6.2 | **本増分に含める社内管理者機能の列挙に「一般アカウントの MFA リセット」(`POST /admin/accounts/{account_id}/mfa/reset` — §2.4) を追加する** (2026-07-31 の AA-Q2=a で確定。MFA 必須契約で契約内管理者が全員デバイスを失った場合の製品内で唯一の回復経路)。**採番の経緯**: 当初 R-AA-10 として追記したが起草時の R-AA-10 と ID が衝突したため 2026-07-31 のレビュー指摘 (S-10) で R-AA-12 へ改番。その結果**既存の R-AA-12 ([../testing.md](../testing.md) §7.3) と再衝突した**ため、後者を **R-AA-14** へ改番して解消した (同日) | **実施済み (2026-07-31)** — [../auth.md](../auth.md) §6.2 の「本増分に含める範囲」表に `POST /admin/accounts/{account_id}/mfa/reset` の行が入り、回復経路が無い場合の帰結も併記された (同 §10.3 の受信欄) |
+| **R-AA-13** | [plan.md](../../../aidlc-docs/inception/productionization/plan.md) / `aidlc-docs/aidlc-state.md` / `todo.html` | **Task-3i の状態を「完了」に更新する** (成果物 = 本書 + [README.md](README.md) §0 / §3 の更新)。併せて **aidlc-state.md の「④Task-3i は DM-A3 / DM-A4 の回答が前提」の行**と、**todo.html の be / fe「認証機能設計」(現在 進行中 = 1。理由が「入出力仕様は Task-3i 未着手」)** を実態へ同期する。**本書からは編集しない** (状態管理はメインセッションの担当)。**更新は 2026-07-31 のレビューが挙げた重大指摘 (本書側の反映 = R-AA-18〜R-AA-22 の起票を含む) が解消し、再レビューで重大ゼロを確認した後に行う** — 現時点で「Task-3i 完了」にすると、受け皿の無い委譲先 (`audit_logs` / `action` 値域 / トークン列。**`admin_mfa_configs` は AA-D-22 で不要になった**) が未整備のまま実装リポへ渡る | **未対応 (重大指摘の解消が前提)** |
 | **R-AA-14** | [../testing.md](../testing.md) §7.3 / §13.1 (T-Q3) | **「例外の表現方法は Task-3i が定義する」の参照先を本書 §3.6 に更新する** — 定義は「**`companies.mfa_type = 'none'` を使い、コードに分岐を作らない**」であり、歯止め 3 点 (dev 専用シード / prod の投入手順に含めない / CI 検査) を含む。**§3.6 の歯止め③ (CI 検査) は [../testing.md](../testing.md) 側の検査一覧にも載せる必要がある** | **未対応** |
 | **R-AA-15** | [../auth.md](../auth.md) §6.7 の**公開系統のホワイトリスト** | **公開系統の宣言を「本書 §2.1 の 6 本 + `GET /alive`」に差し替える**。同節の「公開」行は現在 **`GET /accounts/signup-links/:id`** と **`POST /accounts/reset-password/:hash`** を具体パスで宣言しているが、本書は AA-D-4 (秘密を URL に置かない) により **`POST /accounts/signup-links/lookup`** / **`POST /accounts/reset-password/confirm`** へ変更した。**この表が §6.7 の CI 検査の入力である**ため、放置すると ①実装が §6.7 に合わせて旧パスを作る ②または新パスが未宣言として CI で落ちる、のどちらかになる (§7.1 の「共通層を先に完成させる」が成立しない)。**`GET /alive` を明示的に含める** ([../infrastructure.md](../infrastructure.md) INF-D / [../auth.md](../auth.md) §1.6)。**併せて SSOT の向きを確定する** (下の「SSOT の向き」を参照) | **未対応 (M-2)** |
 | **R-AA-16** | [../frontend.md](../frontend.md) §11.1 | **`/settings/profile` 相当の画面を 1 本追加する** (R-AA-11 とは別の要求。**既存行の根拠列更新ではなく行の新設**)。§11.1 の現ルート一覧に**自分自身のプロフィール系画面が 1 つも無い**ため、本書 §2.3.1 の **6 本に消費者 (画面) が存在しない** (BE-10 の読む側の不在): `PUT /accounts/me` (氏名・所属・役割) / `PUT /accounts/me/email` / `PUT /accounts/me/password` / `POST /accounts/me/icon` / `DELETE /accounts/me/icon` / `POST /mfa/totp/reset` (自分の TOTP 再登録)。とくに **`POST /mfa/totp/reset`** は AA-D-8 が「v2 でできていた自己解決の経路を失わない」を理由に残したエンドポイントであり、**画面が無いとその判断の根拠が成立しない**。画面に載せる項目 = 氏名 / 所属 / 役割 / アイコン / メールアドレス / パスワード / MFA 再登録。**入力は [settings.md](settings.md) §2 (`:33`-`:37`) のプロトタイプ棚卸しにある profile 項目**だが、**プロトタイプは設計入力であって仕様ではない** (DR-7) ため、ルートと画面仕様の確定は §11.1 側で行う。**画面を作らない判断をする場合は、本書 §2.3.1 の該当 6 本を本増分から外す** (作ったが誰も呼ばない API を残さない) | **実施済み (2026-07-31)** — [../frontend.md](../frontend.md) §11.1 に **`/settings/profile`** (`(app)` グループ) が新設され、氏名・所属・役割 / アイコン / メール変更 / パスワード変更 / MFA 再登録の 6 本すべてに消費者ができた。**同行は AA-D-17 の 400 (フィールドエラー) も正しく反映している** (本書 §3.1.1 と一致)。本書 §1.1 / §2.3.1 の「画面未存在」記述も同日に更新済み |
 | **R-AA-17** | [../data-model.md](../data-model.md) §4.2 (`signup_links`) | **`UNIQUE (contract_id, email)` を追加する**。AA-D-5 ② の「1 アカウントにつき有効な招待リンクは 1 本」を**発行時の delete → insert という手続きだけ**で担保しているため、**「再送」を同時に 2 回押すと 2 本の有効リンクが残る** (delete → insert のレース。BE-11 と同型)。DB 制約があれば 2 本目の insert が失敗し、UseCase は 409 か再試行として扱える。**制約を入れない場合でも、発行は 1 トランザクション内で `DELETE` → `INSERT` を行い、トランザクション分離だけに頼らない**ことを §4.2 の注記に残す (本書 §3.3 にも明記済み) | **未対応 (S-8)** |
-| **R-AA-18** | [../data-model.md](../data-model.md) §4.2 / §4.1.2 (a) / §3.3 の検査① / §7.2 | **`admin_mfa_configs` を追加する**。[../auth.md](../auth.md) §6.2 が「`admin_mfa_configs` 相当を新設する」と決定し、同 §10.2 R-3 の必須事項③が本書に「スキーマ」を要求しているが、**起票時点では [../data-model.md](../data-model.md) に `admin_mfa_configs` の記述が 1 件も無く** (2026-07-31 の 1 巡目レビュー時に実測)、**本書 §2.4.1 の 2 本 (社内管理者の TOTP 登録・検証) はシークレットの保存先が無く実装不能だった** (BE-10)。`account_mfa_configs.account_id` は `accounts` への FK なので流用できない (`hassan-v2-backend/db/schema.sql:68-77`)。**列** (v2 の `account_mfa_configs` を雛形にする): `admin_account_id uuid NOT NULL` (`admin_accounts` への FK・`ON DELETE CASCADE`・PK の一部) / `mfa_type text NOT NULL` (**`totp` 固定**。§4.2 の enum → text + CHECK 方針に合わせる) / `otp_secret text NOT NULL` / `is_verified boolean NOT NULL DEFAULT false` / `created_at` / `updated_at` / `PRIMARY KEY (admin_account_id, mfa_type)`。**例外分類は §4.1.2 の (a) 側** (所有者列を持たない。社内管理者は契約に属さないため `contract_id` を持てず、`admin_account_id` は所有者列として認識されない — 本書 §3.5 の⑦と同じ理由)。**連動する件数を同じ差分で更新すること**: §4.1.2 見出しの「機能テーブル以外の 11 テーブル」→ 12、(a) 表 6 → 7 件、**§3.3 検査①の除外リスト「8 件」→ 9 件** (起票時の実測で §3.3 / §4.1.2 / §7.2 / §8 の **4 箇所**が連動する)。**この 4 箇所は起票時点で `make check-table-counts` の検算対象外**だったので、同時に検算対象へ加えるか定義元へのリンクに置き換える (DR-9)。**R-AA-5 (`register_admin_password_requests` を外す) と同じ差分で扱う** — 両方が通ると (a) 表と除外リストの件数は差し引きゼロになるため、別々に反映すると中間状態で件数がずれる | **実施済み (2026-07-31)** — [../data-model.md](../data-model.md) **§4.2 に定義**・**§4.1.2 (a) の表に追加** (「`admin_accounts` に属し契約を横断する運用主体の設定なので `contract_id` を持たない」)・**§3.3 の検査①の除外リストを 9 件へ更新**。件数は `make check-table-counts` が §4.1.2 の 2 表から**実測して照合する形になった** (「機能テーブル以外 12 / 除外リスト 9」を実測 — 転記の照合ではなくなったため DR-9 の懸念も解消)。**R-AA-5 は依然未対応**だが、除外リストが実測式になったため中間状態の件数ずれは起きない |
+| **R-AA-18** | — | **取り下げ (2026-08-10。AA-D-22)**。社内管理者に MFA を課さないため `admin_mfa_configs` は作らない。**[../data-model.md](../data-model.md) §4.2 に追加済みの定義を削除する要求 = R-AA-28** |
 | **R-AA-19** | [../data-model.md](../data-model.md) §4.10 (`audit_logs`) | **actor / contract が確定しない認証イベントを書けるようにする** (AA-D-21)。**起票時の問題**: 同節の列定義は `actor_id uuid` / `contract_id NOT NULL` で、「社内管理者による全契約横断の操作でも対象アカウントの契約が入るため NOT NULL を維持できる」と明示していたが、**未登録メールアドレスへのサインイン失敗では actor も契約も存在せず `signin_failed` が書けない** — **v2 でできていた `signin_failed` / `mfa_verify_failed` (V2-F17) が v3 で落ち、O-6 が v2 より後退する**。**要求 4 点のうち①②④は充足済み** (下の状態列)。**残る要求は 1 点**: **`detail.email_hash` の方式を「pepper 無しの SHA-256」から「HMAC-SHA256 + サーバ側 pepper (`AUDIT_EMAIL_HMAC_KEY`)」へ改める** — **メールアドレスは低エントロピーで候補が有限**なので、素のダイジェストは既知アドレスの総当たりで復元でき、**「監査ログを見られてもアドレスが分からない」が成立しない** (**2026-07-31 ユーザー決定**)。同節自身が「**値域と記録項目の SSOT は [../observability.md](../observability.md) §4.5**」と書いており、その **§4.5.2 は HMAC + pepper で確定済み**であるため、**現状は参照先と本文の例が矛盾している** — どちらで実装されるかが読んだ順で決まる (BE-12)。**併せて③の扱いを確認する**: 本書が起票した「`(contract_id, …)` を `WHERE contract_id IS NOT NULL` で部分化する」は**採用されず**、代わりに `(action, occurred_at DESC) WHERE actor_type = 'unauthenticated'` が入った。**本書はこの形を受け入れた** (AA-D-21 の代償②) ので、③の再要求はしない | **①②④ 実施済み・③ は別案で対応・`email_hash` の方式のみ未対応 (2026-07-31)**。実施済みの内容: ①`actor_id` / `contract_id` を NULL 可 ②**`actor_type` に `unauthenticated` を追加し、`CHECK` は `action` ではなく `actor_type` を条件にする形**を採用 (本書の起票は「`action` が認証失敗系のときだけ」だったが、**SSOT 側の形に本書を合わせた** — AA-D-21①) ④反転を明記し反転理由 (未認証の失敗イベント) を同節に記録済み。**未対応の 1 点 (`detail` の例が pepper 無しの SHA-256) は本書 §4 の D-5 (pepper の棚卸し) と §3.7 に依存する**ため、放置すると pepper を持つ実装と持たない実装が並立する |
 | **R-AA-20** | [../auth.md](../auth.md) §6.4 (許可リストの記載形式と CI 検査) | **許可リストの必須項目に「呼び出しを許す系統」列を足し、種別⑦を系統で機械検査できるようにする**。**問題**: 同節は「**許可リストは「そのクエリを許可する」だけで呼び出し元を制約しない**」と明記している (同節の種別⑦の「理由」欄)。種別⑦のクエリ (`WHERE id = $1`) を契約内管理者の UseCase が呼んでも、①SQL 検査 (所有者条件の有無) ②許可リスト検査の**どちらも通る**ため、**V2-D4 / 同 §5-11 (ロック解除のテナント越境) が CI を通ったまま復活する**。**3 点**: ①必須項目を「ファイルパス + クエリ名 + 種別 + 理由 + **呼び出しを許す系統**」にする ②**種別⑦の定義に「社内管理者系統 (`X-Admin-Token`) の UseCase からのみ呼べる」を含める** ③**CI 検査に「⑦のクエリ名をユーザー系統のパッケージが参照していないこと」を加える** (系統の機械判定は同 §6.7 で既に成立しているため、系統列との突き合わせが可能)。**§6.4 が却下したのは「③ (レコードを返す一意性検査) に呼び出し元パッケージを書かせる案」であり、その却下理由 (レコードを返す経路が残る) は⑦には当てはまらない** — ⑦は書き込みで、系統が既に機械判定できる。**併せて本書 §3.5 のクエリ名変更を許可リストに反映する** (`UnlockAccountByID` → **`UnlockAccountByIDForAdmin`** / `DeleteAccountMfaConfigByAccountID` (社内管理者経路) → **`DeleteAccountMfaConfigForAdmin`**) | **①②③ 実施済み (2026-07-31 実測)** — [../auth.md](../auth.md) §6.4 の記載形式に「**種別⑦は『呼び出しを許す系統』も必須項目**」が入り、種別⑦の定義にも「登録には『呼び出しを許す系統』列が必須」が追記され、追加制約の項に「**§6.7 の系統検査と突き合わせて機械判定する**」「③に呼び出し元を書かせる案の却下理由は⑦には当てはまらない」が明記された。**同 §10.3 の受信欄には本 ID の行が無い**ため、受信欄への追記は宛先側の残作業 (本書からは書けない)。**クエリ名変更 (`…ForAdmin`) の許可リストへの反映は実装リポの担当** (§3.5 が元表) |
 | **R-AA-21** | [../data-model.md](../data-model.md) §4.2 (`signup_links` / `reset_password_requests`) | **秘密文字列の格納先を定義する** (AA-D-5④)。**現状 `signup_links` に `token` 相当の列が無く** (v2 は 5 列 = V2-F3。秘密はリンク ID 自体 = V2-F2)、**`reset_password_requests` の列は `hash` で `token` は無い** (`hassan-v2-backend/db/schema.sql:312-320`) ため、本書 §3.3 / §3.5 のフローに保存先が存在しない (BE-10)。**2 点**: ①**`signup_links` に `token_hash text NOT NULL UNIQUE` を追加する** — §4.2 の「変える点は 2 つだけ」に対する **3 点目**になる。**承認の根拠**: AA-D-5 の却下 (b) が `account_id` 追加を却下した理由は「**移行の写像が増える**」だが、**P-2 (v2 の既存未使用リンクは引き継がず失効・再発行 = DM-A4=B) により `token_hash` には写す元が無く、移行の写像は増えない** ②**`reset_password_requests.hash` に格納する値を「平文トークン」から「SHA-256 ダイジェスト」へ変える**ことを §4.2 に明記する (v2 は `util.RandStringRunes(32)` の生成値をそのまま入れている — `hassan-v2-backend/usecase/account/request_reset_password.go:59`, `:62`)。**併せて §6.5 の移行設計で「v2 の未処理リセット要求 (1 時間有効) を v3 に写さない」ことを確認する** — 写すと平文トークンが v3 の DB に入る | **①② とも実施済み (2026-07-31)** — [../data-model.md](../data-model.md) §4.2 が `signup_links.token_hash text NOT NULL UNIQUE` を新設し、**`reset_password_requests.hash` を `token_hash` へ改名**した (本書の②は「列名は据え置き」だったが、**採用されたのは改名**。理由「列名で保存形が読める」)。**本書は SSOT 側に合わせて AA-D-5④(iii) / §3.3 / §3.5 のクエリ名を `token_hash` へ更新済み** (2026-07-31)。**残る確認 1 点**: 同書 §6.5 (移行設計) が「v2 の未処理リセット要求を写さない」を明記しているかは**本巡では未照合**であり、要求として残す |
@@ -764,6 +766,9 @@ v2 は招待メール送信失敗時にリンクを保存しないまま 500 を
 | **R-AA-23** | [../operations.md](../operations.md) §4.5 (シークレットの棚卸し表) | **本書の移植で増える秘密 3 件を棚卸し表に行として載せる** (§4 の D-5)。**現状の同表に無い**: ①**メール送信 (Resend) の API キー** — カテゴリ「外部 API」の例に「メール送信」の語はあるが**行として分類 (§3.3) が振られていない** ②**S3 (アイコンの非公開バケット + 署名付き URL 生成)** の資格情報・バケット名 (AA-D-16) ③**`AUDIT_EMAIL_HMAC_KEY`** (監査記録の `detail.email_hash` の pepper。AA-D-21③)。**分類とローテーション方針も同時に決める**: ③は **ローテーションしない** (回すと過去の失敗サインインと新しい記録が突き合わせ不能になり、パスワードスプレーの月次検知が切れる) ため、**同 §4.3 のローテーション対象から明示的に除外する**。**なぜ口頭委譲では足りないか**: 同 §4.5 の運用ルールは「**新しい設定値を追加する PR は分類を書く**」という**追加時点**の規約であり、**設計段階で表に載っていない秘密は §6.1 の RL-2 完了条件② (「§4.5 の棚卸し表の全行に prod の値が投入済み」) を空振りで通過する** = **pepper 未投入のまま prod が立つ**。pepper は後から入れ直すと監査の連続性が切れる。**併せて本書 §4 の D-5 行の「棚卸し先」表記も訂正済み** (2026-07-31。`infrastructure.md` → `operations.md` §4.5。[../infrastructure.md](../infrastructure.md) §3.4 は器の定義のみで棚卸し表を持たない) | **未対応 (2026-07-31 のレビュー中 6。新規起票)** |
 | **R-AA-24** | [README.md](README.md) §0 (差分 3 点の注記) | **是正要求 ID の参照を `R-AA-2` → `R-AA-2a / R-AA-2b` に直す**。同節は「SSOT 側への是正要求は同 §5 **R-AA-2**」と書いているが、**`R-AA-2` という ID は本書に存在しない** — §5 冒頭の運用 3 に従って**宛先ごとに R-AA-2a (auth.md §6.6) / R-AA-2b (README.md §2.5) へ分割済み**であり、分割前の ID で引くと**どちらの状態を指すのか判定できない** (R-AA-2a は未対応・R-AA-2b は実施済み)。**R-AA-2b とは別行にした理由**: R-AA-2b は既に実施済みで、同じ行に 4 点目を足すと状態列が「実施済み」から後退して見える (§5 冒頭の運用 1・4) | **実施済み (2026-07-31)** — メインセッションが [README.md](README.md) §0 の参照を `R-AA-2a` / `R-AA-2b` へ更新 (AA-D-17 / §3.1.1 への参照も併せて追加) |
 | **R-AA-25** | `scripts/check-endpoint-mapping.sh` (**設計文書ではないためメインセッションの担当**) | **照合を 2 件足し、抽出の前提を 1 つ狭める** (R-AA-22 の残り。DR-9)。**追加する照合 2 件**: ①**レート制限の本数 (11)** — 本書 §2.0 / §3.7 と [README.md](README.md) §2.5 の 429 行の 3 箇所に同じ数が転記されている (S-3 で 8 → 11 に動いた実績があり、**次に動いたとき人手一致に戻る**) ②**§3.1.1 のコード表の行数 (10)** — 本書 §7.1 が「10 コードを `constants` に定義」と転記しており、コードを 1 つ足すと 2 箇所が同時に動く。**狭める前提 1 件**: 同スクリプトの `aa_claim` は「**文書内で最初に現れた『計 N 本 / N エンドポイント』**」を掴む実装であり、**§2 見出しより前に同形の文が入ると別の数を拾う**。抽出を **`## 2.` 見出し行に限定**するか、限定しない場合は**その前提をスクリプト内のコメントに明記する** (誤検知側に倒れるため害は小さいが、原因の特定に時間がかかる) | **実施済み (2026-07-31)** — メインセッションが `scripts/check-endpoint-mapping.sh` に照合 3 件を追加 (429 の本数 ×2・§3.1.1 のコード表の行数) し、`rm_429` の抽出を末尾数値へ限定。**照合 5 → 8 件**。故障注入 2 種 (429 の 1 本削除 / コード表 1 行削除) で検出力を確認済み |
+| **R-AA-26** | [../observability.md](../observability.md) §4.6 (アラート定義) | **O-7 のアラート入力から「社内管理者のサインイン失敗」を外す**。AA-D-23 で `POST /admin/signin` の監査記録を行わないと決めたため、**入力となるイベントが発生しない**。**同節の AL-7 (認証エンドポイントのレート制限の発動スパイク) は `POST /admin/signin` を含むため引き続き有効**だが、「社内管理者のサインイン失敗そのもの」を条件にしたアラートは追加しないこと (一度も発火しない監視になる) |
+| **R-AA-27** | [../data-model.md](../data-model.md) §4.2 (`accounts`) | **実施済み (2026-08-10)**。`accounts.deactivated_at` の追加 (DM-A5) と、**無効化の帰結 7 点 (サインイン拒否 / トークン失効 / 一覧の既定除外 / 所有物の参照 / メールアドレスの占有 / 人数上限 / 再有効化)** が同節の「DM-A5 補足」で確定した。**本書はその受信側**であり、§2.1 の `POST /accounts/signin` と §2.3.2 の `GET /accounts` / `DELETE /accounts/{account_id}` に反映済み |
+| **R-AA-28** | [../data-model.md](../data-model.md) §4.2 / §4.1.2 (a) / §3.3 の検査①の除外リスト / §7.2 | **`admin_mfa_configs` を削除する** (AA-D-22)。**件数の連動先が複数ある** — 機能テーブル以外の件数・除外リスト・`make check-table-counts` の期待値。**削除と同じ差分で検算を通すこと** (DR-9) |
 
 **SSOT の向き (R-AA-15 の一部。決定は AA-D-20)**:
 
@@ -796,7 +801,7 @@ v2 は招待メール送信失敗時にリンクを保存しないまま 500 を
   (`同 result_helpers.go:135`)。**会社単位ミッションの提供終了は切替告知の対象に追加**
   ([../operations.md](../operations.md) §6.3.1)
 
-- **AA-Q2: 社内管理者による「一般アカウントの MFA リセット」(§2.4.2) を本増分に含めてよいか**。
+- **AA-Q2: 社内管理者による「一般アカウントの MFA リセット」(§2.4) を本増分に含めてよいか**。
   事実: v2 に実装がある (`hassan-v2-backend/router/router.go:217`。全契約横断・Admin / SuperAdmin の
   どちらでも実行可)。**[../auth.md](../auth.md) §6.2 が本増分に含めた社内管理者機能の列挙にはこれが無い**。
   含めない場合の帰結: **MFA 必須の契約で契約内管理者が全員 MFA デバイスを失うと、
@@ -806,7 +811,7 @@ v2 は招待メール送信失敗時にリンクを保存しないまま 500 を
   選択肢: (a) 含める (本書の採用案) / (b) 含めず運用手順 (DB 直更新) に委ねる
   (同 §6.9 の却下 (c) と同じ代償)。
   **(a) を前提に設計した** (エンドポイント 1 本と許可リスト 1 行の追加で済む)。
-  [Answer]: **(a) 本増分に含める** (2026-07-31 ユーザー回答)。§2.4.2 の
+  [Answer]: **(a) 本増分に含める** (2026-07-31 ユーザー回答)。§2.4 の
   `POST /admin/accounts/{account_id}/mfa/reset` を確定。[../auth.md](../auth.md) §6.2 の
   社内管理者機能の列挙への追加は §5 の R-AA-12 として是正要求
 
@@ -833,9 +838,12 @@ v2 は招待メール送信失敗時にリンクを保存しないまま 500 を
 | **AA-Q5** | **メール送信基盤**と**メール到達を前提とするフローの検証方法** | ①**送信基盤**: v2 と同じ **Resend** を使うと仮定した (V2-F11)。`gateway/mail` に置く ([../architecture.md](../architecture.md) §3.3)。**SES へ替える場合、テンプレートの管理方法とバウンス処理が別途必要になる** ②**dev の送信ポリシー** (実メールを送るか / 送信先ドメインを許可リストで制限するか) と③**テストがトークンを取得する経路**が未定。**AA-D-5④ (DB にはハッシュしか保存しない) により選択肢が 1 つに減った** — **DB を読んでも平文トークンは復元できない**ため、**dev / test では `gateway/mail` をキャプチャ実装に差し替えて送信本文からトークンを取り出す**しかない (API から取得する経路は AA-D-6 で作らないと決めた)。**本書の仮定**: **招待受諾 (`/signup?token=…`) とパスワードリセット (`/reset-password?token=…`) の E2E は行わず、I 段 (BE の統合テスト。トークンは `gateway/mail` のキャプチャ実装から取得する) で担保する** — §3.6 が E2E の MFA 例外を `companies.mfa_type='none'` で解いたのと違い、**メールは「送らない」で代替できない** (トークンの到達がフローの本体) ため。**この仮定が変わる場合、②③ の決定が [../testing.md](../testing.md) §7.3 に必要**になる | [../infrastructure.md](../infrastructure.md) (D-5 の資格情報棚卸しと同時) / [../testing.md](../testing.md) §7.3 |
 | **AA-Q6** | **会社情報の更新を一般メンバーに開くか** | **v2 どおり全メンバーに開く**と仮定した (v2 の `UpdateCompany` に `IsAdmin()` 判定が無い — V2-F12 に含まれない)。[../auth.md](../auth.md) §9.3 Q-A2 の「v2 で管理者限定だった範囲のみ維持し、新しいロール差を作らない」に従った結果である。**管理者限定にすると R-1 の 403 が 1 本増える** | 要件確認 |
 | **AA-Q7** | **パスワードの強度要件** | v2 は `min=8,max=255` のみ (`hassan-v2-backend/controller/dto/account.go:106`, `:130-132`)。**同じ要件で設計した** (400 の条件に「強度違反」と書いた実体はこれ)。**強化する場合、値の SSOT は [../auth.md](../auth.md) §10.2 R-4 の設定 1 箇所に置く** | 要件確認 |
-| **AA-Q8** | **メンバー削除の既定挙動** | [../data-model.md](../data-model.md) DM-Q2 が「メンバー削除時の所有物の扱い」をユーザー確認待ちにしている。**「分類①を契約内管理者へ移管」を前提に 202 + ジョブの契約を書いた** (AA-D-13)。**「削除せず無効化のみ」に決まる場合、`DELETE /accounts/{account_id}` は 204 の同期 API になり `GET /account-deletions/{id}` と R-AA-4 が不要になる** (代わりに `accounts` に無効化列が必要 = 同 §8.4-5) | [../data-model.md](../data-model.md) DM-Q2 |
+| **AA-Q8** | **メンバー削除の既定挙動** | **回答済み (2026-08-10)**: **(a) 削除せず無効化のみ**。`DELETE /accounts/{account_id}` は **204 の同期 API** になり、`GET /account-deletions/{deletion_id}` と `account_deletions` テーブルは不要。`accounts` に無効化列が要る (§5 **R-AA-27**)。判断は **AA-D-13** に反映済み | [../data-model.md](../data-model.md) DM-Q2 |
+| **AA-Q12** | **社内管理者の MFA を将来やるか** | **本増分ではやらない** (AA-D-22)。再開する場合の入口: ①`admin_mfa_configs` を [../data-model.md](../data-model.md) §4.2 に戻す ②[../auth.md](../auth.md) §6.7 の系統を 3 → 4 に戻す ③本書 §2.4 に 3 本を戻す。**②が最も波及が大きい** (全 API ドキュメントの系統宣言) | ユーザー |
+| **AA-Q13** | **手動ロックの実装時期** | **設計は確定・実装は 9 月末までの増分の対象外** (2026-08-10 のユーザー決定)。`POST /accounts/{account_id}/lock` は §2.3.2 に残すが実装しない。**`DELETE /accounts/{account_id}/lock` (解除) は v2 にあるため実装する** — 解除だけが先に入るのは v2 と同じ状態であり、[../auth.md](../auth.md) §5-10 の欠陥が本増分では残ることを意味する | ユーザー |
+| **AA-Q14** | **監査ログを将来拡張するか** | **本増分では v2 相当に留める** (AA-D-23)。再開する場合の入口: §3.7 の表に行を戻し、[../observability.md](../observability.md) §4.5.1 に値域を足す。**§3.7 の表に行を足すだけで済む**ようにするため、削除ではなく「記録しない対象」として本書に列挙を残してある | ユーザー |
 | **AA-Q9** | **招待リンクとリセットトークンの有効期間** | v2 と同じ (**招待 7 日** / **リセット 1 時間**) で設計した (V2-F2 / V2-F10)。値の SSOT は [../auth.md](../auth.md) §10.2 R-4 の設定 1 箇所 (BE-2) | 実装リポの設定設計 |
-| **AA-Q10** | **`GET /admin/accounts` の言語絞り込み** | v2 は契約の `language_type` で絞る (V2-F15)。**AA-Q4 の仮定 (日本語のみ) により絞り込みを持たない**設計にした | AA-Q4 と同時 |
+| **AA-Q13** | **`GET /admin/accounts` の言語絞り込み** | v2 は契約の `language_type` で絞る (V2-F15)。**AA-Q4 の仮定 (日本語のみ) により絞り込みを持たない**設計にした | AA-Q4 と同時 |
 
 ### 6.3 本書の仮定 (違えば §3.1 の判断が変わる)
 
@@ -855,9 +863,11 @@ v2 は招待メール送信失敗時にリンクを保存しないまま 500 を
 
 ```
 [../data-model.md] §4.2 / §4.10 のスキーマ投入 (RL-2 より前に確定が要るもの)
-  + R-AA-4  account_deletions (新テーブル。DM-Q2 の回答が前提)        … 未対応 (条件付き)
+  + R-AA-4  account_deletions (新テーブル)                            … 取り下げ (2026-08-10。DM-Q2 = 無効化のみ)
   + R-AA-17 signup_links の UNIQUE (contract_id, email)              … 未対応 ★RL-2 前に唯一残る DB 制約
-  + R-AA-18 admin_mfa_configs (新テーブル)                            … 実施済み (2026-07-31)
+  + R-AA-18 admin_mfa_configs (新テーブル)                            … 取り下げ (2026-08-10。AA-D-22)
+  + R-AA-28 admin_mfa_configs の削除                                 … 実施済み (2026-08-10)
+  + R-AA-27 accounts の無効化列 (DM-Q2 = 無効化のみ)                  … 実施済み (2026-08-10。DM-A5)
   + R-AA-21 signup_links.token_hash / reset_password_requests.token_hash … 実施済み (2026-07-31。列は改名)
   + R-AA-19 audit_logs の actor_type='unauthenticated' + NULL 可 + CHECK … 実施済み
             (残るは detail.email_hash を HMAC + pepper にすること。列定義には影響しない)
@@ -871,20 +881,20 @@ v2 は招待メール送信失敗時にリンクを保存しないまま 500 を
 §2.1 公開 6 本   §2.2/§2.3.1 自分  §2.3.2 メンバー  §2.4 社内管理者     ← 並列可
                                       ↓
                           §2.3.2 DELETE /accounts/{id} は
-                          [../data-model.md] §3.4.3 の移管ジョブに依存 (最後)
+                          (2026-08-10: 移管ジョブは作らない = DM-Q2。依存なし)
 ```
 
 - **共通層を先に完成させる** — 系統ホワイトリストと CI 検査 ([../auth.md](../auth.md) §6.7) が
   後回しになると、公開エンドポイントの追加が素通りとして現れる (AC-1.1)
 - **未対応の是正要求のうち、着手を止めるものは 2 種しかない** (2026-07-31 の状態列に基づく):
   ①**RL-2 (初期スキーマ投入) より前**: **R-AA-17** (`signup_links` の `UNIQUE (contract_id, email)`) と
-  **R-AA-4** (`account_deletions`。DM-Q2 の回答が前提) ②**共通層の実装より前**: **R-AA-15**
+  **R-AA-27** (`accounts.deactivated_at` = DM-A5。**R-AA-4 の `account_deletions` は取り下げ済み**) ②**共通層の実装より前**: **R-AA-15**
   (公開ホワイトリストが `GET /accounts/signup-links/:id` / `POST /accounts/reset-password/:hash` の
   **旧パスのまま**。この表が CI 検査の入力なので、①実装が旧パスを作るか②新パスが未宣言で落ちるかが確定で起きる) と
   **R-AA-2a③** (403 の第 3 系統 = R-3)。**それ以外の未対応 (R-AA-3 / 5 / 6 / 7③ / 13 / 14 / 23 / 24 / 25) は
   並列で進められる** — ただし **R-AA-6 (`company_missions` の既存データ) は移行設計 (DM-A2) の締切に間に合わせる**
   (移行後に気づくとデータが消えている) と **R-AA-23 (pepper の棚卸し) は RL-2 の完了条件②に間に合わせる**の 2 点は例外
-- **`§2.3.2 の 10 本` と `§2.4 の 8 本` は同じ増分に入れる** — 読む側 (ロック状態の表示) と
+- **`§2.3.2` と `§2.4` は同じ増分に入れる** (**本数は §2 の見出しが正**。DR-9) — 読む側 (ロック状態の表示) と
   書く側 (ロック / 解除) と回復側 (社内管理者) が揃って初めてロック機構が成立する (§3.4 = BE-10)
 - **§2.2 の 2 本と MFA ゲートは同時** — ゲートだけ入れると MFA 必須の契約が誰も入れなくなる
 
@@ -892,8 +902,8 @@ v2 は招待メール送信失敗時にリンクを保存しないまま 500 を
 
 | 目的 | 参照先 |
 |---|---|
-| 認証ミドルウェアの判定順序 (v3 は空 role を拒否・全 enum 網羅) | `hassan-v2-backend/auth/middleware.go:23-86` ([../auth.md](../auth.md) §6.1 の変更点 3 / 4) |
-| 社内管理者ミドルウェア (v3 は MFA 判定を追加) | `hassan-v2-backend/auth/middleware.go:88-131`、`:153-163` (SuperAdmin) |
+| 認証ミドルウェアの判定順序 (v3 は空 role を拒否・全 enum 網羅。**社内管理者側に MFA 判定は追加しない** = AA-D-22) | `hassan-v2-backend/auth/middleware.go:23-86` ([../auth.md](../auth.md) §6.1 の変更点 3 / 4) |
+| 社内管理者ミドルウェア (**v3 も MFA 判定を持たない** = AA-D-22。v2 と同じ) | `hassan-v2-backend/auth/middleware.go:88-131`、`:153-163` (SuperAdmin) |
 | JWT クレームと署名 | `hassan-v2-backend/auth/client.go:32-38`, `:66-95` |
 | サインイン (失敗回数・ロック・マスク) | `hassan-v2-backend/usecase/account/sign_in.go:57-133` |
 | TOTP の生成・検証・リセット | `hassan-v2-backend/usecase/mfa/create_totp.go:29-61`、`verify_totp.go:46-88`、`reset_totp.go:25-46` |

@@ -304,7 +304,7 @@ Agent 経路・直接 API 経路の**両方**で、1 回の LLM 呼び出しご�
 | ドメイン | `action` の値 | 出典 |
 |---|---|---|
 | **認証** (v2 に既存の 6 種 — `hassan-v2-backend/db/schema.sql:467`〜`:479`) | `signin_success` / `signin_failed` / `mfa_verify_success` / `mfa_verify_failed` / `mfa_reset_by_admin` / `mfa_reset_by_aillio_admin` | [API/auth-accounts.md](API/auth-accounts.md) §3.7 |
-| **アカウント・ロック** | `account_created` / `account_role_changed` / `account_deleted` / `account_locked` / `account_unlocked` | 同 §3.7 / [auth.md](auth.md) §6.9 |
+| ~~**アカウント・ロック**~~ | ~~`account_created` / `account_role_changed` / `account_deleted` / `account_locked` / `account_unlocked`~~ | **2026-08-10 の AA-D-23 で削除** — 監査ログを v2 相当に限定し、v3 独自の対象 (メンバー作成・権限変更・削除・ロック・解除) を記録しないことにした ([API/auth-accounts.md](API/auth-accounts.md) §3.7 / §5 の R-AA-7③ 取り下げ)。**再開する場合は同書 §6.1 の AA-Q14 から** |
 | **利用状況の集計対象** (契約内の活動) | `theme_created` / `idea_diverged` / `plan_drafted` / `knowledge_chat` / `asset_registered` / `comment_posted` | [API/settings.md](API/settings.md) §3 (`GET /usage-summary` のクロス集計の軸) |
 | **生成・削除・共有** | 各ドメインの設計書が本表へ追記する (アイデア / 企画書 / アセット抽出の生成・削除、共有設定の変更) | 本節の「記録対象」 |
 
@@ -461,3 +461,11 @@ CloudWatch の標準メトリクス)。したがって ⑦ / ⑧ のどちらの
 - **メトリクスの実装手段** — CloudWatch のメトリクスフィルタ (ログから抽出) か
   カスタムメトリクスの直接送信 (`PutMetricData`) か。前者は追加実装が少なく、後者は次元を柔軟に持てる。
   **仮定**: ログからのメトリクスフィルタで始める
+
+
+## 他書からの是正要求の受信欄 (DR-8)
+
+| 起票元 | ID | 内容 | 状態 |
+|---|---|---|---|
+| [API/auth-accounts.md](API/auth-accounts.md) §5 | **R-AA-26** | O-7 のアラート入力から「社内管理者のサインイン失敗」を外す (AA-D-23 で記録自体を行わないため) | **実施済み (2026-08-10)** — §4.6 に当該条件のアラートは無く、**AL-7 (認証エンドポイントのレート制限の発動スパイク) は `POST /admin/signin` を含むため引き続き有効**。§4.5.1 からは `account_locked` / `account_unlocked` / `account_created` / `account_role_changed` / `account_deleted` を削除済み |
+| [auth.md](auth.md) §6.11-4 | — | 「手動ロック / 解除の実行を記録する」の要求 | **対応不要 (2026-08-10)** — AA-D-23 で値域から削除したため、auth.md 側の要求を取り下げてもらった (同節に反映済み) |

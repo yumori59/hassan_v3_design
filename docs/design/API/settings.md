@@ -179,8 +179,8 @@ if !authAccount.AuthRoleID.IsAdmin() { 403 }     // 契約内ロールの判定
 | ロック解除・MFA リセット | `POST /accounts/unlock` / `POST /accounts/mfa/reset` | `同:82-83` |
 | **社内管理者のサインイン** | `POST /admin/signin` (**公開エンドポイント**) | `同:195` (**2026-07-31 訂正** — `:194` は `adminRoute := r.Group("/admin")`。[../auth.md](../auth.md) §6.2 と [auth-accounts.md](auth-accounts.md) §2.1 は当初から `:195` で正しい) |
 | **社内管理者によるロック解除** (全契約横断) | `POST /admin/accounts/unlock` | `同:211` |
-| **社内管理者の MFA 登録・検証** | ユーザー側の `POST /mfa/totp/generate` / `verify` が移植元 (**`admin_mfa_configs` は新設**) | `同:231-232` |
-| **社内管理者の MFA リセット** (SuperAdmin のみ) | ユーザー側の `POST /accounts/mfa/reset` が移植元 | `同:83` |
+| **社内管理者の MFA 登録・検証** | ユーザー側の `POST /mfa/totp/generate` / `verify` が移植元 (**`admin_mfa_configs` は新設**) | `同:231-232` ⚠️ **2026-08-10: v3 では作らない** ([auth-accounts.md](auth-accounts.md) AA-D-22) |
+| **社内管理者の MFA リセット** (SuperAdmin のみ) | ユーザー側の `POST /accounts/mfa/reset` が移植元 | `同:83` ⚠️ **2026-08-10: v3 では作らない** (同 AA-D-22) |
 | MFA (TOTP) | `POST /mfa/totp/generate` / `verify` / `reset` | `同:231-233` |
 | 契約情報 | `GET /contracts` | `同:62` |
 | 会社情報 | `GET /companies` / `POST /companies` / `PUT /companies` / `PUT /companies/mfa` | `同:93`, `:95-97` |
@@ -196,7 +196,7 @@ if !authAccount.AuthRoleID.IsAdmin() { 403 }     // 契約内ロールの判定
 | ID | 回答 | 備考 |
 |---|---|---|
 | A-1 | [README.md](README.md) §2.1。v3 新設の 6 本すべて認証必須。**§5 の移植対象のうち signin / signup / reset-password / signup-links 取得は本質的に未認証**であり、[../auth.md](../auth.md) §6.7 の**公開エンドポイントのホワイトリスト + CI 検査**で管理する (D-ST-1' により v3 が持つことになったため、v2 での公開範囲 — 同 §1.6 — をそのまま引き継ぐ) | AC-1.1 |
-| A-2 | **回答**: 本ディレクトリのエンドポイントは `AuthRoleUser` のみ。契約内管理者限定は §3.1 の 3 本 ([../auth.md](../auth.md) §9.3 Q-A2 への回答を含む)。**ただし §5 の移植対象には社内管理者認証 (`X-Admin-Token`) を要するものが含まれる** — ロック解除 / MFA 登録・検証・リセット ([../auth.md](../auth.md) §6.2 の例外。**社内管理者は MFA 必須**)。**本ディレクトリ外**であり、認証系統の分離は同 §6.7 の **4 系統**ホワイトリストが担う | — |
+| A-2 | **回答**: 本ディレクトリのエンドポイントは `AuthRoleUser` のみ。契約内管理者限定は §3.1 の 3 本 ([../auth.md](../auth.md) §9.3 Q-A2 への回答を含む)。**ただし §5 の移植対象には社内管理者認証 (`X-Admin-Token`) を要するものが含まれる** — ロック解除 / MFA 登録・検証・リセット ([../auth.md](../auth.md) §6.2 の例外。**社内管理者は MFA 必須**)。**本ディレクトリ外**であり、認証系統の分離は同 §6.7 の **3 系統**ホワイトリストが担う | — |
 | A-3 | v3 が新設する `account_notification_settings` / `workspace_settings` / `activity_logs` (v3 側) は、それぞれ `account_id` / `contract_id` を持つ | data-model で確定 |
 | A-4 | 通知設定は `account_id`、ワークスペース設定・サマリ・活動ログは `contract_id` を Repository のクエリ条件に入れる。`GET /activity-logs` の `account_id` パラメータは**自契約メンバーであることをサーバが検証**する ([README.md](README.md) D-API-8) | — |
 | A-5 | 本表の「固有ステータス」列 + [README.md](README.md) §2.5。**本ファイルの 403 は §3.1 の 3 本** (R-1)。ディレクトリ全体では 11 本 ([idea-boards.md](idea-boards.md) の 8 本を含む) | **AC-1.4** |

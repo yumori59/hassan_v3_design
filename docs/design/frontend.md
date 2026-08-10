@@ -140,7 +140,7 @@ tsc の防御 (§5.3) が効かなくなる。
 | **FE-C** | サーバ状態の扱い | **既定は Server Component が orval の生成関数を直接呼ぶ** (v2 踏襲。V-3)。更新は **Server Action** + `revalidateTag`。**クライアント主導の再取得が必要な 2 経路だけを例外**にする: ①非同期ジョブの状態ポーリング ([API/README.md](API/README.md) J-6 / J-7) ②会話ターンの SSE。この 2 つは **`features/<domain>/hooks/` の専用フックが持ち、キャッシュライブラリを使わない** | (a) **TanStack Query / SWR を全面導入**: v2 に前例が無く (V-4)、**RSC のキャッシュと二重のキャッシュ層**になる。さらに SSE と長時間ジョブは Query のモデル (キー + fetcher + 再検証) に載らないため、結局例外実装が要る。(b) **v2 の zustand store 方式をストリーミング以外にも広げる** (V-4): サーバ状態のコピーがクライアントに増え、更新後の同期が手動になる。(c) **例外を認めず全てを RSC の再検証で回す**: ジョブの進捗は数秒間隔で変わるため、ページ全体の再検証はコストが合わない |
 | **FE-C'** | クライアント状態の置き場 | **3 分類に固定する** (§4.2): ①**URL に置く** (一覧の絞り込み・ソート・ページ・選択タブ) = **nuqs** (v2 に既存。V-5) ②**画面ローカルの複合状態** (会話ターン・ジョブ進捗・ウィザード) = **`useReducer` + 純粋 reducer** ③**画面を跨いで共有する一時状態のみ zustand**。**②を zustand に置かない** | (a) **v2 の形 (ストリーミング状態を zustand の global store に置く。V-4 の 4 store)**: 会話は「履歴 GET で復元 + 再接続」が仕様 ([design_memo.md](design_memo.md):169) なので、**global store と履歴 API が同じ状態の 2 つのソースになる**。加えて store をまたぐテストは reducer 単体テストより書きにくい (FE-4)。(b) **すべて `useState` で持つ**: 会話ターンは「本文追記 + ツール状態 + オプション + 中断」の複合状態で、`useState` の分割は更新順序のバグを生む。(c) **絞り込み状態を React state に持つ**: 再読込・共有・戻る操作で消える (v2 が nuqs を入れた理由と同じ) |
 | **FE-D** | **トークンの保持と BE の呼び出し経路** | **BE の JWT は next-auth の HttpOnly セッション Cookie 内にのみ置き、ブラウザの JS から触れない**。BE への呼び出しは**すべてサーバ側** (Server Component / Server Action / **Route Handler**) から行い `X-Token` を付ける。**SSE も Next.js の Route Handler で中継する** (§6.3)。**`X-Admin-Token` は送らない** | (a) **v2 方式 (ブラウザに JWT を渡して BE を直接叩く。V-12)**: XSS 1 件で**有効期間 7 日・リフレッシュなし**のトークンが漏れる ([auth.md](auth.md) §6.9)。失効手段は**手動ロック API のみ**で、漏洩に気付いてから人が操作するまで有効。加えてブラウザ直叩きは **Vercel の Preview URL が変動するため BE の CORS 許可リストを維持できない** ([operations.md](operations.md) §3.2 の確認事項 / v2 の許可リストはハードコード — [API/README.md](API/README.md) F-14)。(b) **`localStorage` に保持**: (a) より悪く、Cookie の `HttpOnly` すら失う。(c) **BE に FE 専用の Cookie 認証を新設**: [auth.md](auth.md) §6.1 が `X-Token` 踏襲を決めており、BE 側の逸脱を FE の都合で作ることになる。(d) **BE が SSE 用の短命チケットを発行し、ブラウザが直接 SSE を張る**: 中継のホップが消える利点はあるが、**(a) で却下した CORS の問題 (Preview URL の可変オリジン) をそのまま再現する** — (d) は「(a) より漏洩耐性の高い資格情報を使う案」であって CORS を解く案ではない。加えて BE の新規 API (チケット発行) と失効管理が増える。**FE-Q2 (Vercel で 5 分の中継ができるか) が不成立だった場合の唯一の代替**として §16.1 に骨子を残すが、**成立条件 (許可オリジンの決め方) が未解決であり、採否はユーザー決定を要する** |
-| **FE-D'** | **社内管理者経路 (サインイン / MFA 登録・検証 / MFA リセット / ロック解除) の置き場とトークン系統** | **同一 FE リポ・同一 Next.js アプリの別ルートグループ `(admin)`** に置く (§11.3)。**next-auth のインスタンスとセッション Cookie を一般ユーザー系と分ける** (`app/api/admin-auth/[...nextauth]`・Cookie 名を別にする)。**`X-Admin-Token` を付けるのは `lib/api/admin-mutator.ts` の 1 ファイルのみ**とし、一般ユーザー系の mutator には付けない (§5.2) | (a) **v2 と同じ「1 つの next-auth に provider を並べる」形 (V-19)**: セッションに入っているのが一般ユーザーのトークンか管理者トークンか**区別できず、両ヘッダに同じ値を送る以外の実装が無くなる** (V-20 = V-7 の原因)。加えて Cookie が 1 つなので**管理者作業中に一般ユーザーとしてサインインすると管理者セッションが消える** (逆も同じ)。(b) **別 Vercel プロジェクト (別アプリ) に切り出す**: 分離は最も強いが、①`components/` とデザイントークンを 2 箇所で二重管理する ②本増分の管理者機能は 4 つだけ ([auth.md](auth.md) §6.2) ③Vercel プロジェクトが増えて [operations.md](operations.md) §3.2 の環境対応表と Production Branch 運用が二重になる。**管理者機能が増える増分 (利用状況閲覧・会社管理 = auth.md §6.2 で対象外) で再検討する**。(c) **UI を作らず運用手順で API を直叩きする**: [auth.md](auth.md) §6.2 の却下 (a) が「本番で SQL を手打ちする運用を常設の回復手段にしない」と決めた理由がそのまま当てはまる。TOTP 登録 (QR コード表示) を CLI で行うのも現実的でない。(d) **`(app)` グループに置きロールで出し分ける**: 管理者は `admin_accounts` であり `accounts` ではない。認証系統・トークン・レイアウトのいずれも共有できない ([auth.md](auth.md) §6.7 の 4 系統) |
+| **FE-D'** | **社内管理者経路 (サインイン / アカウント検索 / ロック解除 / 管理者一覧) の置き場とトークン系統** | **同一 FE リポ・同一 Next.js アプリの別ルートグループ `(admin)`** に置く (§11.3)。**next-auth のインスタンスとセッション Cookie を一般ユーザー系と分ける** (`app/api/admin-auth/[...nextauth]`・Cookie 名を別にする)。**`X-Admin-Token` を付けるのは `lib/api/admin-mutator.ts` の 1 ファイルのみ**とし、一般ユーザー系の mutator には付けない (§5.2) | (a) **v2 と同じ「1 つの next-auth に provider を並べる」形 (V-19)**: セッションに入っているのが一般ユーザーのトークンか管理者トークンか**区別できず、両ヘッダに同じ値を送る以外の実装が無くなる** (V-20 = V-7 の原因)。加えて Cookie が 1 つなので**管理者作業中に一般ユーザーとしてサインインすると管理者セッションが消える** (逆も同じ)。(b) **別 Vercel プロジェクト (別アプリ) に切り出す**: 分離は最も強いが、①`components/` とデザイントークンを 2 箇所で二重管理する ②本増分の管理者機能は少数 ([auth.md](auth.md) §6.2。**画面の実数は §11.1 の表が正** — DR-9) ③Vercel プロジェクトが増えて [operations.md](operations.md) §3.2 の環境対応表と Production Branch 運用が二重になる。**管理者機能が増える増分 (利用状況閲覧・会社管理 = auth.md §6.2 で対象外) で再検討する**。(c) **UI を作らず運用手順で API を直叩きする**: [auth.md](auth.md) §6.2 の却下 (a) が「本番で SQL を手打ちする運用を常設の回復手段にしない」と決めた理由がそのまま当てはまる。ロック解除の対象検索を CLI で行うのも現実的でない。(d) **`(app)` グループに置きロールで出し分ける**: 管理者は `admin_accounts` であり `accounts` ではない。認証系統・トークン・レイアウトのいずれも共有できない ([auth.md](auth.md) §6.7 の 3 系統) **2026-08-10 (AA-D-22)**: MFA の登録・検証・リセットの 3 画面が消えたが、**②③ (next-auth の 2 系統分離・`admin-mutator.ts` 1 ファイル集約) と却下 (a)〜(d) は MFA と無関係なので維持する** |
 | **FE-E** | 型の唯一のソース | **orval 生成物 (`src/generated/`) が唯一の API 型**。入力は **同一リポジトリの `api/` にコミットされた OpenAPI 定義** (D-API-13。**2026-08-03 のモノレポ化で「別リポからの取得」が不要になった**)。**手書きの API 型を作らない**。生成物は**コミットし、CI で再生成差分を検査**する (雛形 [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `contract` ジョブ が既にこの形) | (a) **v2 方式 (稼働サーバ URL を入力。V-6)**: BE をローカル起動しないと型を更新できず、**CI が型ズレを検知できない** (D-API-13 で既に却下済み)。(b) **`openapi-typescript` に替える**: v2 は orval に加えて `openapi-typescript` も依存に持つが、生成関数 (fetch ラッパ) と **MSW ハンドラ**を得られるのは orval 側で、[testing.md](testing.md) T-O が MSW ハンドラの生成を前提にしている。(c) **backend リポを git submodule にする**: 3 リポ構成での案。FE の `npm ci` に BE の取得が要り、Vercel のビルドが BE リポの権限に依存する。**モノレポ化により検討不要になった** |
 | **FE-E'** | **snake_case の扱い (FE-2)** | **変換しない**。BE の JSON キーは snake_case ([API/README.md](API/README.md) D-API-4) で、**生成型のまま使う**。表示のために別の形が必要な場合のみ、`features/<domain>/lib/` に **ViewModel 型と一方向の変換関数 (生成型 → ViewModel)** を置き、テストを併置する | (a) **API 境界で全レスポンスを camelCase に自動変換**: 変換器が**第 2 のスキーマ**になり、BE のフィールド追加が黙って落ちる (BE-12 の FE 版。PoC の手書きマッパー `claude_managed_agents/frontend/src/lib/conversation-api.ts` がこの形)。(b) **orval の命名変換で camelCase の型を生成する**: 生成型と実際の JSON キーが食い違い、**SSE の payload (生成型を通る経路と通らない経路が混在する) と MSW ハンドラで不整合**が出る。(c) **ViewModel を作らず生成型を全コンポーネントに流す**: 表示都合の整形がコンポーネントに散り、FE-6 のようなパースがテスト対象外の場所に生まれる |
 | **FE-F** | SSE クライアント | **共通クライアント 1 本** (`src/lib/sse/`) に集約する。仕様は §6.2 (ブロック分割・`event:` 名・空行を本文として通す・discriminated union への振り分け・`AbortError` は正常系・無通信タイムアウト・履歴 GET からの復元) | (a) **v2 の per-feature 実装** (V-9 の 7 ファイル): 共通化の未対応コメントが残ったまま複製が増えた実例そのもの。1 箇所の修正が他 6 箇所に伝播しない。(b) **`EventSource` を使う**: **ヘッダを付けられず POST もできない** — `X-Token` / `X-Request-Id` を送れないため FE-D と両立しない。(c) **PoC の `parseSSEBlock` をそのまま流用**: 各 `data:` 行を `.trim()` するため本文のインデントが壊れ (P-4)、`data:` 0 本のブロックを `null` にするため `event:` のみのイベントを表現できない |
@@ -783,12 +783,10 @@ type StreamState =
 | `/settings/workspace` | `(app)` | ワークスペース設定 = アセット可視性の既定 (**契約内管理者のみ**) | `GET/PUT /settings/workspace` | **[API]** (R-1。403)。**ST-Q8 により増分 2 へ後ろ倒し** | **2** |
 | `/settings/usage` | `(app)` | 利用量集計 — 月 × メンバー × 活動種別のクロス集計 + CSV (**契約内管理者のみ**) | `GET /usage-summary` | **[API]** (R-1。403)。形は ST-Q9 で確定 | 1 |
 | `/settings/activity-logs` | `(app)` | 活動ログ (**契約内管理者のみ**) | `GET /activity-logs` | **[API]** (R-1。403) | 1 |
-| `/settings/members` | `(app)` | メンバー管理・会社情報 + **アカウントの手動ロック / 解除 / ロック状態の表示** ([auth.md](auth.md) §6.9 の実行者 2 経路のうち**契約内管理者の経路**。**ロックの実行 UI はここだけにある** — 社内管理者の `/admin/accounts` は解除専用なので、**この画面が無いと製品内に即時遮断手段が存在しない**) | [auth-accounts.md](API/auth-accounts.md) §2.3.2 (メンバー管理・ロック) / §2.3.3 (会社情報) | **[API]**。403 が正常系になるガード (最後の管理者・自分自身) は同書 §3.1 の R-3 | 1 |
+| `/settings/members` | `(app)` | メンバー管理・会社情報 + **アカウントの解除 / ロック状態の表示** (⚠️ **手動ロックの UI は 2026-08-10 の AA-Q13 で実装スコープ外**) ([auth.md](auth.md) §6.9 の実行者 2 経路のうち**契約内管理者の経路**。**ロックの実行 UI はここだけにある** — 社内管理者の `/admin/accounts` は解除専用なので、**この画面が無いと製品内に即時遮断手段が存在しない**) | [auth-accounts.md](API/auth-accounts.md) §2.3.2 (メンバー管理・ロック) / §2.3.3 (会社情報) | **[API]**。403 が正常系になるガード (最後の管理者・自分自身) は同書 §3.1 の R-3 | 1 |
 | **`/admin/signin`** | `(admin)` | **社内管理者のサインイン** | [auth-accounts.md](API/auth-accounts.md) `POST /admin/signin` | **[API]** (同書 §2.1)。[auth.md](auth.md) §6.2 の例外 (公開エンドポイント) | 1 |
-| **`/admin/mfa/setup`** | `(admin)` | **社内管理者の TOTP 登録** (初回サインイン後は**登録するまで他へ行けない**) | [auth-accounts.md](API/auth-accounts.md) §2.4.1 の管理者 TOTP 登録 | **[API]**。[auth.md](auth.md) §6.2 (「投入直後は MFA 未登録」「初回サインイン後に TOTP 登録を強制」) | 1 |
-| **`/admin/mfa`** | `(admin)` | **社内管理者の TOTP 検証** | [auth-accounts.md](API/auth-accounts.md) §2.4.1 の管理者 TOTP 検証 | **[API]**。**コード不一致の 401 はフォーム内エラー** (§9 の②) | 1 |
 | **`/admin/accounts`** | `(admin)` | **アカウント検索 + ロック状態表示 + ロック解除** (全契約横断・**解除専用**) | [auth-accounts.md](API/auth-accounts.md) §2.4.2 (アカウント検索 + ロック解除) | **[API]**。[auth.md](auth.md) §6.9 の実行者 2 経路 (社内管理者は解除のみ) | 1 |
-| **`/admin/admins`** | `(admin)` | 社内管理者の一覧と **MFA リセット** (**SuperAdmin のみ**。権限不足は 403) | [auth-accounts.md](API/auth-accounts.md) §2.4.2 (管理者一覧 + MFA リセット) | **[API]** (SuperAdmin のみ = 403)。[auth.md](auth.md) §6.2 (MFA デバイス紛失時の回復) | 1 |
+| **`/admin/admins`** | `(admin)` | 社内管理者の一覧 (**MFA リセットは AA-D-22 で消滅**) | [auth-accounts.md](API/auth-accounts.md) `GET /admin/admins` | **[API]** (同書 §2.4) |
 
 > **`Idea` 型の SSOT は [API/ideas.md](API/ideas.md) §2.1** (2026-08-02 確定。同書 §8 の R-IDA-11)。
 > **手書きの型を作らず orval の生成型を使う** (§6.2 の FE-2 対策)。**旧 `idea-boards.md` §2.1 の型を参照しないこと** —
@@ -836,9 +834,8 @@ type StreamState =
 | `PUBLIC_PATHS` | `(auth)` | **セッションが無くても入れる** | `/login` / `/signup` / `/reset-password` / `/api/logout` |
 | `MFA_PENDING_PATHS` | `(auth)` | **セッションはあるが MFA 未検証でも入れる** | `/mfa` / `/mfa/setup` / `/api/logout` |
 | `ADMIN_PUBLIC_PATHS` | `(admin)` | 管理者セッションが無くても入れる | `/admin/signin` |
-| `ADMIN_MFA_PENDING_PATHS` | `(admin)` | 管理者セッションはあるが MFA 未検証・未登録でも入れる | `/admin/mfa` / `/admin/mfa/setup` |
 
-**4 本に分ける理由**: 一般ユーザーと社内管理者は**別の Cookie を読む別の判定**であり (§11.3.1)、
+**3 本に分ける理由** (**2026-08-10 の AA-D-22 で `ADMIN_MFA_PENDING_PATHS` を削除。4 本 → 3 本** — 社内管理者に MFA が無く、MFA 未検証で入れる管理者ルートが存在しなくなったため): 一般ユーザーと社内管理者は**別の Cookie を読む別の判定**であり (§11.3.1)、
 1 本にまとめると「一般ユーザーのセッションで `/admin/accounts` に入れるか」の判定が
 リストの中身に依存してしまう。**グループごとに判定関数を持ち、リストはその入力にする**。
 
@@ -867,8 +864,8 @@ type StreamState =
 (page があるのにどのリストにも無い = **認証必須になってしまっている**、
 逆にリストにあるのに page が無い = **消したページの許可が残っている**)。
 **照合は 2 組**: `(auth)` ↔ `PUBLIC_PATHS ∪ MFA_PENDING_PATHS` /
-`(admin)` ↔ `ADMIN_PUBLIC_PATHS ∪ ADMIN_MFA_PENDING_PATHS`
-(`(admin)` の残り = `/admin/accounts` / `/admin/admins` は「管理者認証 + MFA 検証済み」必須)。
+`(admin)` ↔ `ADMIN_PUBLIC_PATHS`
+(`(admin)` の残りは「**管理者認証のみ**」必須。**MFA 検証済みの要求は AA-D-22 で消滅した** — 残すと管理者が永久に到達できない画面になる。**画面の実数は §11.1 の表が正**)。
 
 - **実体**: [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `frontend` ジョブの「検査 2 公開パスの許可リストとルートグループの一致」ステップ が
   許可リストの存在確認と `scripts/check-public-paths.sh` の呼び出しまでを持つ。
@@ -921,17 +918,20 @@ ALB が見る送信元 IP は**運用者のオフィスの IP ではなく Verce
 **Vercel の egress IP を許可リストに入れると、実質的に「誰でも通る」に等しくなる**
 (Vercel 上の任意のプロジェクトが同じ帯域から出る)。
 
-- **本書の立場**: **MFA の必須化 (auth.md §6.2) とレート制限・監査記録を主たる防御とし、
-  IP 制限は「Vercel を経由しない経路が用意できた場合のみ」有効な追加層として扱う**。
-  同節が「MFA を主たる防御とし、IP 制限は多層防御として併用する (どちらかで代替しない)」と
-  書いているため、**IP 制限が外れることは同節の前提を弱める** — したがって
+- **本書の立場** (**2026-08-10 の AA-D-22 で前提が変わった**): 旧記述は「**MFA の必須化 (auth.md §6.2)**
+  とレート制限・監査記録を主たる防御とする」だったが、**社内管理者の MFA は無くなり、監査記録も
+  v2 相当に絞られた (AA-D-23)**。**残る防御は `POST /admin/signin` の未認証レート制限 1 本のみ**である。
+  IP 制限は「Vercel を経由しない経路が用意できた場合のみ」有効な追加層として扱う。
+  **旧前提が消えたことで、③ (IP 制限を諦める) の暫定既定は「防御が 1 本だけ残る」を意味する** — したがって
   **[auth.md](auth.md) §6.2 と [infrastructure.md](infrastructure.md) INF-L への是正要求**を出す (§16.2-7)
-- **選択肢は 3 つあり、いずれもユーザー決定を要する** ([Answer] FE-Q7):
+- **選択肢は 3 つあった。2026-08-10 に ③ で確定** (FE-Q7 = 回答済み。§16.2 の [Answer] 参照):
   ①Vercel の固定 egress IP 機能を使う (**利用可否・プラン要件は未調査**) ②管理者 UI を
   Vercel ではなく BE の ALB 配下 (WAF の内側) に配信する (**FE-D' の却下 (b) に戻る + 新規インフラ**)
-  ③IP 制限を管理者経路について諦め、MFA + レート制限 + 監査 + `SuperAdmin` の複数運用で担保する
-- **無言で ③ を採らない**。③ は本書の暫定既定だが、**auth.md の決定を弱める変更**なので
-  FE 側だけで確定させない
+  ③IP 制限を管理者経路について諦める (**AA-D-22 / AA-D-23 後は「レート制限のみ」になる** — 旧記述の「MFA + レート制限 + 監査 + `SuperAdmin` の複数運用」は成立しない)
+- **③ をユーザー決定として採った** (2026-08-10。「一旦管理者 EP の保護はスキップ」)。
+  **auth.md の決定を弱める変更なので FE 側だけで確定させない**という原則は守り、
+  [auth.md](auth.md) §6.2 の「追加の層」③ と [infrastructure.md](infrastructure.md) INF-L に
+  **本増分では管理者経路の IP 制限を行わない**ことを反映した (§16.2-7 = 是正済み)
 
 ---
 
@@ -1231,19 +1231,27 @@ ALB が見る送信元 IP は**運用者のオフィスの IP ではなく Verce
   [auth.md](auth.md) §6.2 は多層防御として「社内管理者系エンドポイントを WAF の IP 許可リストで
   社内からのみ到達可能にする」を決めているが、**FE-D (BE 呼び出しは全てサーバ側) では
   ALB が見る送信元 IP が Vercel の Function になり、この制限が成立しない** (§11.3.2)。
-  **暫定既定**: ③(IP 制限を管理者経路について諦め、**MFA 必須 + レート制限 + 監査記録 +
-  SuperAdmin の複数運用**で担保する)。**選択肢**: ①Vercel の固定 egress IP 機能を使う
+  **確定 (2026-08-10)**: ③(IP 制限を管理者経路について諦める)。**却下した選択肢**: ①Vercel の固定 egress IP 機能を使う
   (**利用可否とプラン要件は未調査**) ②管理者 UI を Vercel ではなく BE の ALB 配下に配信する
   (FE-D' の却下 (b) に戻り、新規インフラが必要)。
   **影響範囲**: ①なら [infrastructure.md](infrastructure.md) の WAF ルールと Vercel のプラン、
   ②なら FE-D' の採用案と [operations.md](operations.md) §3.2 の環境対応表、
   ③なら [auth.md](auth.md) §6.2 の「IP 制限を併用する」という記述の是正 (§16.2-7)
-  [Answer]:
+
+  [Answer]: **③ (IP 制限を管理者経路について諦める)** — 2026-08-10 のユーザー決定。
+  **本増分では管理者エンドポイントの追加保護を行わない**。**受け入れるリスク**: `POST /admin/signin` は
+  公開エンドポイント ([API/auth-accounts.md](API/auth-accounts.md) §2.1) であり**インターネットから到達可能**なまま、
+  AA-D-22 / AA-D-23 で MFA・監査記録・SuperAdmin の分離が消えたため、**防御は同エンドポイントの
+  未認証レート制限 1 本だけ**になる。突破された場合の到達範囲は全契約横断のロック解除・アカウント検索・
+  一般アカウントの MFA リセット ([auth.md](auth.md) §6.2)。
+  **「URL を公開しない」は防御に数えない** — 到達性が変わらないため。
+  **再検討の契機**: ①社内管理者の機能が増える増分 (利用状況閲覧・会社管理) ②`POST /admin/signin` の
+  レート制限発動 ([observability.md](observability.md) §4.6 の AL-7) が実際に鳴ったとき。**AL-7 が唯一の検知手段**である。
 
 - **FE-Q8: 管理者セッションの寿命 (新規 2026-07-30)**。
   一般ユーザーは 7 日 = BE の JWT 期限に一致させる ([auth.md](auth.md) §6.9-3。§5.2.3)。
-  **管理者トークンの有効期間は [auth.md](auth.md) が明示していない** (§6.2 は MFA 必須化を決めたが
-  期間には触れていない)。**暫定既定**: Task-3i が管理者トークンの有効期間を決めるまで
+  **管理者トークンの有効期間は [auth.md](auth.md) が明示していない** (§6.2 は認証強度を決めたが
+  期間には触れていない。**2026-08-10 の AA-D-22 で MFA が無くなり、漏洩時の窓がより重くなった**)。**暫定既定**: Task-3i が管理者トークンの有効期間を決めるまで
   **7 日を上限とし、FE 側の `maxAge` は BE の決定値に一致させる**。
   **影響範囲**: 短くすると解除作業中に切れる可能性があり、長くすると漏洩時の窓が広がる。
   **一般ユーザーと同じ 7 日にするかどうかを Task-3i で決める**
