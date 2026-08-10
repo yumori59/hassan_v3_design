@@ -546,3 +546,11 @@ $ grep -rn "admin_mfa_configs\|admin/mfa/totp\|admin/admins/{admin_account_id}\|
 - **FE-Q7 の回答が必要になった** — AA-D-22 / AA-D-23 で「MFA 必須 + 監査記録 + SuperAdmin の複数運用」が消え、
   社内管理者経路の担保が**レート制限 1 本だけ**になった。IP 制限を諦める暫定既定のまま進めるかはユーザー判断
 - **`operations.md` が R-8 (即時遮断手段が無いことの運用手順) を未受信** — 次の増分で受信欄を作る
+
+### 残課題の解消 (2026-08-10。ユーザー決定)
+
+- **FE-Q7 = ③ で確定** — 「一旦管理者 EP の保護はスキップ」。`docs/design/frontend.md` §16.2 の `[Answer]` に
+  受け入れるリスクと再検討の契機を記録し、`docs/design/auth.md` §6.2 に決定ブロックを、
+  `docs/design/infrastructure.md` の INF-L に「管理者経路の IP 許可リストは本増分では入れない」を追記した。
+  **`POST /admin/signin` のレート制限と `observability.md` §4.6 の AL-7 は外してはいけない** (外すと防御がゼロになる)
+  ことを両書に明記している。**残るのは `operations.md` の R-8 未受信のみ**
