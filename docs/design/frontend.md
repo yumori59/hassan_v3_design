@@ -56,7 +56,7 @@ tsc の防御 (§5.3) が効かなくなる。
 更新版の実測値へ更新済み。**更新で画面側の前提が変わった箇所は各 API 設計の再確認事項に起票した**
 ([API/themes.md](API/themes.md) §6 / [API/settings.md](API/settings.md) §7.1 / [API/idea-boards.md](API/idea-boards.md) §6.1 /
 [API/knowledge.md](API/knowledge.md) KN-Q8〜Q10)。**TH-Q6〜Q9 / ST-Q8〜Q9 / IB-Q11〜Q13 は 2026-07-30 に回答済み**
-(各ファイルの `[Answer]:` を参照) — ルート表 (§11.1) には反映済み (`/settings/workspace` は増分 2 へ)。
+(各ファイルの `[Answer]:` を参照) — ルート表 (§11.1) には反映済み (**`/settings/workspace` は増分 1** — [auth.md](auth.md) §6.12 (c) の C-16 適用により 2026-08-12 に増分 2 から戻した)。
 
 ---
 

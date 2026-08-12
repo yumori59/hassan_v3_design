@@ -37,7 +37,7 @@
 | | アイコン | **v3 で移植** (§5) | 移植元: `POST` / `DELETE /accounts/icon` — `同:73-74`。S3 アップロード実装は `hassan-v2-backend/aws/s3.go:62` |
 | | **通知設定** (アイデア発散の完了通知・週次サマリ) | **v3 新設** (`GET` / `PUT /settings/notifications`) | **v2 に相当機能が無い** (`accounts` に通知列なし、通知系ルートなし)。通知の対象イベント (発散完了) が v3 の機能であるため v3 が持つ |
 | **workspace** (**2026-07-30 更新版プロトタイプでセクション消滅 — ST-Q8**) | ワークスペース名・組織 ID | **v3 で移植** (§5。**プロトタイプから消えても v2 既存機能の移植としての根拠は残る**) | 移植元: `GET /companies` — `同:93`、`PUT /companies` — `同:96` |
-| | **タイムゾーン** | **保留** — ST-Q8=a により `/settings/workspace` は増分 2 へ後ろ倒し。`timezone` 項目は **ST-Q1 の結論が「サーバ側で使う」の場合のみ**増分 2 で追加 | v2 に相当列が無い。**要確認 ST-Q1** (サーバ側で使う必要があるのか。更新版プロトタイプに選択 UI 自体が無い) |
+| | **タイムゾーン** | **保留** — `/settings/workspace` 自体は増分 1 ([../auth.md](../auth.md) §6.12 (c))。`timezone` 項目は **ST-Q1 の結論が「サーバ側で使う」の場合のみ**増分 2 で追加 | v2 に相当列が無い。**要確認 ST-Q1** (サーバ側で使う必要があるのか。更新版プロトタイプに選択 UI 自体が無い) |
 | | **データポリシー** (入力データの学習利用) | **対象外 (先送り)** — **更新版プロトタイプから UI も消滅し、対象外の判断が補強された** (ST-Q2) | 旧プロトタイプの選択肢 (「組織内モデルのみ」/「共通モデルにも活用」) が**実装可能な挙動として定義されていない**。LLM 提供者との契約・実装の両面で未確定 (ST-Q2) |
 | | **アセット可視性の既定** | **v3 新設 (増分 1)** (**2026-07-31 に C-16 で前倒し** — v2 の `POST /sharing-settings` は 1 スイッチで契約全体を切り替えられたため、既定値が無いと操作の後退になる。[../auth.md](../auth.md) §6.12 の 3。**3 カテゴリ (テーマ / アセット / アイデア) へ拡張する**) | v2 に `sharing_settings` (カテゴリ単位の ON/OFF。`POST /sharing-settings` — `同:189`) があるが、**GET が無く現在値を読めない**。v3 のアセット/テーマは v3 の DB にあるため v3 側で持つ (§4 D-ST-3)。**適用先 ([assets.md](assets.md) の `visibility`) と同じ増分 2 に揃える** — BE-10 (読む側と書く側を対で設計する) への対応 |
 | **members** | メンバー一覧・権限バッジ・**ロック状態** | **v3 で移植** (§5) | 移植元: `GET /accounts` = 契約内一覧 — `同:65`。**ロック状態 (`last_locked_at`) を返すこと** — v2 の `ListAccountsForAdmin` も返している (`hassan-v2-backend/db/queries/account.sql:98`)。解除操作に到達するための読み側 ([../auth.md](../auth.md) §6.9) |
@@ -56,21 +56,21 @@
 ## 3. エンドポイント一覧 (v3 新設分)
 
 すべて認証必須 (`X-Token`)。**増分は「増分」列のとおり** (2026-07-30 の ST-Q8 回答で
-`/settings/workspace` は増分 2 へ後ろ倒し — §7.1)。
+`/settings/workspace` は増分 1 — [../auth.md](../auth.md) §6.12 (c) が SSOT)。
 共通の 400 / 401 / 500 は [README.md](README.md) §2.5 に従い、本表では**固有のコードのみ**挙げる。
 
 | メソッド | パス | 概要 | スコープ | 主なリクエスト / レスポンス項目 (暫定) | 固有ステータス | 増分 |
 |---|---|---|---|---|---|---|
 | GET | `/settings/notifications` | 通知設定取得 | 個人 | R: `{diverge_completed: "email_and_slack"\|"email"\|"none", weekly_summary: "monday_09"\|"none"}` | 200 | 1 |
 | PUT | `/settings/notifications` | 通知設定更新 | 個人 | B: 上と同じ項目 — R: 同じ | 200 / **400** (列挙外の値) | 1 |
-| GET | `/settings/workspace` | v3 側ワークスペース設定取得 | 契約 | R: `{default_asset_visibility: "private"\|"contract"}` (**ST-Q8=a: 増分 1 には置かない。`timezone` は ST-Q1 の結論が「使う」の場合のみ追加**) | 200 | **2** |
-| PUT | `/settings/workspace` | 同 更新 | 契約 | B: 上と同じ項目 — R: 同じ | 200 / **403** (契約内管理者以外) / **400** (列挙外の値) | **2** |
+| GET | `/settings/workspace` | v3 側ワークスペース設定取得 | 契約 | R: `{default_asset_visibility: "private"\|"contract"}` (**`timezone` は ST-Q1 の結論が「使う」の場合のみ追加。`timezone` は ST-Q1 の結論が「使う」の場合のみ追加**) | 200 | 1 |
+| PUT | `/settings/workspace` | 同 更新 | 契約 | B: 上と同じ項目 — R: 同じ | 200 / **403** (契約内管理者以外) / **400** (列挙外の値) | 1 |
 | GET | `/usage-summary` | 契約の利用量集計 (**月 × メンバー × 活動種別のクロス集計** — ST-Q9=a) | 契約 | Q: `from_month` / `to_month` (`YYYY-MM`) — R: `{months:[...], members:[{account_id, name}], counts:{<action>: {<month>: {<account_id>: n}}}}`。**活動種別の値域は [../observability.md](../observability.md) §4.5 の `action` 定義と揃える** (D-ST-6 と同じ委譲)。集計元は `audit_logs` ([../data-model.md](../data-model.md) §4.10) | 200 / **403** (契約内管理者以外) / **400** (月形式・期間) | 1 |
 | GET | `/activity-logs` | 契約の活動ログ一覧 | 契約 | Q: `from` / `to` / `account_id` (**自契約のメンバーのみ**) / `limit` / `offset` — R: `{items:[{occurred_at, actor:{account_id, name}, action, target}], total_count}` | 200 / **403** (契約内管理者以外) / **400** (契約外の `account_id`) | 1 |
 
 ### 3.1 契約内管理者限定の 3 本 (A-2 / [README.md](README.md) §2.2 の **R-1**)
 
-`PUT /settings/workspace` (増分 2 — ST-Q8) / `GET /usage-summary` / `GET /activity-logs` は
+`PUT /settings/workspace` / `GET /usage-summary` / `GET /activity-logs` は
 **契約内管理者のみ**が実行できる。判定は v2 の前例に倣う:
 
 ```
@@ -103,18 +103,25 @@ if !authAccount.AuthRoleID.IsAdmin() { 403 }     // 契約内ロールの判定
 
 | 増分 | 書く側 (本ファイル) | 読む側 ([assets.md](assets.md) / [themes.md](themes.md)) |
 |---|---|---|
-| **1** | **`/settings/workspace` 自体を提供しない** (ST-Q8=a。設定画面は通知設定のみ) | `visibility` はスキーマに存在するが常に `private`。`scope=contract` は 400 |
-| **2** | `GET/PUT /settings/workspace` を開放し `default_asset_visibility` を受け付ける | `PUT /assets/{asset_id}` / `PUT /themes/{theme_id}/visibility` で変更可、`scope=contract` が有効 |
+| **1** | **`GET/PUT /settings/workspace` を提供し `default_*_visibility` (3 カテゴリ) を受け付ける** | `PUT /assets/{asset_id}` / `PUT /themes/{theme_id}/visibility` で変更可、`scope=contract` が有効 |
+
+**増分は 1 で確定している** ([../auth.md](../auth.md) §6.12 (c) が SSOT)。
+同節は **C-16 (v2 に存在する仕様は原則すべて v3 に引き継ぐ)** の適用として
+「契約内共有の読み取り (`scope=contract`) と `visibility` の書き込みは増分 1 に含める」を決めており、
+**書く側だけを増分 2 に残すと v2 の `POST /sharing-settings` (契約単位で共有を ON/OFF する操作) が
+増分 1 で失われる**。読む側・書く側とも増分 1 に揃えることで BE-10 は起きない。
 
 **移行**: v2 の `sharing_settings` の既存値は、**設定値としてではなく既存リソースの `visibility` 初期値**
 として使う ([themes.md](themes.md) §3.2 TM-1 / [assets.md](assets.md) §3.2 AS-M1)。
 **`default_asset_visibility` の初期値も同じ値から決める** (契約が共有 ON だった → `contract`)。
 これで「既存アセットは共有されているのに、新規作成すると非公開になる」という不整合を避ける。
 
-- **却下**: `default_asset_visibility` を増分 1 で作る — 適用先が無く、設定した値が
-  どこにも効かない期間ができる (レビューで指摘された BE-10 の再発形)
-- **却下**: v2 の `sharing_settings` を v3 の設定として引き継ぎ、契約 × カテゴリで判定し続ける —
-  per-resource の可視性を表現できない ([themes.md](themes.md) D-TH-3 / [assets.md](assets.md) D-AS-12)
+- **却下**: `default_asset_visibility` を増分 2 に残す — 適用先 (読む側) が
+  [../auth.md](../auth.md) §6.12 (c) で増分 1 に引き上げられており、**書く側だけが遅れると
+  v2 の「契約単位で共有を切り替える」操作が増分 1 で失われる** (C-16 違反)
+- **却下**: v2 の `sharing_settings` を v3 の設定としてそのまま引き継ぎ、契約 × カテゴリで判定し続ける —
+  per-resource の可視性を表現できない ([themes.md](themes.md) D-TH-3 / [assets.md](assets.md) D-AS-12)。
+  **v2 の操作は「契約単位の既定値 3 カテゴリ」として引き継がれる** ([../auth.md](../auth.md) §6.12 (a))
 
 ---
 
@@ -227,11 +234,14 @@ if !authAccount.AuthRoleID.IsAdmin() { 403 }     // 契約内ロールの判定
 
 - **ST-Q8: `workspace` セクション消滅後の `/settings/workspace` の扱い**。
   事実: 更新版に `workspace` セクションが無く、タイムゾーン・データポリシー・ワークスペース名の UI が消えた (§1)。
-  ただし `default_asset_visibility` は増分 2 の共有機能 ([assets.md](assets.md) §3.2 / §3.2 の BE-10 対応) が読む側として要求する。
+  ただし `default_asset_visibility` は共有機能 ([assets.md](assets.md) §3.2 の BE-10 対応) が読む側として要求する (**その読む側が増分 1 に引き上げられたのが撤回の理由**)。
   選択肢: (a) `/settings/workspace` を増分 2 へ丸ごと後ろ倒しし、増分 1 の設定画面は通知設定のみにする
   (`timezone` は ST-Q1 の結論次第で削除) / (b) 現行設計 (増分 1 に `GET/PUT /settings/workspace`) を維持する。
-  [Answer]: **(a) 増分 2 へ後ろ倒し** (2026-07-30 ユーザー回答)。§3 の増分列・§3.2 に反映済み。
-  `timezone` は ST-Q1 の結論が「サーバ側で使う」となった場合のみ増分 2 の項目に追加する
+  [Answer]: **(a) 増分 2 へ後ろ倒し** (2026-07-30 ユーザー回答) → **2026-08-12 に撤回**。
+  [../auth.md](../auth.md) §6.12 (c) が **C-16 の適用で読む側・書く側とも増分 1** に確定させたため、
+  `/settings/workspace` は**増分 1** になった。後ろ倒しのままだと **v2 の `POST /sharing-settings`
+  (契約単位で共有を ON/OFF する操作) が増分 1 で失われる**。§3 の増分列・§3.2 に反映済み。
+  `timezone` は ST-Q1 の結論が「サーバ側で使う」となった場合のみ項目に追加する
 
 - **ST-Q9: `GET /usage-summary` が返す集計の形**。
   事実: 更新版の audit は「月選択 + メンバー × 活動種別 6 種の月次クロス集計 + CSV」(§2 の audit 行)。

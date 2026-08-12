@@ -32,7 +32,7 @@ prod 環境の構築と全面切替 ([operations.md](../docs/design/operations.m
 | **B の裏で進めるもの** | **A-0** (§3.2) と **C-0 = 発散の設計と起票** (§3.3)。C-0 を先に済ませることで、C の 3 週間を実装と検証だけに使える |
 | **C の期間** | **3 週間を確保する**。tool 契約 (C-3) と会話ターン (C-4) に BE-8 / BE-10 / BE-12 が集中し、**末尾に通し検証 (C-7) を 4 日置く** |
 | **テーマ** | **スコープ外** — 別の開発者が担当する。ただし `POST /conversations` は `theme_id` 必須のため**依存が残る** (§7 の R-12) |
-| **設定** | **v2 にあった設定機能を B-9 として入れる** (§3 の B-9)。A から 3 日を移した — **A が本計画で最も薄い部分になる** (§7 の R-14) |
+| **設定** | **v2 にあった設定機能を B-9 として入れる** (§3 の B-9。5 本)。A から 3 日を移した — **A が本計画で最も薄い部分になる** (§7 の R-14) |
 | **期限** | 9/30 固定。並列時に 3 分類へ分割していた稼働を 1 分類へ集中させる前提で、各中分類の所要を圧縮している |
 | **バッファ** | **C-7 の通し検証 4 日が実質のバッファも兼ねる**。それを超える遅延は C-6 → C-5 の版・復元 の順に削る (§7 の R-6) |
 
@@ -87,7 +87,7 @@ prod 環境の構築と全面切替 ([operations.md](../docs/design/operations.m
 | **P-4** | **AC カタログが `AC-CV-*` を 1 件も拾っていない** — `hassan-v3/scripts/sync-ac-catalog.sh` が読むのは `aidlc-docs/inception/*/requirements.md` 固定で、定義元の [requirements-conversation.md](inception/productionization/requirements-conversation.md) がグロブから外れている | 8/11 | **発散系の計画に `AC-CV-*` を書くと `check-ac-coverage.sh` の検査④が「実在しない AC」と判定して CI が落ちる**。修正後、故障注入で拾うことを確認する |
 | **P-5** | **設計と実装の食い違いの解消** (認証系統の数) | 8/12 | **完了**。社内管理者に MFA を課さない決定 ([auth-accounts.md](../docs/design/API/auth-accounts.md) AA-D-22) により設計は 3 系統。実装 `feat/6` が正 |
 | **P-6** | **発散系の issue 起票** — §5 の中分類の単位 | **8/13〜8/23** (C-0 の一部) | **B の裏で行う** (§3.3)。起票を C の 3 週間の中でやらない — 実装と検証に充てるため |
-| **P-7** | **`default_asset_visibility` の増分が 3 箇所で食い違っている** — [settings.md](../docs/design/API/settings.md) §3 は `/settings/workspace` を**増分 2**、同 §4 は「増分 1 で作るのは却下 (適用先が無い)」、[README.md](../docs/design/API/README.md) §5 と [v2-feature-inventory.md](../docs/analysis/v2-feature-inventory.md) §2.9 は「**C-16 で増分 1 へ前倒し**」 | **8/12** | **B-9 の範囲が決まらない**。v2 の `POST /sharing-settings` を引き継ぐ以上 C-16 の対象だが、**適用先 (アセット / テーマ / アイデアの `visibility`) は本計画の対象外**なので、既定値だけ作っても効果が無い。**「設定値の保存だけ先に作る」か「適用先とセットで後の増分にする」かをユーザーが決める** |
+| **P-7** | ~~`default_asset_visibility` の増分の食い違い~~ → **2026-08-12 に解決**。[auth.md](../docs/design/auth.md) **§6.12 (c)** が SSOT で、**C-16 の適用により読む側・書く側とも増分 1** と既に確定していた。[settings.md](../docs/design/API/settings.md) の §3 / §3.2 / §7.1 と [frontend.md](../docs/design/frontend.md) §0 が旧記述 (増分 2) のままだったため是正した | **完了** | **B-9 の③の範囲が確定**: `GET`/`PUT /settings/workspace` (契約単位の既定値 3 カテゴリ) を作る |
 
 **S-3 の計画 (`hassan-v3/docs/plans/<issue番号>-<slug>.md`) は V-12 で backend の全 issue に必須**。
 40 本ぶんのコストは各中分類に内包しており、表には別行として現れない。
@@ -107,7 +107,7 @@ prod 環境の構築と全面切替 ([operations.md](../docs/design/operations.m
 | **B-6 メンバー管理** | 8/19〜8/21 | **#14** + **#15** + **#16** | 一覧・取得・作成・更新・招待発行・MFA リセット / ロック解除 / 削除。**削除は無効化のみの 204 同期 API** (帰結の SSOT は [data-model.md](../docs/design/data-model.md) §4.2 の DM-A5 補足)。**手動ロックは実装しない** |
 | **B-7 契約・社内管理者** | 8/22 | **#17** + **#18** | 契約・会社情報 / 横断検索・一般アカウントの MFA リセット・管理者一覧 |
 | **B-8 検査と運用の穴埋め** | 8/23 | #20 + #21 + #23 + #24 + #25 + #28 | 乖離検出テストの自己拡張 / env キー集合の CI 照合 / `check-owner-scope.sh` の取りこぼし / レート制限のログ 2 重出力と 503 / `auth_rate_limit_counters` の掃除 / 認証ミドルウェア内イベントログの移植 (BE-10 の予防)。**実機依存の項目 (#24 の 503) は A-6 後に dev で再確認する** |
-| **B-9 設定 (v2 にあった分)** | 8/24〜8/26 | 新規 3 本 | **①通知設定** (`GET`/`PUT /settings/notifications`。テーブルは [data-model.md](../docs/design/data-model.md) §4.9 の `account_notification_settings`) **②活動ログと利用状況** (`GET /activity-logs` / `GET /usage-summary`。v2 の `GET /event_logs/analytics` の引き継ぎ) **③共有設定の既定値** (v2 の `POST /sharing-settings` の引き継ぎ。**範囲は P-7 の確定に従う**)。**②は書く側とセットで確認する** — `audit_logs` に記録が無いと空の画面になる (BE-10) |
+| **B-9 設定 (v2 にあった分)** | 8/24〜8/26 | 新規 5 本 | **①通知設定** (`GET`/`PUT /settings/notifications`。テーブルは [data-model.md](../docs/design/data-model.md) §4.9 の `account_notification_settings`) **②活動ログと利用状況** (`GET /activity-logs` / `GET /usage-summary`。v2 の `GET /event_logs/analytics` の引き継ぎ) **③共有設定の既定値** `GET`/`PUT /settings/workspace` (v2 の `POST /sharing-settings` の引き継ぎ。契約単位の既定値 3 カテゴリ。テーブルは `workspace_settings`)。**②は書く側とセットで確認する** — `audit_logs` に記録が無いと空の画面になる (BE-10) |
 
 **クローズする issue**: **#11** (社内管理者 TOTP。AA-D-22 により対象外)。
 
@@ -121,7 +121,7 @@ prod 環境の構築と全面切替 ([operations.md](../docs/design/operations.m
 | **B-6** | **#16** | `accounts` に無効化列を追加 (①) | #14 / #16 = 2 巡 / #15 = 1 巡 | **直列** — `/accounts/{id}` 系を共有 |
 | **B-7** | **#17** / #18 は要判定 | `companies` を新設 (①) | 各 2 巡 | **並列可** — `/contracts` `/companies` と `/admin` で第 1 階層が分かれる |
 | **B-8** | **#28** / #25 は条件付き | `event_logs` を新設 (①) / #25 は Scheduled Task を採ると infra 跨ぎ (③) | chore 各 1 巡 / #28 = 2 巡 | **#20 / #21 / #23 / #24 は並列可** |
-| **B-9** | **①②③ すべて該当** (①新規テーブル + 新規第 1 階層 `/settings` / ②新規第 1 階層 `/activity-logs` `/usage-summary` / ③P-7 の確定内容による) | 下の根拠列を参照 | 各 2 巡 | **①と② は並列可** — 触るテーブルが分かれる。③ は P-7 の後 |
+| **B-9** | **①②③ すべて該当** (①`account_notification_settings` + 新規第 1 階層 `/settings` / ②新規第 1 階層 `/activity-logs` `/usage-summary` / ③`workspace_settings`) | いずれも新規テーブル + 新規第 1 階層 (①) | 各 2 巡 | **①②③ すべて並列可** — 触るテーブルが分かれる |
 
 **想定巡数の根拠**: 実測は #6 が 2 巡・#7 が 1 巡。「新規テーブルを伴う feat = 2 巡 / chore・検査 = 1 巡」を置いた。
 **3 巡目は制度上存在しない** (R-7)。「要判定」は S-2 で OR が確定させる。
@@ -296,7 +296,7 @@ P-1 → P-2 → P-3 → P-4 → P-5                       (8/10〜8/12)
 | 8/19〜8/21 | **B** B-6 メンバー管理 | A-0.3 / C-0.3 |
 | 8/22 | **B** B-7 契約・社内管理者 | A-0.4 |
 | 8/23 | **B** B-8 検査と運用の穴埋め | C-0.4 (起票) |
-| 8/24〜8/26 | **B** B-9 設定 (通知 / 活動ログ・利用状況 / 共有設定の既定値) | A-0.4 |
+| 8/24〜8/26 | **B** B-9 設定 (通知 2 / 活動ログ・利用状況 2 / ワークスペース設定 1〜2) | A-0.4 |
 | 8/27〜8/28 | **A** A-1 tfstate + OIDC | — |
 | 8/29〜8/30 | **A** A-2 network | — |
 | 8/31〜9/2 | **A** A-3 RDS + Secrets | — |
