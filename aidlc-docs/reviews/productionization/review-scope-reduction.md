@@ -554,3 +554,23 @@ $ grep -rn "admin_mfa_configs\|admin/mfa/totp\|admin/admins/{admin_account_id}\|
   `docs/design/infrastructure.md` の INF-L に「管理者経路の IP 許可リストは本増分では入れない」を追記した。
   **`POST /admin/signin` のレート制限と `observability.md` §4.6 の AL-7 は外してはいけない** (外すと防御がゼロになる)
   ことを両書に明記している。**残るのは `operations.md` の R-8 未受信のみ**
+
+### 追加是正 (2026-08-12。設定機能の増分の食い違い)
+
+**発見**: `default_asset_visibility` / `/settings/workspace` の増分が 4 箇所で食い違っていた。
+**SSOT は [../../../docs/design/auth.md](../../../docs/design/auth.md) §6.12 (c)** で、
+**C-16 の適用により読む側・書く側とも増分 1** と 2026-07-31 に確定済みだった。
+`settings.md` と `frontend.md` がその改訂を受け取っておらず、増分 2 の旧記述を保持していた (DR-8 の受信漏れ)。
+
+| ファイル | 旧記述 | 是正 |
+|---|---|---|
+| `docs/design/API/settings.md` §3 の増分列 | `GET`/`PUT /settings/workspace` = **増分 2** | **増分 1** |
+| 同 §3.2 の増分表 | 「増分 1 では `/settings/workspace` 自体を提供しない」 | 増分 1 で提供。auth.md §6.12 (c) が SSOT と明記 |
+| 同 §3.2 の却下 | 「増分 1 で作るのは却下 (適用先が無い)」 | 「**増分 2 に残すのを却下**」へ反転。読む側が増分 1 に引き上げられたため |
+| 同 §7.1 の ST-Q8 `[Answer]` | 「(a) 増分 2 へ後ろ倒し」 | **撤回**を追記。後ろ倒しのままだと v2 の `POST /sharing-settings` が増分 1 で失われる (C-16 違反) |
+| `docs/design/frontend.md` §0 | 「`/settings/workspace` は増分 2 へ」 | 増分 1 |
+
+**帰結**: スケジュールの **P-7 が解決**し、**B-9 設定の範囲が 5 本に確定**した
+(通知 2 / 活動ログ・利用状況 2 / ワークスペース設定 1〜2)。
+
+**検証**: `make check` 全ゲート エラー 0 件。
