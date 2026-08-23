@@ -47,7 +47,7 @@ v3 の対応先は [../design/API/auth-accounts.md](../design/API/auth-accounts.
 
 | v2 エンドポイント | 行 | v2 が搭載していた機能 | v3 の対応 | 状態 |
 |---|---|---|---|---|
-| `GET /contracts` | `:62` | 自分の契約情報の取得 (v2 は `sharing_settings` も含めて返す) | `GET /contracts/me` (`sharing_settings` は返さず `member_count` を返す — AA-D-15) | **引き継ぐ** |
+| `GET /contracts` | `:62` | 自分の契約情報の取得 (v2 は `sharing_settings` も含めて返す) | `GET /contract` (`sharing_settings` は返さず `member_count` を返す — AA-D-15。パスは `/me` を付けない単数形 = AA-D-25) | **引き継ぐ** |
 | `GET /accounts` | `:65` | 契約内メンバー一覧 | 同名 | **引き継ぐ** |
 | `GET /accounts/me` | `:66` | 自分のアカウント取得 | 同名 | **引き継ぐ** |
 | `GET /accounts/:id` | `:67` | メンバー個別取得 | 同名 | **引き継ぐ** |
