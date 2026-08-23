@@ -236,6 +236,31 @@ expect "README.md の「同書の 403 は N 本ある」== auth-accounts の実�
 rm_403_sep=$(pick '認証・アカウント基盤の ?\*{0,2}[0-9]+ ?\*{0,2}本は別勘定' "$RM")
 expect "README.md の「認証・アカウント基盤の N 本は別勘定」== auth-accounts の実測" "$aa_403" "$rm_403_sep" "⑧"
 
+# ── ⑨ CSV の列数: ideas.md §2.6 の写像表 (定義元) == 自称値・転記先 (2026-08-23 追加 = proto-v4 レビュー 重大 2) ──
+# 起票理由: 増分 proto-v4 が CSV の 4 列を改称し、「16 列」の転記が ideas.md 内 4 箇所 +
+# operations.md §6.3.1 の告知に増えたのに無検査だった (DR-9)。列数と列名は実装リポの
+# CSV 生成テストの期待値になる (AC-PV-3.3 / AC-PV-6.5 の④)。
+# 定義元 = §2.6 の「列の写像」表 (4 セル行 = NF==6)。§2.6.1 の改称対応表 (同形式) は範囲外。
+IDE="docs/design/API/ideas.md"
+OPS="docs/design/operations.md"
+if [[ -f "$IDE" && -f "$OPS" ]]; then
+  csv_rows=$(awk '/^### 2\.6 /,/^#### 2\.6\.1 /' "$IDE" | awk -F'|' '/^\| [0-9]+ \|/ && NF==6' | wc -l | tr -d ' ')
+  csv_head=$(pick 'ヘッダは ?\*{0,2}[0-9]+ ?\*{0,2}列' "$IDE")
+  expect "ideas.md §2.6 の写像表の行数 == 「ヘッダは N 列」" "$csv_rows" "$csv_head" "⑨"
+  csv_write=$(pick '[0-9]+ 列すべてに値を書く' "$IDE")   # 決定 1 と D-IDA-11 の 2 箇所 — pick() の多重ヒット検査が値の食い違いを見る
+  expect "ideas.md の「N 列すべてに値を書く」== 写像表の行数" "$csv_rows" "$csv_write" "⑨"
+  csv_261=$(pick '列数は ?\*{0,2}[0-9]+ ?\*{0,2}のまま' "$IDE")
+  expect "ideas.md §2.6.1 の「列数は N のまま」== 写像表の行数" "$csv_rows" "$csv_261" "⑨"
+  csv_tags=$(pick '§2\.6 の ?\*{0,2}[0-9]+ ?\*{0,2}列に無い' "$IDE")
+  expect "ideas.md の「§2.6 の N 列に無い」== 写像表の行数" "$csv_rows" "$csv_tags" "⑨"
+  csv_ops=$(pick '列数・列順は ?\*{0,2}[0-9]+ ?\*{0,2}列のまま' "$OPS")
+  expect "operations.md §6.3.1 の「列数・列順は N 列のまま」== 写像表の行数" "$csv_rows" "$csv_ops" "⑨"
+else
+  checked=$((checked + 1))
+  echo "[ERROR] $IDE または $OPS が見つからない (移動・改名したなら本スクリプトの IDE / OPS を更新すること)"
+  errors=$((errors + 1))
+fi
+
 # ── 多重ヒットの集計 (pick() がサブシェルで記録したもの) ──
 if [[ -s "$MULTIHIT_LOG" ]]; then
   while IFS= read -r line; do
@@ -246,6 +271,6 @@ if [[ -s "$MULTIHIT_LOG" ]]; then
 fi
 
 # ── 結果 ────────────────────────────────────────
-echo "[endpoint-mapping] 実測: auth-accounts.md $aa_eps 本 / $NDOM ドメイン $dom_subtotal 本 / settings.md §5 $st_rows 行 / custom tool ${tool_rows:-?} 本 / 403 ${sum403:-?} 本"
+echo "[endpoint-mapping] 実測: auth-accounts.md $aa_eps 本 / $NDOM ドメイン $dom_subtotal 本 / settings.md §5 $st_rows 行 / custom tool ${tool_rows:-?} 本 / 403 ${sum403:-?} 本 / CSV ${csv_rows:-?} 列"
 echo "[endpoint-mapping] 照合 $checked 件 / エラー $errors 件"
 [[ "$errors" -eq 0 ]] || exit 1

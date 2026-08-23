@@ -595,11 +595,11 @@ db/
 
 | テーブル | 用途 | 主キー | 主要カラム | 参照 (FK) | 主なインデックス |
 |---|---|---|---|---|---|
-| `ideas` | アイデア | `id` | `theme_id` / `conversation_session_id` (NULL 可) / `seq_no integer` / `title` / `summary` / `target_market` / `customer` / `issue` / `solution` / `market_size` / `cagr` / `uniqueness` / `mission_alignment` / `score` / 各軸スコア / `star_rating` / `visibility` / `deleted_at` | `theme_id`→`themes` (CASCADE) / `conversation_session_id`→`conversation_sessions` (SET NULL) | `(account_id, updated_at DESC) WHERE deleted_at IS NULL` / `(theme_id) WHERE deleted_at IS NULL` / `(contract_id, visibility) WHERE deleted_at IS NULL` / **UNIQUE `(theme_id, seq_no)`** |
+| `ideas` | アイデア | `id` | `theme_id` / `conversation_session_id` (NULL 可) / `seq_no integer` / `title` / `summary` / `target_market` / `customer` / `issue` / `solution` / `market_size` / `cagr` / **`advantage_note`** / **`feasibility_note`** (**2026-08-23 の proto-v4 で `uniqueness` / `mission_alignment` を改称**) / `score` / **`grade text`** / **軸スコア 3 列 `market_appeal_score` / `advantage_score` / `feasibility_score` (`numeric(3,1)`)** / **サブ基準スコア 2 列 `sam_score` / `cagr_score` (`smallint`)** / `star_rating` / `visibility` / `deleted_at` | `theme_id`→`themes` (CASCADE) / `conversation_session_id`→`conversation_sessions` (SET NULL) | `(account_id, updated_at DESC) WHERE deleted_at IS NULL` / `(theme_id) WHERE deleted_at IS NULL` / `(contract_id, visibility) WHERE deleted_at IS NULL` / **UNIQUE `(theme_id, seq_no)`** |
 | `idea_assets` | アイデアが使ったアセット | `(idea_id, asset_id)` | `sort_order` | `idea_id`→`ideas` (CASCADE) / `asset_id`→`assets` (NO ACTION) | `(asset_id)` |
 | `idea_tags` | アイデアのタグ (**2026-07-31 追加**。**v2 に対応するタグ列・タグテーブルが無いため移行対象外 = 初期は空** — [API/idea-boards.md](API/idea-boards.md) §8。DDL は非破壊 `CREATE TABLE` なので dev は自動適用 / prod は承認必須 = §7.4 の OP-J) | `id` | `tag` / `sort_order` | `idea_id`→`ideas` (CASCADE) | `(idea_id)` / **GIN trgm on `tag`** (`GET /ideas` の `keyword` がタグを対象にするため) |
 | `idea_versions` | ブラッシュアップ履歴 | `id` | `ver_no integer` / `label` / `snapshot jsonb` / `create_account_id` / `created_at` | `idea_id`→`ideas` (CASCADE) | **UNIQUE `(idea_id, ver_no)`** / `(idea_id, created_at DESC)` |
-| `idea_evaluations` | リッチ評価 (派生物) | `id` | `source_idea_version_id` / `source_hash text` / `evaluation jsonb` / **`status`** (`queued`\|`running`\|`succeeded`\|`failed`) / **`failure_code` / `failure_message` / `heartbeat_at` / `idempotency_key`** (DM-16 の共通列名。2026-08-02 追加) / `updated_at` | `idea_id`→`ideas` (CASCADE) / `source_idea_version_id`→`idea_versions` (NO ACTION) | **UNIQUE `(idea_id)`** / `(status, heartbeat_at) WHERE status IN ('queued','running')` (J-3 の取り残し回収) / **部分 UNIQUE `(idea_id, idempotency_key) WHERE status IN ('queued','running')`** (J-5 の冪等キー。`asset_extractions` と同型だが**キーは `account_id` ではなく `idea_id`** — 再評価は「そのアイデアに対して 1 本」で排他するため) |
+| `idea_evaluations` | リッチ評価 (派生物) | `id` | `source_idea_version_id` / `source_hash text` / `evaluation jsonb` / **`criteria_version text NOT NULL`** (**2026-08-23 の proto-v4 で追加**。採点に使った軸定義の識別子) / **`status`** (`queued`\|`running`\|`succeeded`\|`failed`) / **`failure_code` / `failure_message` / `heartbeat_at` / `idempotency_key`** (DM-16 の共通列名。2026-08-02 追加) / `updated_at` | `idea_id`→`ideas` (CASCADE) / `source_idea_version_id`→`idea_versions` (NO ACTION) | **UNIQUE `(idea_id)`** / `(status, heartbeat_at) WHERE status IN ('queued','running')` (J-3 の取り残し回収) / **部分 UNIQUE `(idea_id, idempotency_key) WHERE status IN ('queued','running')`** (J-5 の冪等キー。`asset_extractions` と同型だが**キーは `account_id` ではなく `idea_id`** — 再評価は「そのアイデアに対して 1 本」で排他するため) |
 | `plans` | 企画書 (8 タブの親) | `id` | `theme_id` / **`visibility`** (`private`\|`contract`。既定 `private`) / **`thumbnail_object_key text` / `thumbnail_generated_at`** / `generated_at` / `deleted_at` | `idea_id`→`ideas` (CASCADE) / `theme_id`→`themes` (CASCADE) | **UNIQUE `(idea_id) WHERE deleted_at IS NULL`** / `(theme_id) WHERE deleted_at IS NULL` |
 | `plan_tab_versions` | タブ別の版 | `id` | `tab_id text` / `ver_no integer` / `label` / **`instruction text NOT NULL DEFAULT ''`** (生成時の追加指示。v2 の `business_plan_histories.prompt` の後継) / `content jsonb` / `source_idea_version_id` / `source_hash` / `create_account_id` / `created_at` | `plan_id`→`plans` (CASCADE) / `source_idea_version_id`→`idea_versions` (NO ACTION) | **UNIQUE `(plan_id, tab_id, ver_no)`** / `(plan_id, tab_id, created_at DESC)` |
 | `plan_favorites` | 企画書のお気に入り (**2026-08-02 追加**。v2 の `business_plan_favorites` の後継 — `hassan-v2-backend/db/schema.sql:206`) | `(plan_id, account_id)` | `created_at` | `plan_id`→`plans` (CASCADE) / `account_id`→`accounts` (CASCADE) | `(account_id, created_at DESC)` |
@@ -625,6 +625,23 @@ db/
   **却下**: PoC 方式 (`created_at > target` の行を物理削除する
   — `claude_managed_agents/internal/db/migrations/000022_idea_versions.up.sql:11`〜`:12` のコメントが方針を明記)。
   誤操作が不可逆で、監査でも「何を戻したか」が追えない
+
+**評価の 3 軸化に伴う列の改訂 (増分 proto-v4。2026-08-23。AC-PV-3.5。起票元: [API/ideas.md](API/ideas.md) §8.1 の R-IDA-12)**:
+
+上の表が列の定義元で、**判断の SSOT は [API/ideas.md](API/ideas.md)** (軸とサブ基準 = 同 §6.3.1 /
+`grade` の値域と導出 = 同 §6.3.3 / どの値をどこに保存するか = 同 §6.3.4 の「保存先の書き分け」)。
+**本節は列の側だけを確定させ、軸の定義・値域・重みを再定義しない** (DR-9)。
+
+| # | 決定 |
+|---|---|
+| 1 | **軸スコアは 3 列** (`market_appeal_score` / `advantage_score` / `feasibility_score`)。上の表にあった「各軸スコア」(**軸名も本数も書いていない記述**) を**列名で確定させた** — 曖昧なままだと実装者が軸の集合を別文書から推測することになる (DR-5)。型は `score` と同じ `numeric(3,1)` — 軸スコアと `composite` は同じ 0.0〜10.0 尺度で、`integer` にすると小数 1 桁が丸められる ([API/ideas.md](API/ideas.md) §6.3.1) |
+| 2 | **サブ基準スコアは `sam_score` / `cagr_score` の 2 列だけを持つ** (`smallint`。値域はアンカーの点数集合 = [API/ideas.md](API/ideas.md) §6.3.2 が定義元)。**この 2 列を持つ理由は CSV の 14 / 15 列がサーバ側でここを読むこと** (同 §2.6 の列の写像)。**却下 (a) サブ基準を全件列にする**: 一覧・CSV が読まない値が列に増え、「`ideas` の列は軽い値・本文つきは `idea_evaluations.evaluation` (jsonb)」という書き分け (同 §6.3.4) が崩れる。**却下 (b) 2 列も持たず jsonb から都度取り出す**: CSV の全件出力が行ごとに jsonb を展開することになり、`ideas` だけを読む一覧クエリの形が壊れる |
+| 3 | **説明文列は改称して残す** (`uniqueness` → `advantage_note` / `mission_alignment` → `feasibility_note`)。**列を落とさない・中身の意味と列名を一致させる**という判断とその却下案は [API/ideas.md](API/ideas.md) §7 の **D-IDA-20** が SSOT |
+| 4 | **`grade text` を列として持つ**。値域の定義元は [API/ideas.md](API/ideas.md) §6.3.3 で、**本節に値を再掲しない**。§3.2 の列挙値の規約どおり `text` + `CHECK` とし、**`CHECK` に書く値の集合と判定は `entity/idea` の Go 型・関数が SSOT** (`grade` は `score` と 3 軸から導出される値であり、DB では計算しない) |
+| 5 | **新設・改称した列はすべて NULL 可** — 評価が未実行のアイデア (人手作成・発散直後で未評価) が存在するため。**`NOT NULL DEFAULT 0` にしない**: 0 は「最低スコア」と読めてしまい、「未評価」と区別できなくなる (欠損を値で埋めない = [API/ideas.md](API/ideas.md) §6.3.4 の欠損の扱いと同じ思想) |
+| 6 | **`idea_evaluations.criteria_version` は `NOT NULL`** — 「どの軸定義・どの重みで採点したか」の記録で、値は `entity/idea` の定数 1 箇所が持つ (増分 1 は 1 種のみ)。判断と却下案は [API/ideas.md](API/ideas.md) §7 の **D-IDA-23** / §6.8 の②。**列は増分 2 でも追加しない** (値の意味を「契約 ID + 基準の版」へ拡張する) |
+| 7 | **v2 の 4 列 (`uniqueness_score` / `mission_alignment_score` / `market_size_score` / `cagr_score`) を受ける先を作らない** — 移行は「引き継がず NULL」で、**規則と理由の SSOT は [API/ideas.md](API/ideas.md) §3.3** (同名の `market_size_score` / `cagr_score` も校正が違うため移行しない)。**説明文 2 列も移行しない** (改称した列に旧軸の文章が入ると、再評価後の内容と混ざりどちらの軸の説明か判別できない)。§6.4 の 2a も参照 |
+| 8 | **本改訂はすべて列の追加・改称でテーブルは 1 件も増減しない** — 上の表の行数は変わらず、`make check-table-counts` の期待値・§4.1 の一覧・§3.4.2 の 3 分類はいずれも更新不要 (DR-9)。**確認済み** (2026-08-23) |
 
 ### 4.7 ナレッジ (RAG)
 
@@ -853,17 +870,25 @@ PoC の 13 フィールド ([../analysis/poc-conversation-flow.md](../analysis/p
 |---|---|---|---|
 | `theme` | 持つ | `usecase/conversation` のツールハンドラ (`generate_ideas` の引数マージ) | 前提チェック / 発散入力 / `display_title` 導出 |
 | `asset_definition` (+ `function_tree`) | 持つ | ハンドラ (`load_asset` 成功時) | `deep_dive` の文脈 / `match_functions` の機能列 / 前提チェック |
-| `approach` / `constraints` | 持つ | ハンドラ (`generate_ideas` の引数) | 発散 pattern の解決 / 発散入力 |
+| **`divergence`** (オブジェクト。`mode` = 必須 / `lens` = 任意 / `lens_input` = 任意。**「必須」は「オブジェクトが台帳に存在するとき `mode` は必ず入っている」の意味** — tool 引数としては 3 つとも任意で、mode 未確定のまま `lens` だけが指定された場合はハンドラが F-3 を返し台帳を書かない = [API/conversation.md](API/conversation.md) §4.1.1 の 6 ⑤。**2026-08-23 の proto-v4 で `approach` を置き換えた**。AC-PV-4.6) | 持つ | ハンドラ (**`research_market` と `generate_ideas` の同名 3 引数** — [API/conversation.md](API/conversation.md) §4.1.1 の 4)。**更新は `entity/conversation` の副作用のない関数 1 本**が行い、①`mode` の指定で `lens` と `lens_input` を消す ②`lens` の指定で `lens_input` を消す ③指定の無いキーは保持する (同 §4.1.1 の 6) | ①[API/conversation.md](API/conversation.md) §2.2 の注入ブロック ②`research_market` ハンドラ (探索方針の組み立てと `lens_input` の埋め込み) ③`generate_ideas` ハンドラ (発散モードの解決 = **旧 `approach` の読み手の置き換え**) ④`prompts/idea/diverge.md` の軸別セクションの選択。**`stage` 導出には使わない** (同 §2.3.1) |
+| `constraints` | 持つ | ハンドラ (`generate_ideas` の引数) | 発散入力 / [API/conversation.md](API/conversation.md) §2.2 の注入 |
 | `selected_domains` (+ `rationale`) | 持つ | ハンドラ (領域選択・`generate_ideas` の引数) | `match_functions` / 発散入力 / `stage` 導出。**`rationale` を失わない経路にする** (PoC は引数マージ側が `SelectedDomainLedger{Name: ...}` だけを詰めて `rationale` を消していた — `claude_managed_agents/cmd/devui/conversation_tools_generate.go:194`〜`:204`。消える行は `:198`) |
-| `researched_domains` (+ `source_urls` / `pattern` / `researched_at`) | 持つ | ハンドラ (`research_market` 成功時。append) | 発散入力 / `match_functions` のフォールバック / `stage` 導出 / **会話再開時の FE 表示** |
+| `researched_domains` (+ `source_urls` / `pattern` / `researched_at`) | 持つ | ハンドラ (`research_market` 成功時。**append**)。**重複除外キーは正規化した `name`** (Unicode NFKC + 前後空白の除去 + 連続空白の 1 個への畳み込み + 英字の小文字化) で、**正規化は `entity/conversation` の関数 1 本**が行い書き込み経路すべてがそれを通る。**キーに `pattern` を含めない**。既存行に当たった場合は **`source_urls` を合併し `researched_at` を更新し、`entry_id` は変えない** (`entry_id` は grounding と退避の参照キー = 本節の「安定 ID」)。**規則の定義元は [API/conversation.md](API/conversation.md) §4.1.3 の 4・5** (2026-08-23 の proto-v4 で追加探索を受けたときの注記) | 発散入力 / `match_functions` のフォールバック / `stage` 導出 / **会話再開時の FE 表示** / **追加探索 (`exclude_researched`) の除外集合** (同 §4.1.3 の 3) |
 | `deep_dive_results` (+ `summary` / `target`) | 持つ | ハンドラ (`deep_dive` 成功時。append) | `generate_plan` の grounding 還流 |
 | `generated_ideas` / `generated_plans` | 持つ (**参照のみ**) | ハンドラ (生成成功時。append) | 最新エントリの解決 / `stage` 導出。**本体は `ideas` / `plans` テーブル** (台帳には ID と件数だけを置く) |
 | `rejected_candidates` | 持つ | ハンドラ (`record_rejection`) | 再提案の抑制 (**読み手を必ず実装する**。PoC は台帳コピー以外の読み手が無かった) |
 | `matching` | 持つ | ハンドラ (`match_functions`。全置換) | `stage` 導出 / 発散入力 |
-| **`seed_idea`** (新規。v3 で追加) | 持つ | ハンドラ (`generate_ideas` の `seed_idea` 引数。全置換) | 発散入力 / [API/conversation.md](API/conversation.md) §2.2 の状態注入。**v2 のマイアイデア補完 (V-3) をこの引数で吸収したため、入力原文が台帳に残らないと再発散が別物になる (BE-1)**。**書き手・読み手を対で置く** (BE-10)。起票元: 同 §8 の R-CVA-2 |
+| **`seed_idea`** (新規。v3 で追加) | 持つ | ハンドラ (`generate_ideas` の `seed_idea` 引数。全置換) | 発散入力 / [API/conversation.md](API/conversation.md) §2.2 の状態注入。**保存理由 (2026-08-23 に UI 部品に依存しない書き方へ改めた。AC-PV-5.2)**: ①**発散のやり直し** — 会話で再度発散を依頼する経路が残るため、種の原文が台帳に無いと同じ種で出し直せない (v4 で消えたのは**再発散ボタンという UI 部品**であり操作ではない — [API/conversation.md](API/conversation.md) §4.1.5 の PV-DF5) ②**入力原文の再現** — v2 のマイアイデア補完 (V-3) をこの引数で吸収したため、原文が残らないと**やり直しの入力が別物になる** (BE-1)。**書き手・読み手を対で置く** (BE-10)。起票元: 同 §8 の R-CVA-2 / **R-CVA-14 ③** |
 | **`entrypoint`** | **持たない** | — | — (PoC は**書き手も読み手も無い**フィールドだった。G-14) |
 | **`interests`** | **持たない** | — | PoC は**読み手が 2 箇所あるのに書き手が無く**、前提チェックの条件が実現不能だった (G-14)。**必要になった時点で tool schema の引数・書き手・読み手を同一 PR で追加する** |
 | **`rejected_candidates[].confidence`** | **持たない** | — | 同上 (書き手が無い。G-14) |
+
+**`divergence` を 1 つのオブジェクトとして持つ (増分 proto-v4。2026-08-23)**:
+`lens_input` は `lens` に、`lens` は `mode` に従属するため、**3 つのフラットフィールドにすると
+「古いレンズに新しい起点が付く」組が型の上で作れてしまう** (BE-1)。
+`entity/conversation` の構造体もネストした 1 つの型で宣言し、**更新はこの節の表に書いた 1 関数だけを通す**。
+**enum の値域と (mode, lens) の妥当な組は [API/conversation.md](API/conversation.md) §4.1.1 の 2 表が定義元**で、
+**本書に値を再掲しない** (DR-9)。却下案は同 §4.1.1 の 5。
 
 **フィールド契約の担保 (BE-12)**:
 
@@ -880,6 +905,7 @@ PoC の 13 フィールド ([../analysis/poc-conversation-flow.md](../analysis/p
 |---|---|
 | 1 | `ledger_schema_version smallint NOT NULL DEFAULT 1` を持つ。**フィールドの追加 (後方互換) では上げない。フィールドの意味・型を変える場合に上げ、読み手に版の分岐を置く** |
 | 2 | **既存行の一括変換 (JSONB のバックフィル) は [operations.md](operations.md) §7.4 の 8 (データ移行 SQL = 破壊的変更) として扱う** — 影響行数を承認材料に添える |
+| 3 | **`approach` → `divergence` の置き換え (2026-08-23) で `ledger_schema_version` を上げない**。決定 1 の基準では「フィールドの意味・型を変える」に当たるが、**版を上げる目的は読み手に分岐を置くこと**であり、**分岐すべき既存行が存在しない**。根拠: 会話機能は第 1 リリース前で v3 の台帳に行が無い (**評価側と同じ根拠 = [API/ideas.md](API/ideas.md) §3.3 の「v3 側の既存データは 0 件」**。出典は [schedule-2026q3.md](../../aidlc-docs/schedule-2026q3.md) §5)。**却下**: 版を 2 にして読み手に `approach` の分岐を残す — **書き手が存在しない旧フィールドを読む経路**が第 1 リリース時点から死にコードとして入る (G-14 の「書き手の無いフィールド」を自分で作ることになる)。**リリース後に同型の置き換えを行う場合は決定 1 のとおり版を上げる** |
 
 **サイズ上限と退避 (DM-11 の却下 b への対処)**:
 
@@ -1070,8 +1096,8 @@ conversation_sessions.ledger.deep_dive_results ──> plan_tab_versions (ground
 | # | 項目 | 具体 |
 |---|---|---|
 | 1 | **対象テーブルの対応表** | v2 のテーブル → v3 のテーブル・列の 1:1 対応 (型変換を含む)。対象外にする v2 テーブルとその理由 |
-| 2 | **写像規則** | ①ID を維持するか再割り当てするか (DM-1 は維持できる形にしてある。**例外: `asset_documents` は v2 が `uuid` PK** (`hassan-v2-backend/db/schema.sql:510`〜`:515` の `id uuid NOT NULL` / F-5) で **v3 は `bigint`** (§4.4) なので、**このテーブルだけは ID を維持できず対応表が必要**になる。DM-1 の却下 (a) が「全テーブル分の対応表が必要になる」を理由に UUIDv7 統一を却下したのと同じ論法が 1 テーブルに残る。**F-1 の他の `uuid` 系 4 テーブル (`contracts` / `accounts` / `companies`) は §4.2 で `uuid` を維持するため影響なし**) ②`ideas` の 2 段チェーン (F-6) から `account_id` / `contract_id` を 1 段に落とす規則 ③配列カラム (F-7) から中間テーブルへの展開 ④`enum` から `text` への変換 ⑤`ideas.memo` / `phase` をボードアイテムへ移す規則 ([API/idea-boards.md](API/idea-boards.md) M-2 / M-3) ⑥**v2 に対応列が無い `NOT NULL` 列の既定値** (`themes.mission` / `icon` — v2 の `themes` は `id` / `account_id` / `name` / `hex` / `created_at` / `updated_at` の 6 列しかない (`hassan-v2-backend/db/schema.sql:94`〜`:102`)。**空文字を入れるのか NULL 可に変えるのかを移行前に決める**。旧記述の `subtitle`/`purpose`/`status` は 2026-07-30 の TH-Q6〜Q8 回答で列自体が無くなった) ⑦**列名が変わった列の対応** (2026-07-31 追加。フィールド単位の照合で判明): **v2 `ideas.concept`** (`hassan-v2-backend/db/schema.sql:155`) に対し **§4.6 の v3 `ideas` は `summary`** を持つ。本書に `concept` の言及が他に 1 件も無く、**リネームなのか意味を変えたのかが未記録**のため移行時にどちらへ入れるかが決まらない。**「事業コンセプト」を表示する画面が実在する**ため落とせない ([API/idea-boards.md](API/idea-boards.md) §8 の IB-Q14-4 / IB-Q11=a)。同節の照合表で `customer` / `issue` / `solution` / `market_size` / `cagr` は v2 と同名で一致することを確認済み — **対応が付かないのは `concept` → `summary` の 1 列のみ** |
-| **2a** | **確定済みの列写像 (アイデア・企画書。2026-08-02 追加)** | **v2 `ideas.concept` → v3 `ideas.summary`** (`hassan-v2-backend/db/schema.sql:155`。起票元: [API/ideas.md](API/ideas.md) §8 の R-IDA-4) / **v2 `ideas.score` (0〜40 の整数) → v3 `ideas.score`**。**v3 の `score` は `numeric(3,1)` (0.0〜10.0)** とし、**写像は [API/ideas.md](API/ideas.md) §3.3 の規則に従う** (`integer` で実装すると 0.0〜10.0 の小数が丸められる) / **v2 `business_plans.thumbnail_url` → v3 `plans.thumbnail_object_key`** (**URL ではなくオブジェクトキーを持つ** — v2 は public-read ACL で URL を直接保存していた (`hassan-v2-backend/aws/s3.go:46`) が、v3 は署名付き URL を都度発行するため保存する値の意味が変わる。**移行時に URL からキーを切り出す**) |
+| 2 | **写像規則** | ①ID を維持するか再割り当てするか (DM-1 は維持できる形にしてある。**例外: `asset_documents` は v2 が `uuid` PK** (`hassan-v2-backend/db/schema.sql:510`〜`:515` の `id uuid NOT NULL` / F-5) で **v3 は `bigint`** (§4.4) なので、**このテーブルだけは ID を維持できず対応表が必要**になる。DM-1 の却下 (a) が「全テーブル分の対応表が必要になる」を理由に UUIDv7 統一を却下したのと同じ論法が 1 テーブルに残る。**F-1 の他の `uuid` 系 4 テーブル (`contracts` / `accounts` / `companies`) は §4.2 で `uuid` を維持するため影響なし**) ②`ideas` の 2 段チェーン (F-6) から `account_id` / `contract_id` を 1 段に落とす規則 ③配列カラム (F-7) から中間テーブルへの展開 ④`enum` から `text` への変換 ⑤`ideas.memo` / `phase` をボードアイテムへ移す規則 ([API/idea-boards.md](API/idea-boards.md) M-2 / M-3) ⑥**v2 に対応列が無い `NOT NULL` 列の既定値** (`themes.mission` / `icon` — v2 の `themes` は `id` / `account_id` / `name` / `hex` / `created_at` / `updated_at` の 6 列しかない (`hassan-v2-backend/db/schema.sql:94`〜`:102`)。**空文字を入れるのか NULL 可に変えるのかを移行前に決める**。旧記述の `subtitle`/`purpose`/`status` は 2026-07-30 の TH-Q6〜Q8 回答で列自体が無くなった) ⑦**列名が変わった列の対応** (2026-07-31 追加。フィールド単位の照合で判明): **v2 `ideas.concept`** (`hassan-v2-backend/db/schema.sql:155`) に対し **§4.6 の v3 `ideas` は `summary`** を持つ。本書に `concept` の言及が他に 1 件も無く、**リネームなのか意味を変えたのかが未記録**のため移行時にどちらへ入れるかが決まらない。**「事業コンセプト」を表示する画面が実在する**ため落とせない ([API/idea-boards.md](API/idea-boards.md) §8 の IB-Q14-4 / IB-Q11=a)。同節の照合表で `customer` / `issue` / `solution` / `market_size` / `cagr` は v2 と同名で一致することを確認済み — **写像が未決なのは `concept` → `summary` の 1 列のみ**。**2026-08-23 の proto-v4 で `uniqueness` / `mission_alignment` も改称された** (§4.6 の決定 3) が、**こちらは写像が決まっている** (引き継がず NULL — 下の 2a と §4.6 の決定 7) |
+| **2a** | **確定済みの列写像 (アイデア・企画書。2026-08-02 追加)** | **v2 `ideas.concept` → v3 `ideas.summary`** (`hassan-v2-backend/db/schema.sql:155`。起票元: [API/ideas.md](API/ideas.md) §8 の R-IDA-4) / **v3 の `ideas.score` は `numeric(3,1)` (0.0〜10.0)** — v2 は 0〜40 の整数で**尺度が違う**ため、`integer` で実装すると 0.0〜10.0 の小数が丸められる (v2 値の写像そのものは下の「評価に関する v2 の列」のとおり **2026-08-23 に「引き継がない」へ改訂**された。旧記述の「合計を 4 で割る」は [API/ideas.md](API/ideas.md) §3.3 が撤回済み) / **v2 `business_plans.thumbnail_url` → v3 `plans.thumbnail_object_key`** (**URL ではなくオブジェクトキーを持つ** — v2 は public-read ACL で URL を直接保存していた (`hassan-v2-backend/aws/s3.go:46`) が、v3 は署名付き URL を都度発行するため保存する値の意味が変わる。**移行時に URL からキーを切り出す**) / **評価に関する v2 の列は引き継がない (2026-08-23 の proto-v4)** — `ideas.score` と、軸スコア 4 列 (`uniqueness_score` / `mission_alignment_score` / `market_size_score` / `cagr_score`) と、説明文 2 列 (`uniqueness` / `mission_alignment`) は **v3 側を NULL のままにする**。規則と理由の SSOT は [API/ideas.md](API/ideas.md) §3.3、列側の帰結は §4.6 の決定 7。**`market_size` / `cagr` の表示文字列は同名でそのまま移行する** (評価結果ではなくアイデアの説明であり、v3 ではサブ基準の採点入力にもなる) |
 | 3 | **実行経路** | 上の確定事項 5 を使う。**移行スクリプトの置き場は app モノレポの `backend/cmd/migrate-from-v2`** とし、v2 の DB へは**読み取り専用の資格情報**で接続する |
 | 4 | **冪等性** | 中断しても再実行できること (自然キーまたは `UNIQUE` による重複防止。[API/idea-boards.md](API/idea-boards.md) M-1 の形) |
 | 5 | **検証方法** | 件数の照合 + 組の完全一致が必要な項目の列挙 (ロール・可視性)。**0 件確認の対象** |
@@ -1225,6 +1251,8 @@ auth.md §6.3 / §6.4 への転記は同文書の担当セッションが行う 
 |---|---|---|---|
 | [API/auth-accounts.md](API/auth-accounts.md) §5 | **R-AA-27** | `accounts` に無効化列を追加し、無効化の帰結を決める | **実施済み (2026-08-10)** — §4.2 の **DM-A5** と「DM-A5 補足」(帰結 7 点) が本書側の決定。**一覧の既定除外は本書が SSOT** (循環委譲を解消した) |
 | 同 | **R-AA-28** | `admin_mfa_configs` を削除する (AA-D-22) | **実施済み (2026-08-10)** — §4.1.2 (a) から削除し、§3.3 / §7.2 / §4.1.2 の件数を `make check-table-counts` の実測に合わせた |
+| [API/ideas.md](API/ideas.md) §8.1 | **R-IDA-12** (= R-PV-3。AC-PV-3.5) | `ideas` の軸カラムを 3 軸に改め、サブ基準スコア 2 列・`grade`・`idea_evaluations.criteria_version` を確定する | **実施済み (2026-08-23)** — §4.6 の表と「評価の 3 軸化に伴う列の改訂」(決定 1〜8)。v2 の評価列を引き継がない帰結は §6.4 の 2a にも反映。**テーブル件数は不変** (`make check-table-counts` で確認) |
+| [API/conversation.md](API/conversation.md) §8.1 | **R-CVA-14** (= AC-PV-4.6 / AC-PV-5.2) | ①台帳の `approach` を `divergence` (`mode` / `lens` / `lens_input`) に置き換え `constraints` を独立行にする ②`researched_domains` の重複除外キーと合併規則を注記する ③`seed_idea` の保存理由を UI 部品に依存しない書き方へ改める | **実施済み (2026-08-23)** — §4.11.2 の表の 3 行 + 「`divergence` を 1 つのオブジェクトとして持つ」+ スキーマ変更の決定 3 (`ledger_schema_version` を上げない理由)。**新規テーブルなし** |
 
 ## 8. 残課題 / 要確認
 

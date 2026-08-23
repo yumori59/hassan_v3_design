@@ -304,8 +304,10 @@ Agent 経路・直接 API 経路の**両方**で、1 回の LLM 呼び出しご�
 | ドメイン | `action` の値 | 出典 |
 |---|---|---|
 | **認証** (v2 に既存の 6 種 — `hassan-v2-backend/db/schema.sql:467`〜`:479`) | `signin_success` / `signin_failed` / `mfa_verify_success` / `mfa_verify_failed` / `mfa_reset_by_admin` / `mfa_reset_by_aillio_admin` | [API/auth-accounts.md](API/auth-accounts.md) §3.7 |
-| ~~**アカウント・ロック**~~ | ~~`account_created` / `account_role_changed` / `account_deleted` / `account_locked` / `account_unlocked`~~ | **2026-08-10 の AA-D-23 で削除** — 監査ログを v2 相当に限定し、v3 独自の対象 (メンバー作成・権限変更・削除・ロック・解除) を記録しないことにした ([API/auth-accounts.md](API/auth-accounts.md) §3.7 / §5 の R-AA-7③ 取り下げ)。**再開する場合は同書 §6.1 の AA-Q14 から** |
-| **利用状況の集計対象** (契約内の活動) | `theme_created` / `idea_diverged` / `plan_drafted` / `knowledge_chat` / `asset_registered` / `comment_posted` | [API/settings.md](API/settings.md) §3 (`GET /usage-summary` のクロス集計の軸) |
+| ~~**アカウント・ロック**~~ | ~~`account_created` / `account_role_changed` / `account_deleted` / `account_locked` / `account_unlocked`~~ | **2026-08-10 の AA-D-23 で削除** — 監査ログを v2 相当に限定し、v3 独自の対象 (ロック・解除等) を記録しないことにした ([API/auth-accounts.md](API/auth-accounts.md) §3.7 / §5 の R-AA-7③ 取り下げ)。**再開する場合は同書 §6.1 の AA-Q14 から**。**メンバー作成・権限変更・削除は本表とは別行 (次行) で 2026-08-14 に一部復帰した — この行が指す「削除」とは異なるので混同しない** |
+| **メンバー・アカウント設定** (2026-08-14 の AA-D-24 で復帰。**AA-D-23 は「v2 に前例が無い」としてこの 4 件を削除したが、v2 の `hassan-v2-backend/auth/event_mapper.go` に直接の前例があった** — 事実誤認の訂正) | `member_create` / `account_update_email` / `account_update_password` / `contract_update_mfa` | [API/auth-accounts.md](API/auth-accounts.md) §3.7 (AA-D-24)。**`member_update_by_admin` / `member_delete_by_admin` は v2 に前例があるが、こちらは事実誤認ではなく AA-D-24 でスコープを広げない判断として引き続き記録しない** |
+| **パスワードリセット要求** (2026-08-23 追加 — [API/auth-accounts.md](API/auth-accounts.md) §3.7 の「要求」行に値が無かった = BE-10 の取りこぼし。v2 の `event_logs` に前例: `hassan-v2-backend/auth/event_mapper.go:75` / `entity/event_log.go:116`) | `account_request_reset_password` | [API/auth-accounts.md](API/auth-accounts.md) §3.7 |
+| **利用状況の集計対象** (契約内の活動。**`GET /usage-summary` のクロス集計の軸はこの行の 6 種のみ** — 認証・メンバー設定系の action は集計軸に含めない) | `theme_created` / `idea_diverged` / `plan_drafted` / `knowledge_chat` / `asset_registered` / `comment_posted` | [API/settings.md](API/settings.md) §3 (`GET /usage-summary` のクロス集計の軸) |
 | **生成・削除・共有** | 各ドメインの設計書が本表へ追記する (アイデア / 企画書 / アセット抽出の生成・削除、共有設定の変更) | 本節の「記録対象」 |
 
 **値域の担保方法**: **Go の定数 1 箇所を SSOT とし、CI で本表との一致を照合する**。

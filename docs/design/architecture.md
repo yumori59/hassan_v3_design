@@ -662,7 +662,7 @@ gateway/anthropic/               ← 外部システムのアダプタ層
 |---|---|---|
 | 1 | schema にある tool 名に**ハンドラが無い** | **起動時チェック**で `map` のキー集合と schema を突き合わせ、不一致なら**起動失敗** (BE-5 の「依存欠如でも動く」を作らない) |
 | 2 | ハンドラがあるのに**schema に無い** | 同上 |
-| 3 | schema の**引数名とハンドラのパースキーが不一致** | **CI 検査** (`scripts/check-tool-contract.sh`)。schema・ハンドラ・`prompts/<domain>/` の説明の**3 者一致** (D-6) を同じスクリプトで見る |
+| 3 | schema の**引数名とハンドラのパースキーが不一致** | **CI 検査** (`scripts/check-tool-contract.sh`)。schema・ハンドラ・`prompts/<domain>/` の説明の**3 者一致** (D-6) を同じスクリプトで見る。**照合対象は引数名だけでなく enum の値集合と `(mode, lens)` の妥当な組を含める** (2026-08-23 追加 — 増分 proto-v4 の R-CVA-15。引数名しか見ないと、値集合を入れ替える変更で検査が緑のまま「Agent の値が実行時に弾かれ発散が黙って止まる」形になる = DR-6 の同型)。**照合の 3 者と故障注入 3 種は [API/conversation.md](API/conversation.md) §4.6 の 1〜3 が SSOT**。導入時に故障注入で検出を確認する |
 | **4** | **ハンドラが `entity/toolresult` 以外の型 (匿名 struct / `map[string]any` / 手組みの `json.RawMessage`) を戻り値に入れている** | **一次担保はコンパイラ** — `Result.Payload` が marker interface なので同パッケージ外の型は代入できない (§3.8.5 の規約 2)。**CI 検査は backstop** (同スクリプト): `Result` を経由せず `any` に直接値を詰める形を検出する |
 | **5** | **読み手が、書き手の型に存在しないフィールド (または異なる型) を参照している** | **CI 検査** (同スクリプト)。読み手・書き手がともに `entity/toolresult` の同じ型を参照していることを検査する。**PoC ではこれが実害になった** (§3.8.5 の実例) |
 

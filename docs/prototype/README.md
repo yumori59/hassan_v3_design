@@ -3,6 +3,17 @@
 | ファイル | 内容 | 由来 |
 |---|---|---|
 | `hassan_agent_prototype_v2.html` | HASSAN Agent v2 — Chat + Artifact 型の UI プロトタイプ (単体 HTML) | リポジトリ開設時にルートから移動 (2026-07-28)。**2026-07-30 に更新版へ差し替え** (15,022 行。旧版は残っていないため、設計書の引用行番号は差し替え後の実測値に更新済み) |
+| `hassan_agent_prototype_v4.html` | HASSAN Agent v4 — v2 の更新版 (単体 HTML・17,844 行)。評価軸の 3 軸化 (市場魅力度/優位性/実現可能性)・発散フローの組み替え・評価基準の編集画面などを含む | ユーザー提供 (2026-08-23 にルートから移動)。v2 は比較参照用に残す |
+
+### v4 の採用範囲 (2026-08-23 のユーザー決定)
+
+設計入力として採用したのは **2 領域だけ** — ①**評価軸の 3 軸化** (契約ごとの編集・変更履歴・settings CRUD は**増分 2 へ先送り**) ②**発散フローの v4 化** (レンズ 2 階層・自由記述質問・追加探索)。
+招待フロー・ナレッジの添付/フォローアップ・設定画面の他セクション等は**未採用のまま** (対象外の列挙は
+[requirements-proto-v4.md](../../aidlc-docs/inception/productionization/requirements-proto-v4.md) §1.2)。
+
+**v4 には過渡状態の残骸が残っている** (旧軸の `strategyFitScore`・旧 4 軸和の `overallScore`・「7 軸スコア」見出し・
+DOM の無い `ideaConditionBanner` 配線・`LENS_META` の「主軸」4 種 — 同 requirements の F-PV6 が行番号付きで列挙)。
+**残骸は仕様として採らない** (DR-7)。v4 を参照するときは同 requirements の F-PV1〜F-PV15 (実測済みの事実) から入ること。
 
 ## 位置づけ (重要)
 

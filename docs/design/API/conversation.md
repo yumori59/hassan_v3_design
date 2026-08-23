@@ -3,7 +3,9 @@
 > 共通規約 (認証・レスポンス形・エラー・ページネーション・ステータスコード) の SSOT: [README.md](README.md)
 > 本ファイルが回答する本番観点: **A-1, A-3 (参照), A-4, A-5, A-6, A-7 (参照), O-2, O-3, O-4, O-5, O-6 (参照), D-6, D-7 (参照)**
 > 対応する受入基準: **AC-CV-2.1〜2.8 / AC-CV-5.1〜5.9 / AC-CV-6.1・6.3** (+ AC-1.1 / AC-1.3 / AC-1.4 / AC-2.1 / AC-2.3 / AC-3.3 の維持)
-> 要件の SSOT: [requirements-conversation.md](../../../aidlc-docs/inception/productionization/requirements-conversation.md)
+> **増分 proto-v4 で追加**: **AC-PV-4.1〜AC-PV-4.7 / AC-PV-5.1 / AC-PV-5.3 / AC-PV-6.1 / AC-PV-6.2 / AC-PV-6.3 / AC-PV-2.3 (②のみ)**
+> 要件の SSOT: [requirements-conversation.md](../../../aidlc-docs/inception/productionization/requirements-conversation.md) /
+> **発散フローの v4 化**: [requirements-proto-v4.md](../../../aidlc-docs/inception/productionization/requirements-proto-v4.md)
 > 必須観点 ID 一覧: [../../../.claude/rules/08-production-gates.md](../../../.claude/rules/08-production-gates.md)
 
 ## 0. 本書の範囲
@@ -43,6 +45,13 @@
 | D-6 Agent ライフサイクル | §3.4 (再発行対象・追加は後方互換・削除は 2 段階) |
 | D-7 段階リリース | **参照** — [../operations.md](../operations.md) §6 が SSOT |
 | D-1〜D-5 / D-8 | **対象外** (インフラ・CI/CD は API 設計の範囲外。SSOT は [../operations.md](../operations.md) / [../infrastructure.md](../infrastructure.md)) |
+
+**増分 proto-v4 (発散フローの v4 化。2026-08-23) が本書で回答する ID**:
+**D-6** = §3.4 の 6・7 (enum の変更と Agent 再発行。AC-PV-6.1) / **O-2** = §3.3 の末尾 (`feature` 値を増やさない。AC-PV-6.2) /
+**A-6** = §4.4 の「増分 proto-v4 で追加した引数」表 (AC-PV-6.3) / **O-4** = §6.3 の F-3 (mode と lens の組の不整合)。
+**本増分で回答が変わらない ID**: A-1 / A-2 / A-3 / A-4 / A-5 / A-7 / O-1 / O-3 / O-5 / O-6 / O-7 / D-1〜D-5 / D-7 / D-8 —
+**新エンドポイントを作らず** (PV-DF2)、所有者境界・ロール・403/404 の判定・ログ項目・コスト集計単位・
+SSE の切断回復に触らないため、上表の回答がそのまま有効である (無言の省略にしない = DR-2)。
 
 ---
 
@@ -203,7 +212,7 @@ v2 の発散セッション API は `hassan-v2-backend/router/router.go:143` の
  "premises":{
    "theme":"超音波センシングの新規事業",
    "asset":{"name":"超音波センシング技術","has_function_tree":true},
-   "approach":"domain",
+   "divergence":{"mode":"zero_based","lens":"adjacency","lens_input":"化学プラント向け既存顧客基盤"},
    "constraints":["3 年以内に PoC"],
    "selected_domains":[{"name":"水素インフラ保安"}],
    "researched_domains":[{"name":"水素インフラ保安","pattern":"domain"}],
@@ -226,8 +235,9 @@ v2 の発散セッション API は `hassan-v2-backend/router/router.go:143` の
 | **`rejected_candidates` の件数上限** | **`config` に置く** (値を本書・プロンプト・FE に書かない。BE-2 / [../architecture.md](../architecture.md) §3.9②) |
 | **`tool_readiness`** | 前提チェックの**結果**をツール単位で渡す。**ツール集合は常に全数**であり、`ready:false` のツールも Agent からは見える (CV-D4)。呼ばれた場合はハンドラが `missing` 付きの構造化エラーで拒否する (§6.4) |
 | **`entry_id`** | `generated_ideas` / `generated_plans` は**最新エントリの `entry_id`** を渡す ([../data-model.md](../data-model.md) §4.11.2 の安定 ID)。`generate_plan` が「どの発散結果に対する企画書か」を取り違えない (BE-1) |
+| **`divergence`** (増分 proto-v4) | **発散方針 (`mode`) と経路別レンズ (`lens`) と自由記述の起点 (`lens_input`) を 1 オブジェクトで渡す** (値域は §4.1.1)。**旧 `approach` の位置を置き換える** — 同じ軸を 2 つの名前で注入しない。**未確定のキーは入れない** (`"lens":null` や `"lens":""` を入れない — 「まだ決まっていない」と「空文字を選んだ」を Agent が区別できなくなる) |
 
-**`<conversation_state>` は Agent → FE のタグ (`<options>` / `<questions>` など) とは逆向き**であり、
+**`<conversation_state>` は Agent → FE のタグ (`<question>` — §5.5。PoC の `<options>` / `<questions>` の後継) とは逆向き**であり、
 **SSE には流さない** (FE には `GET /conversations/{session_id}` の `ledger` を返す。同じ事実の 2 経路を作らない)。
 
 ### 2.3 `stage` の値域・導出・表示用の畳み込み (AC-CV-2.7 / TH-Q3 / IB-Q7 の受け先)
@@ -248,6 +258,11 @@ v2 の発散セッション API は `hassan-v2-backend/router/router.go:143` の
 
 **`deep_dive_results` は判定に使わない** (PoC と同じ。深掘りは段の進行ではなく裏付けの追加であり、
 使うと「深掘りしたら段が進んだ」という誤った表示になる)。
+
+**`divergence` (§4.1.1) も判定に使わない** (増分 proto-v4)。**値域も導出順序も変えない** — 発散方針・レンズの選択は
+「起点をどう探すか」の宣言であって、アセット・領域・アイデアという**事実が増えたわけではない**。
+したがってゼロベース経路・自分のアイデア経路では、最初のターンの `stage` は初期値 `asset` のままになる。
+**`asset` は「アセット段」ではなく「起点が未確定」の意味である** — この読み替えが表示側に必要になる点は §10 の **CV-R9**。
 
 #### 2.3.2 表示用の畳み込み (他ドメインが使う場合)
 
@@ -322,7 +337,7 @@ v2 の発散セッション API は `hassan-v2-backend/router/router.go:143` の
 | Agent | 対応 | 責務 | 呼び出し元 | 使うプロンプト |
 |---|---|---|---|---|
 | **P-1 orchestrator** | `ORCHESTRATOR_AGENT_ID` 相当 | ユーザーとの対話・custom tool の呼び出し判断。**P-3 (発散後チャット) を節として統合** | `service/conversation.Runner` (会話ターンの本体) | `prompts/conversation/orchestrator.md` |
-| **P-2 diverge** | `DIVERGE_AGENT_ID` 相当 | アイデア発散 (domain / trend / usage / spec の 4 軸)。**v2 の V-1 / V-3 を吸収** | **`generate_ideas` の custom tool ハンドラ** | `prompts/idea/diverge.md` |
+| **P-2 diverge** | `DIVERGE_AGENT_ID` 相当 | アイデア発散 (**レンズ別。値域は §4.1.1** — 増分 proto-v4 で PoC の `domain` / `trend` / `usage` / `spec` の 4 軸を置き換えた)。**v2 の V-1 / V-3 を吸収** | **`generate_ideas` の custom tool ハンドラ** | `prompts/idea/diverge.md` |
 | **P-4 plan tab** | `PLAN_AGENT_ID` 相当 | 企画書タブの生成。**8 タブすべてを Agent 経路に統一**。**v2 の V-6 を吸収** | **`generate_plan` の custom tool ハンドラ** / **[plans.md](plans.md) のタブ再生成 REST** | `prompts/plan/tab.md` |
 
 **`CHAT_AGENT_ID` 相当は発行しない** (LM-Q1 の統合結果)。`prompts/conversation/post_diverge_chat.md` も作らない
@@ -369,6 +384,17 @@ v2 の発散セッション API は `hassan-v2-backend/router/router.go:143` の
 (CV-D10)。**この const 群は [../testing.md](../testing.md) の LLM 経路テストの対象集合になる**ため、
 値を増やしたら同じ PR で const を足す (§8 の R-CVA-5)。
 
+**増分 proto-v4 で `feature` 値は増えない (O-2 / AC-PV-6.2)**。発散フローの v4 化で新設するのは
+**既存 tool の引数と本文ブロックだけ**であり、新しい LLM 経路を作らないため:
+
+- ゼロベース経路の 3 レンズ (メガトレンド / 自社隣接領域 / 政策・規制) は **`research_market` の `lens` 引数**に畳む
+  (§4.1.1 の D-CV-18)。v4 プロトタイプが表示している 3 つの別ツール名
+  (`scan_megatrends` / `map_adjacency` / `track_policies` — `docs/prototype/hassan_agent_prototype_v4.html:11030` / `:11037` / `:11046`) は**採らない**
+- 追加探索 (「他の市場を探す」) も同じ `research_market` であり、`feature` は `conversation.research` のまま
+- 自由記述インライン質問は **LLM 呼び出しを増やさない** (同じターンの `message_delta` 本文で表す。§5.5)
+
+したがって上表・`entity/` の const 群・[../observability.md](../observability.md) §4.2 の存在検査への追加は**発生しない**。
+
 ### 3.4 D-6 (Agent のライフサイクル) への回答 (AC-CV-5.8)
 
 | # | 決定 |
@@ -378,6 +404,8 @@ v2 の発散セッション API は `hassan-v2-backend/router/router.go:143` の
 | 3 | **ツールの削除は 2 段階**。①Agent 定義から外して再発行 ②**次のリリースで**ハンドラを削除する。逆順にすると、旧 Agent が呼んだツールが「未対応のツール」で黙って失敗する |
 | 4 | **`set_theme_name` の廃止は 3 の手順で行う** (§4.2)。第 1 リリースは v3 の新規発行なので、初回発行時点で既に含まれない |
 | 5 | `prompts/agents.yaml` の列挙が実体の SSOT。**§3.1 の 3 本と一致すること**を `scripts/check-tool-contract.sh` が検査する ([../llm-migration.md](../llm-migration.md) §6.3) |
+| **6** (増分 proto-v4。**AC-PV-6.1**) | **引数の enum 値の変更も再発行対象**である。`agents.yaml` が列挙する tool schema がハッシュ対象なので、**enum 値を 1 つ足す / 消すだけで [../operations.md](../operations.md) §5.2 の `plan_agent` がハッシュ差分を検出し、prod では H-3 の承認を要求する** ([../../../aidlc-docs/schedule-2026q3.md](../../../aidlc-docs/schedule-2026q3.md) の H-3 停止点 = **C-3 / C-4 / C-8**)。**プロンプト側 (`prompts/conversation/orchestrator.md` / `prompts/idea/diverge.md`) のレンズ記述も同じ列挙に載る**ため、値の追加は「schema・ハンドラ・プロンプト」の 3 者を同一 PR で変える |
+| **7** (同) | **CV-DF2 の「追加は後方互換・削除は 2 段階」は enum 値にも適用する**。①**追加**: 旧 Agent version は新しい値を出さないため、ハンドラを先にデプロイして受け付け可能にしてから Agent を再発行する (順序はツール追加と同じ) ②**削除**: 先に Agent を再発行して新 enum にし、**ハンドラは旧値を受け付けたまま次のリリースまで残す**。逆順にすると、**再発行前の Agent が出す旧値が「enum 外」として §6.3 の F-3 になり、進行中セッションの発散が黙って止まる** (Agent ID が変わっていない間は旧 version が生き続ける)。**本増分の enum 変更 (`industry_mode` / `approach` の廃止。§4.1.2) は第 1 リリース前で初回発行に含まれない**ため、2 段階の実行は不要 (上表 4 と同じ扱い) |
 
 ---
 
@@ -397,10 +425,10 @@ v2 の発散セッション API は `hassan-v2-backend/router/router.go:143` の
 |---|---|---|---|---|---|---|
 | `list_assets` | 登録済みアセットの一覧 | (なし) | `AssetList` | なし | — | — |
 | `load_asset` | アセット 1 件の詳細 + 機能ツリー | `asset_id`: integer (**必須**) | `AssetDetail` | なし | `asset` | — |
-| `research_market` | 候補領域 / トレンドの抽出 | `query`: string (**必須**) / `pattern`: enum(`domain`,`trend`) (**必須**) / `industry_mode`: enum(`cross_industry`,`balanced`,`intra_industry_novel`) | `Research` | なし | `research` | ✓ (P-8 + Exa) |
+| `research_market` | 候補領域 / トレンドの抽出 (**追加探索を含む**) | `query`: string (**必須**) / `pattern`: enum(`domain`,`trend`) (**必須**) / **`divergence_mode`** / **`lens`** / **`lens_input`**: string / **`exclude_researched`**: boolean (既定 `false`) — **値域と規則は §4.1.1 / §4.1.3** | `Research` | なし | `research` | ✓ (P-8 + Exa) |
 | `deep_dive` | 6 パターンの裏付け検証 | `pattern`: enum(`credibility`,`competition`,`momentum`,`demand`,`counterevidence`,`problem_structure`) (**必須**) / `target`: string (**必須**) | `DeepDive` | なし | `deepdive` | ✓ (P-6) |
 | `match_functions` | 機能 × 領域のスコアリング | `domains`: string[] / `focus`: string | `Matching` | `asset_definition.function_tree` と (`selected_domains` または `researched_domains`) | `matching` | ✓ (P-7) |
-| `generate_ideas` | アイデア発散 | `theme`: string (**必須**) / `asset_name` / `asset_summary` / `focus` / `seed_idea`: string / `domains`: string[] / `constraints`: string[] / `approach`: enum(`domain`,`trend`,`usage`,`spec`) | `GeneratedIdeas` | `theme` と (`asset_definition` または `selected_domains` または `researched_domains` または `seed_idea`) | `ideas` | ✓ (P-2) |
+| `generate_ideas` | アイデア発散 | `theme`: string (**必須**) / `asset_name` / `asset_summary` / `focus` / `seed_idea`: string / `domains`: string[] / `constraints`: string[] / **`divergence_mode`** / **`lens`** / **`lens_input`**: string — **値域と規則は §4.1.1** (`approach` を置き換えた。§4.1.2) | `GeneratedIdeas` | `theme` と (`asset_definition` または `selected_domains` または `researched_domains` または `seed_idea`) | `ideas` | ✓ (P-2) |
 | `generate_plan` | 企画書 8 タブの生成 | `idea_id`: integer | `GeneratedPlan` | `generated_ideas` が非空 | `plan` | ✓ (P-4) |
 | `record_rejection` | 見送り候補の記録 | `name`: string (**必須**) / `reason`: string (**必須**) / `sources`: string[] | `Rejection` | なし | — | — |
 
@@ -435,6 +463,141 @@ v2 は「マイアイデアの登録・生成」(`POST /ideas/generate/my-idea`)
 **ツールを増やすと D-6 の再発行対象と 3 者一致検査の対象が増える**。
 **この節が無いと**、C-16 の対応表 ([ideas.md](ideas.md) §3.1) は埋まっているのに
 **実装がどこにも生まれない**状態になる。
+
+#### 4.1.1 発散の起点は 2 階層 (増分 proto-v4。AC-PV-4.1 / AC-PV-4.7)
+
+**事実 (v4 プロトタイプ。パスは `docs/prototype/hassan_agent_prototype_v4.html`)**:
+発散の起点は**単一の選択ではなく 2 段の選択**である。第 1 階層で**発散方針**を選び (`:17816`〜`:17818`。
+アーティファクト側の未選択表示も 3 種を挙げる `:7916`)、方針ごとに**別の集合の**レンズを第 2 階層で選ぶ
+(アセット経路 `:11511`〜`:11520` / ゼロベース経路 `:11584`〜`:11592`)。
+「自分のアイデアから発散」は第 2 階層を持たず、種となるアイデアの入力へ進む (`:11597`〜`:11598` の `own` 分岐)。
+
+**構造**: **第 1 階層 = 発散方針 3 種 / 第 2 階層 = 経路ごとのレンズ 3 種 × 2 経路**
+(自分のアイデア経路は第 2 階層を持たない)。
+
+**第 1 階層 — 発散方針 (`divergence_mode`)**:
+
+| enum 値 | v4 のラベル | 意味 | 第 2 階層 (レンズ) | 起点となる入力 |
+|---|---|---|---|---|
+| **`asset`** | アセット（技術）から発散 | 社内アセットの機能 × 市場でアイデアを出す | **問う** (下表の 3 種) | `load_asset` で確定したアセット |
+| **`zero_based`** | ゼロベースで発散 | アセットに縛られずテーマから市場を探す | **問う** (下表の 3 種) | テーマ (+ `lens_input`) |
+| **`own_idea`** | 自分のアイデアから発散 | 持ち込みアイデアを種にする | **問わない** | `generate_ideas` の `seed_idea` |
+
+**第 2 階層 — レンズ (`lens`)。経路ごとに別集合**:
+
+| **`divergence_mode`** | enum 値 | v4 のラベル | 探索で優先するもの |
+|---|---|---|---|
+| **`asset`** | `market_exploration` | 市場探索から発散 | TAM / CAGR の大きい未踏市場 |
+| **`asset`** | `customer_pain` | 顧客課題から発散 | 実在するペインからの逆算 |
+| **`asset`** | `industry_trend` | 業界トレンドから発散 | 脱炭素 / DX / 高齢化などの構造変化 |
+| **`zero_based`** | `megatrend` | メガトレンドから発散 | 5〜10 年の社会構造変化 |
+| **`zero_based`** | `adjacency` | 自社隣接領域から発散 | 既存の技術・顧客基盤・サプライチェーンの「一歩隣」 |
+| **`zero_based`** | `policy_tailwind` | 政策・規制の追い風から発散 | 補助金・規制緩和・国際標準が作る市場 |
+
+**単一の 4 値 enum として設計しない (AC-PV-4.1)**。`adjacency` は**ゼロベース経路のレンズ**であり、
+アセット経路の 3 種と同じ集合に入れると「アセットを起点にしつつ自社隣接を測る」という
+**プロトタイプに存在しない組**が表現可能になる。`lens` の enum は**両経路のレンズの合併集合**とし、
+**(mode, lens) の妥当な組は上表が SSOT** とする (**値の数は上表が定義元**。件数を他の節に転記しない = DR-9)。
+
+| # | 決定 |
+|---|---|
+| 1 | **`divergence_mode` と `lens` を別引数にする**。`lens` の enum は両経路のレンズの合併、妥当な組は上表 |
+| 2 | **組の検証はハンドラが行う**。不正な組 (例: `mode=asset` × `lens=policy_tailwind`) は §6.3 の **F-3** として `{"error":"…","invalid":["lens"]}` の構造化エラーを返し、**台帳を書かない**。ターンは失敗しない (Agent が選び直せる) |
+| 3 | **`mode=own_idea` のとき `lens` を受け付けない** (指定されたら 2 と同じ F-3)。**台帳にも入れない** — 固定の既定値 (例 `market_exploration`) を入れると、後続の市場探索が「市場探索レンズで探索された」という**誤った前提**を持つ (BE-1)。**AC-PV-4.7** の回答: 自分のアイデア経路の発散入力は `seed_idea` + テーマ + `constraints` であり、レンズは**不在という状態**を持つ |
+| 4 | **3 引数 (`divergence_mode` / `lens` / `lens_input`) を `research_market` と `generate_ideas` の両方に同名で置く**。**経路によって最初に呼ばれるツールが違う**ため (ゼロベース = `research_market` / 自分のアイデア = `generate_ideas` 直行) — 片方だけに置くと、経路によって発散方針が台帳に残らない。**却下**: `load_asset` にも置く — アセット経路も必ず `research_market` か `generate_ideas` を通るため不要で、A-6 の検証点と 3 者一致の対象だけが増える |
+| 5 | **台帳には 1 つのオブジェクト `divergence {mode, lens, lens_input}` として持つ** (§4.5)。**却下 (a) 3 つのフラットフィールド**: `lens_input` が `lens` に従属することが型に現れず、**古いレンズに新しい起点が付く組**が作れる (BE-1)。**却下 (b) 台帳に持たず tool 引数だけで済ませる**: レンズは**後続ターンの市場探索・発散に効き続ける**ため、`focus` を台帳に持たない判断 (§4.1 末尾) とは基準が逆になる — 判定基準は「**後続ターンに効き続けるか**」で一貫させる |
+| 6 | **書き込み規則 (`entity/conversation` の副作用のない関数 1 本。UT 必須)**: ①`divergence_mode` が指定されたら mode を更新し **`lens` と `lens_input` を消す** (方針が変われば経路が変わる) ②`lens` が指定されたら lens を更新し **`lens_input` を消す** (レンズが変われば起点の意味が変わる) ③`lens_input` が指定されたらそのまま入れる ④**指定の無いキーは保持する** ⑤**台帳に `mode` が無い状態 (= `divergence` オブジェクト不在) で `lens` または `lens_input` だけが指定されたら、決定 2 と同じ F-3 (`{"error":"…","invalid":["divergence_mode"]}`) を返し台帳を書かない** — `lens` の指定は `mode` を含意しない。これにより**台帳に「mode の無い `divergence`」は構造的に存在しない** ([../data-model.md](../data-model.md) §4.11.2 の「`mode` = 必須」はこの意味 = オブジェクトが存在するとき必ず入っている)。**この順序でしか更新しない**ことで、注入ブロック (§2.2) と発散入力が常に整合した組を見る |
+| 7 | **`lens_input` は「レンズに従属する自由記述パラメータ」**。**値を要求するレンズは現時点で `adjacency` のみ** (v4 の `askAdjacencyBase()` = `:11007`〜`:11021`。答えは `runZeroBasedScan(lens, base)` に渡り `:11037` / `:11040` / `:11058` で後続の市場探索の絞り込みに効き続ける)。**他のレンズで指定された場合も保存してプロンプトへ渡す** — 黙って捨てると BE-8 (引数が捨てられて機能が死ぬ) と同じ形になる |
+| 8 | **`lens_input` を聞く手段は自由記述インライン質問** (§5.5)。**専用の tool・専用のエンドポイントを作らない** |
+| 9 | **3 引数はすべて任意** (**ただし組の整合は決定 2 と決定 6 ⑤ が守る** — mode 不在で `lens` / `lens_input` だけが来たら F-3) であり、**前提チェック (§2.2 の `tool_readiness` / §4.1 の「前提」列) の判定に使わない**。発散方針は「どう探すか」であって「何があるか」ではないため、未確定でも `research_market` / `generate_ideas` は実行できる。**却下**: `divergence.mode` を `generate_ideas` の前提にする — 最初のターンで全ツールが `ready:false` になり、Agent が質問しかできない状態を作る |
+
+**v2 プロトタイプとの対照 (F-PV10。消えた 3 種・加わった 1 種)**:
+
+| 経路 | v2 プロトタイプのレンズ | v4 = v3 の扱い |
+|---|---|---|
+| アセット | 市場探索 / 顧客課題 / 業界トレンド (v2 の発散設計ウィジェットの選択肢 — `docs/prototype/hassan_agent_prototype_v2.html:9916` / `:9923` / `:9930`) | **維持** (`market_exploration` / `customer_pain` / `industry_trend`) |
+| アセット | **技術シーズから発散** | **消えた** (v2 は発散設計ウィジェットの 4 択目に持つ — `docs/prototype/hassan_agent_prototype_v2.html:9937`。v4 のアセット経路は 3 択) |
+| ゼロベース | メガトレンド / 政策・規制の追い風 | **維持** (`megatrend` / `policy_tailwind`) |
+| ゼロベース | **業界白地・空白市場** / **他業界パターン転用** | **消えた** (v2 の `LENS_META` — `docs/prototype/hassan_agent_prototype_v2.html:7989` / `:7990` — に対して v4 の同ブロックに無い) |
+| ゼロベース | — | **加わった: 自社隣接領域** (`adjacency`。v4 は `LENS_META` の key `fitPattern` を「他業界パターン転用」から流用している — `docs/prototype/hassan_agent_prototype_v4.html:9151` vs v2 `:7990`) |
+
+**C-16 との関係**: 消えた 3 種は**プロトタイプ上の選択肢**であり、v2 本番の発散条件列
+(`ai_role` / `industry` / `trend` / `issue` …。§1.2 の出典) が失われるわけではない。
+v2 の `trend` / `issue` は `industry_trend` / `customer_pain` のレンズと会話の質問として引き継がれる (§1.2 の帰結)。
+**したがって本増分に C-16 の例外承認は要らない**。
+
+#### 4.1.2 旧 enum (`industry_mode` / `approach`) の改訂 (AC-PV-4.2)
+
+**判定の原則**: 「PoC にあるから残す」を理由にしない (DR-1)。**残す条件は「挙動を変える」かつ
+「レンズと別の軸である」の 2 つを満たすこと**。
+
+| 旧引数と値 | PoC での挙動 | 判定 | 理由 |
+|---|---|---|---|
+| `research_market.pattern` = `domain` / `trend` | **挙動を変える**。`searchDomain` / `searchTrend` の別実装に分岐し、出力フィールドが違う (`trend` のみ `confidence` / `hype_warning` が付く — [../../analysis/poc-conversation-flow.md](../../analysis/poc-conversation-flow.md) 「経路・バリエーション」の `pattern=domain` / `pattern=trend` の 2 行。実装は `claude_managed_agents/cmd/devui/conversation_tools_research.go:136` / `:274`) | **残す** | **レンズとは軸が違う** — `lens` は「セッションを通じた探索方針」、`pattern` は「**その 1 回の検索の出力形**」。ライフタイムが違うので同居しても矛盾組にならない (例: `lens=industry_trend` × `pattern=domain` = トレンド起点で候補領域を出す) |
+| `research_market.industry_mode` = `cross_industry` | 挙動を変える (接尾辞が付く) | **廃止** | **レンズと同じ軸** (どの角度で市場を探すか) を別名で二重に持つことになる。**`lens` と `industry_mode` の全組み合わせ**の妥当性をプロンプトに書く必要が生じ、Agent がどちらに従うか決まらない (BE-1) |
+| `research_market.industry_mode` = `balanced` / `intra_industry_novel` | **挙動を変えない** — handler は未知値もそのまま渡し、`cross_industry` 以外は空の接尾辞になる ([../../analysis/poc-conversation-flow.md](../../analysis/poc-conversation-flow.md) の (e))。`pattern=trend` では引数自体が無視される | **廃止** | 上記に加えて**惰性で残すと「値を変えても何も起きない」引数が本番に出る** (F-3 も出ないので観測もできない) |
+| `generate_ideas.approach` = `domain` | 発散の出力モードを変える (3 者一致 — 同 (g)) | **`market_exploration` へ改名して継承** | 領域起点の発散という意味が `lens` の `market_exploration` と一致する |
+| `generate_ideas.approach` = `trend` | 同上 | **`industry_trend` へ改名して継承** | 同上 |
+| `generate_ideas.approach` = `usage` | 同上 | **廃止** | v4 のアセット経路は「用途探索」を選択肢に持たず `customer_pain` (実在するペインからの逆算) を置いた。**`usage` と `customer_pain` は同義ではない**ため「継承」と書かない — `usage` は廃止、`customer_pain` は新設として扱う (誤った 1:1 対応を書かない) |
+| `generate_ideas.approach` = `spec` | 同上 | **廃止** | 対応するレンズ「技術シーズから発散」が v4 で消えた (§4.1.1 の対照表) |
+
+**帰結**:
+
+| # | 決定 |
+|---|---|
+| 1 | **`approach` という引数名を残さない**。v4 は第 1 階層 (発散方針) を `state.approach` と呼んでおり (`docs/prototype/hassan_agent_prototype_v4.html:11566` / `:11579` / `:11598`)、同じ語を第 2 階層に使うと**プロトタイプと設計で語の指すものが逆になる**。引数名は第 1 階層 = `divergence_mode` / 第 2 階層 = `lens` に固定する |
+| 2 | **却下 (a) `approach` を残して `lens` を足す**: 同じ軸が 2 引数になり、矛盾組 (`lens=customer_pain` × `approach=spec`) を Agent が作れる。どちらに従うかは `prompts/idea/diverge.md` の暗黙の優先順位になり、BE-1 の温床 |
+| 3 | **却下 (b) `approach` の enum に両経路のレンズを追記して 1 つの集合にする**: 2 階層が潰れ、(mode, lens) の妥当性を表現できない (AC-PV-4.1 に反する) |
+| 4 | **却下 (c) 階層を文字列で連結する** (`zero_based.adjacency` の 1 引数): enum 値が構造を持つため、値集合の機械照合が文字列の分解を前提にする。プロンプトの記述と 1 文字違いで黙って不一致になる |
+| 5 | **`prompts/idea/diverge.md` の軸別セクションを差し替える** — `usage` / `spec` の 2 節を落とし、`customer_pain` / `megatrend` / `adjacency` / `policy_tailwind` の 4 節を足す。**§8 の R-CVA-16 で [../llm-migration.md](../llm-migration.md) へ起票する** (同書 §6.2 の 1 が「4 軸を 1 ファイルで持つ」と書いている) |
+| 6 | **D-6 の波及**: 本改訂は tool schema の enum とプロンプトの両方を変えるため、**Agent 再発行を伴う** (§3.4 の 6・7)。**3 者一致検査への波及は §4.6** |
+
+#### 4.1.3 追加探索「他の市場を探す」(AC-PV-4.5)
+
+**事実**: v4 は市場探索の次アクションとして「他の市場を探す」を持ち (`docs/prototype/hassan_agent_prototype_v4.html:11119`)、
+`runExpandMarkets()` (`:11129`) が予備プール `EXTRA_MARKETS` (`:9103`) を既存リストへ **append** する (`:11143`)。
+表示上の呼び出しは `search_markets(lens=…, exclude_existing=true, expand=true)` (`:11133`)。
+2 回目の呼び出しでは「新規の有力市場は見つかりませんでした」を返す (`:11139`〜`:11140`)。
+
+| # | 決定 |
+|---|---|
+| 1 | **新 tool を作らず `research_market` に `exclude_researched`: boolean (既定 `false`) を足す** (CV-D5 の足切り: 目的・入力・出力が既存 tool と同一で、LLM が呼び出しを決める必要があるのは「探索するか否か」だけ)。**却下 (a) 新 tool `expand_markets`**: D-6 の再発行対象・3 者一致検査・A-6 の検証点が 1 本増えるのに、出力スキーマは `Research` と同一 |
+| 2 | **v4 の `expand=true` は採らない** — v3 の `researched_domains` は**常に append** (§4.5) なので `expand` は常に真になり、**値を変えても挙動が変わらない引数**になる (§4.1.2 で `balanced` を廃止したのと同じ理由) |
+| 3 | **`exclude_existing` を `exclude_researched` に改名する** — 除外の対象が**台帳の `researched_domains`** であることを名前で示す。ハンドラは台帳から除外集合を作り、**LLM プロンプトと Exa クエリの除外リストに渡す** (引数で受け取らない = CV-D13 を維持) |
+| 4 | **append 時の重複除外キーは「正規化した `name`」**。正規化 = Unicode NFKC + 前後空白の除去 + 連続空白の 1 個への畳み込み + 英字の小文字化。**`entity/conversation` の関数 1 本**が行い、書き込み経路すべてがそれを通る |
+| 5 | **`pattern` をキーに含めない**。同じ領域が `domain` 経路と `trend` 経路で 2 回出たときに 2 行にすると、§2.2 の注入ブロックと発散入力に**同じ領域が 2 度**現れる。既存行がある場合は **`source_urls` を合併し `researched_at` を更新し、`entry_id` は変えない** (`entry_id` は grounding と退避の参照キー — [../data-model.md](../data-model.md) §4.11.2) |
+| 6 | **冪等性 (BE-11)**: 同じ追加探索を 2 回呼ぶと、2 回目は**新規 0 件**になり得る。そのとき ①台帳は変化しない ②`tool_end.ok=true` (**失敗にしない**) ③`artifact(research)` を **`rows: []`** で出し `expanded: true` を付ける (§5.2) ④Agent は「新たな候補は見つからなかった」を本文で伝える。**「0 件だから成功に見せない」型の握り潰しでも、逆に失敗扱いでもない** — 探索は成功しており結果が空である |
+| 7 | **`artifact(research)` の `rows` は「その呼び出しで新たに得られた行」**であり、FE は**既存の一覧へ追加する** (置換しない)。台帳が append であることと表示を揃える (§5.2) |
+
+#### 4.1.4 tool の本数は 8 本のまま (AC-PV-4.3)
+
+**本増分で §4.1 の表の行数は変わらない**。v4 の新機能はすべて**既存 tool の引数か本文ブロック**に落ちる:
+
+| v4 の機能 | v3 での受け先 | 新 tool を作らない理由 (CV-D5) |
+|---|---|---|
+| ゼロベースの 3 スキャン (`scan_megatrends` / `map_adjacency` / `track_policies`) | `research_market` の `lens` | 目的 (候補領域の抽出)・出力スキーマ (`Research`) が同一。分けると同じ出力型に 3 つの入口ができる |
+| 「他の市場を探す」 | `research_market` の `exclude_researched` | §4.1.3 の 1 |
+| 自社隣接領域の起点の確認 | **tool ではない** — §5.5 の自由記述インライン質問 + `lens_input` 引数 | 質問は LLM の発話であり、ツール実行ではない |
+| 自分のアイデアから発散 | 既存 `generate_ideas` の `seed_idea` (§4.1 の変更点 4) | CV-D5 の既決事項 |
+| 発散設計の一括指定 | **採らない** (§4.1.5) | v4 で撤回されている |
+
+したがって `scripts/check-endpoint-mapping.sh` の**検査⑤ の期待値 (見出しと本文の自称値) は変更しない**。
+**本増分で新しい「N 件」を文書に増やしていない** (AC-PV-6.5 のうち tool 本数の分)。
+
+#### 4.1.5 v4 のうち仕様として採らないもの (AC-PV-5.1 / AC-PV-5.3)
+
+**プロトタイプは設計入力であって仕様ではない** (DR-7)。**過渡状態の残骸を移植しない**。
+
+| 対象 | 出典 (`docs/prototype/hassan_agent_prototype_v4.html`) | 採らない理由 |
+|---|---|---|
+| **`LENS_META` の「主軸」4 種** (高精度 / 非侵襲・非破壊 / 低コスト化 / 既存顧客活用) | `:9141`〜`:9148` | **生きた経路から到達しない**。3 質問フローは差別化要素の質問を飛ばす (`:11557` のコメント「skip the differentiator question」) ため、legacy 経路 (`:11687`〜`:11695` の `state.step === 1` 分岐) からのみ到達する = 死にコードに近い。**死んでいるコードを手本にしない** |
+| **アセット経路 3 レンズが `LENS_META` に登録されていない**状態 | `:9139`〜`:9157` に 3 レンズの key が無く、`:9958` の `LENS_META[lens] \|\| __default` で既定に落ちる | **プロトタイプの実装状態を仕様にしない**。v4 ではアセット経路のレンズが市場一覧の並び替えに効いていないが、**v3 は 6 レンズすべてが探索方針に効く** (§4.1.1 の第 2 階層表の「探索で優先するもの」列がプロンプトの入力になる) |
+| **発散設計コンポジットウィジェット** (`addDivergenceDesignWidget`) と PoC の `<divergence_design>` タグ | v4 に 0 件 (`hassan_agent_prototype_v2.html` には 2 件)。変更ログ `:15704` に「質問数を 5 回 → 3 回に削減。発散設計 (起点/差別化要素/時間軸) を 1 メッセージで指定できます」が残るが**機構が存在しない = 撤回された** | **採らない (AC-PV-5.1)**。**代わりに発散条件は逐次の質問で指定する** — 発散方針 → レンズ → (`adjacency` なら) 起点の自由記述 → 領域の選択、の順に §5.5 の質問ブロックを 1 問ずつ出す。台帳の `divergence` と `selected_domains` / `constraints` が受け皿になる。**却下**: 一括指定ウィジェットを復活させる — v4 で撤回された経緯 (機構の削除) が根拠であり、復活させるなら**撤回理由の確認が先** (§10 の CV-R11) |
+| **アイデア条件バナー** (`ideaConditionBanner`) | DOM が無いまま `DOMContentLoaded` の配線だけが残る (`:10471`) | **v3 は「アイデア条件バナー」という表示要素を持たない**。発散条件の現状は台帳 (`GET /conversations/{session_id}` の `ledger`) と注入ブロック (§2.2) が SSOT であり、**同じ事実の 3 経路目を作らない** |
+| **再発散ボタン** (`artRedivergeBtn`) | v4 に 0 件 | **ボタンの廃止であって「再発散」という操作の廃止ではない** (PV-DF5)。会話で再度発散を依頼する経路は残るため、`seed_idea` を台帳に持つ理由 (§4.5) は成立し続ける。**[../data-model.md](../data-model.md) §4.11.2 の理由づけをボタンに依存しない書き方へ更新する** = §8 の R-CVA-14 |
+
+**評価側の残骸 (`strategyFitScore` / 旧 4 軸和の `overallScore: 32` / 「7 軸スコア (加重)」の見出し) は
+[ideas.md](ideas.md) が扱う** (本書の範囲外。AC-PV-5.3 の残り 3 種)。
 
 ### 4.2 tool にしなかった操作の REST 対応 (AC-CV-5.1③)
 
@@ -494,6 +657,19 @@ v2 は「マイアイデアの登録・生成」(`POST /ideas/generate/my-idea`)
 | `generate_plan` | `idea_id` | `repository/idea` の所有者条件付き単一取得。**さらにそのアイデアが当該会話のテーマ配下であること**を UseCase が確認する |
 | `generate_ideas` / `match_functions` / `deep_dive` / `research_market` / `record_rejection` | なし (文字列引数のみ) | 台帳の読み書きは**当該セッションに束縛**され、セッション自体が §2.1 のステップ 4 で所有者検証済み |
 
+**増分 proto-v4 で追加した引数 (AC-PV-6.3)**。**いずれも所有者スコープの解決に使わない**:
+
+| 引数 / 値 | 由来 | 型 | 所有者スコープとの関係 |
+|---|---|---|---|
+| `research_market` · `generate_ideas` の `divergence_mode` / `lens` | **LLM が決める** (ユーザーの選択を Agent が読み取る) | enum (§4.1.1) | **ID ではない**。DB クエリの述語に入らない。プロンプトと探索方針の組み立てにのみ使う。enum 外・組の不整合は §6.3 の F-3 |
+| 同 `lens_input` | **ユーザーの自由記述**をそのまま Agent が渡す | string | **ID ではない**。**SQL の述語・`LIKE` 句・パス・ファイル名に組み立てない** — 用途は「LLM プロンプトへの埋め込み」と「Exa の検索クエリ」に限る。台帳へは当該セッションの `divergence.lens_input` として書き、**他セッション・他アカウントのデータを引く経路を持たない** |
+| `research_market` の `exclude_researched` | LLM が決める | boolean | **除外集合は引数で受け取らない** — ハンドラが**当該セッションの台帳 `researched_domains`** から作る (§4.1.3 の 3)。セッションはステップ 4 で所有者検証済みなので、集合は常に呼び出し元のスコープ内に閉じる |
+
+**したがって上の「ツール別の適用点」表の分類は変わらない** — `research_market` / `generate_ideas` は
+**引き続き「LLM 由来の ID を持たないツール」**である。**却下**: `lens_input` を「アセット名・顧客名の検索キー」として
+`repository/asset` の検索に渡す — 自由記述文字列が所有者条件付きクエリの入力になると、
+**入力の正規化ミスが越境の形で現れる**余地を作る。アセットの参照は `load_asset` の `asset_id` に限る。
+
 **`generate_plan` にテーマ配下チェックを足す理由**: 所有者条件だけだと「自分の別テーマのアイデア」に対して
 企画書を作れてしまい、`plans.theme_id` と会話の `theme_id` が食い違う。
 **却下**: 所有者条件のみ — 上記の不整合が黙って発生する。
@@ -507,10 +683,11 @@ v2 は「マイアイデアの登録・生成」(`POST /ideas/generate/my-idea`)
 |---|---|---|
 | `theme` | `generate_ideas` の引数マージ | §2.2 の注入 / 発散入力 / §1.4 の表示タイトル |
 | `asset_definition` (+ `function_tree`) | `load_asset` 成功時 | `deep_dive` ハンドラの文脈構築 (**引数注入をやめた分の受け皿**) / `match_functions` の機能列 / §2.2 の注入 |
-| `approach` / `constraints` | `generate_ideas` の引数 | 発散 pattern の解決 / 発散入力 / §2.2 の注入 |
+| **`divergence`** (`mode` / `lens` / `lens_input`。増分 proto-v4 で `approach` を置き換え) | **`research_market` と `generate_ideas` の引数** (同名 3 引数。§4.1.1 の 4)。更新は `entity/conversation` の 1 関数が §4.1.1 の 6 の規則で行う | ①**§2.2 の注入ブロック** ②**`research_market` ハンドラ** (探索方針の組み立て + `lens_input` の埋め込み) ③**`generate_ideas` ハンドラ** (発散モードの解決 = 旧 `approach` の読み手の置き換え + 発散入力) ④`prompts/idea/diverge.md` の軸別セクションの選択。**`stage` 導出には使わない** (§2.3.1) |
+| `constraints` | `generate_ideas` の引数 | 発散入力 / §2.2 の注入 |
 | **`seed_idea`** (新規) | `generate_ideas` の引数 | 発散入力 / §2.2 の注入 (**§8 の R-CVA-2 で data-model へ起票**) |
 | `selected_domains` (+ `rationale`) | ①`POST .../messages` の `selected_domains` ②`generate_ideas` の `domains` 引数 | `match_functions` / 発散入力 / §2.3 の `stage` 導出 / §2.2 の注入。**②の経路で `rationale` を消さない** (PoC の欠陥) |
-| `researched_domains` | `research_market` 成功時 (append) | 発散入力 / `match_functions` のフォールバック / `stage` 導出 / `GET /conversations/{id}` の FE 表示 |
+| `researched_domains` | `research_market` 成功時 (append。**重複除外キーは正規化した `name`** — §4.1.3 の 4・5) | 発散入力 / `match_functions` のフォールバック / `stage` 導出 / `GET /conversations/{id}` の FE 表示 / **追加探索の除外集合** (§4.1.3 の 3) |
 | `deep_dive_results` | `deep_dive` 成功時 (append) | `generate_plan` の grounding 還流 (**`entity/toolresult` の同じ型から読む** — BE-12) |
 | `generated_ideas` / `generated_plans` | 生成成功時 (append) | 最新エントリの解決 / `stage` 導出 / §2.2 の注入 (`entry_id` と件数のみ) |
 | **`rejected_candidates`** | `record_rejection` 成功時 (append) | **①§2.2 の注入ブロック ②`generate_ideas` の発散入力の「既に見送った候補」ブロック** — **どちらも第 1 リリースで実装する** (BE-10 のクローズ) |
@@ -528,6 +705,18 @@ v2 は「マイアイデアの登録・生成」(`POST /ideas/generate/my-idea`)
 | CI 4 | ハンドラの戻り値が `entity/toolresult` の型か | §4.1 の「出力」列 |
 | CI 5 | 読み手が参照するフィールド ↔ 書き手の型 | §4.5 の「読み手」列 |
 | operations §5.2 | `prompts/agents.yaml` の列挙 ↔ 発行コマンドが送る集合 | §3.1 の 3 本 |
+
+**増分 proto-v4 で判明した検査の穴 (AC-PV-4.2③)**: [../architecture.md](../architecture.md) §3.8.4 の**検査 3 は
+「引数名」の一致しか見ない**。本増分は**引数名を増やすだけでなく enum の値集合を入れ替える**
+(`industry_mode` / `approach` の廃止と `divergence_mode` / `lens` の新設。§4.1.2) ため、
+**値集合がずれても検査が緑のまま通る**。「検査が通った」は「検査が対象を見た」を意味しない (DR-6)。
+
+| # | 決定 |
+|---|---|
+| 1 | **検査 3 の照合対象に「enum の値集合」を加える**ことを [../architecture.md](../architecture.md) §3.8.4 へ要求する (§8 の **R-CVA-15**)。照合するのは ①schema の `enum` 配列 ②ハンドラの検証に使う `entity/conversation` の const 群 ③`prompts/conversation/orchestrator.md` と `prompts/idea/diverge.md` に列挙されたレンズ値 の 3 者 |
+| 2 | **(mode, lens) の妥当な組も照合対象**にする。組の表 (§4.1.1 の第 2 階層表) は `entity/conversation` の 1 箇所に写し、プロンプトの記述と突き合わせる。**組は「引数名」でも「単独の enum 値」でもないため、1 を入れても自動では見られない** |
+| 3 | **導入時に故障注入で確かめる** — ①schema の enum から 1 値を削る ②プロンプトのレンズ 1 行を消す ③(mode, lens) の 1 組をプロンプトだけで入れ替える の 3 種で `exit 1` になること。**検査を足したら足した検査を殴る** |
+| 4 | **§4.1 系の表で、行の先頭セルをバッククォート付きの識別子だけにしない** — `scripts/check-endpoint-mapping.sh` の検査⑤ は §4.1〜§4.2 の範囲で**行頭のバッククォート付き識別子を tool の行として数える**。引数を表にするときは `research_market.lens` のように**ツール名で修飾する** (ドットを含めると tool 行として数えられない)。**構造が副産物として担保している検査の前提を黙って壊さない** (DR-10) |
 
 **CV-D13 (サーバ注入の廃止) により、検査 3 の不一致が原理的に発生しない**:
 「schema にあってハンドラが読まない引数」も「ハンドラが読んで schema に無い引数」も、
@@ -566,15 +755,17 @@ v2 は「マイアイデアの登録・生成」(`POST /ideas/generate/my-idea`)
   **会話ターン以外の SSE 経路 (企画書のタブ生成・再生成) でも使う**が、それらには会話メッセージが無く
   `message_seq` に入れる値が存在しないため。**会話ターン経路では必ず入れる**
 - `error.message` は**表示可能な文言**であり、**プロバイダのエラー文言を素通ししない** (§6.2)
+- **増分 proto-v4 でイベント型を増やしていない (AC-PV-4.4①)**。自由記述インライン質問は
+  **`message_delta` の本文に置く宣言的ブロック**で表す (§5.5)。判定と却下理由は §7 の **D-CV-20**
 
 ### 5.2 `artifact` の kind 別 payload
 
 | kind | payload | PoC からの変更 |
 |---|---|---|
-| `ideas` | `{session_id, theme_id, generated_at, count, ideas:[{idea_id, num, title, summary, score, grade, pattern?, competition_density?, competitors?}], note?}` | 変更なし |
+| `ideas` | `{session_id, theme_id, generated_at, count, ideas:[{idea_id, num, title, summary, score, grade, lens?, competition_density?, competitors?}], note?}` | **`grade` の値域を `A` / `B+` / `B` / `C` に変更** (AC-PV-2.3②。**バンドの SSOT は [ideas.md](ideas.md) §6.3.3 の `entity/idea` の 1 関数**。本書に閾値を書かない)。**`pattern?` を `lens?` に改名**し値域を §4.1.1 のレンズにした (PoC は発散軸 `domain`/`trend`/`usage`/`spec` を 1 件ごとに付けていた — `claude_managed_agents/cmd/devui/conversation_tools_generate.go:246` の `Pattern` / 付与は `:605`)。**旧値 `D` を返す経路は無い** |
 | `plan` | `{plan_id, idea_id, idea_title, generated_at, tabs:[{tab_id, ver_no, label}]}` | **タブ本文を SSE に載せない** (§7 の D-CV-11) |
 | `matching` | `{pairs:[{rank, function_name, domain_name, score, rationale?}]}` | 変更なし |
-| `research` | `{pattern, title, rows:[{name, summary, source_urls:[{url,title,kind?}], confidence?, hype_warning?, market_size?, cagr?, social_issue?, customer_pain?}]}` | **`pattern` を payload の中へ**移す (PoC は payload の sibling) |
+| `research` | `{pattern, lens?, expanded, title, rows:[{name, summary, source_urls:[{url,title,kind?}], confidence?, hype_warning?, market_size?, cagr?, social_issue?, customer_pain?}]}` | **`pattern` を payload の中へ**移す (PoC は payload の sibling)。**`lens` と `expanded` を追加** (増分 proto-v4): `lens` は表示ラベル (「切り口: …」) 用で**レンズ未確定なら入れない**、`expanded` は**追加探索の応答か**を示す boolean。**`rows` は「その呼び出しで新たに得られた行」であり FE は既存の一覧へ追加する** (置換しない。§4.1.3 の 7)。**追加探索で新規 0 件のときは `rows: []` + `expanded: true`** (§4.1.3 の 6) |
 | `deepdive` | `{title, pattern, target, confidence, notes:[string], source_urls:[{url,title,kind?}], details?}` | 変更なし。**型は `entity/toolresult` の 1 宣言から読む** (BE-12) |
 | `asset` | `{asset_id, name, summary, function_tree:[…]}` | **`payload` ラッパを持つ形に揃える** (PoC は `{kind, name, function_tree}` の直置き — `claude_managed_agents/cmd/devui/conversation.go:705`) |
 
@@ -599,6 +790,7 @@ done                                     ← 1 回・末尾
 | 4 | `artifact` は**ツール成功時のみ**。`tool_end.ok=false` のときは出さない |
 | 5 | **打ち切り (`tool_limit` / `token_limit` / `timeout`) は `error` を出さない**。`turn_summary.outcome` だけで表す |
 | 6 | 台帳・生成物の書き込みは `artifact` 送出**より前**に完了している (§2.1 のステップ 17→19) |
+| 7 | **質問 (選択肢つき / 自由記述) はイベントではなく `message_delta` の本文である** (§5.5) ため、**本契約は変わらない** (増分 proto-v4。AC-PV-4.4)。質問で終わるターンも `turn_summary` (`outcome=completed`) → `done` を出す — **「ユーザーの回答待ち」はターンの継続ではなく次ターンの開始である** |
 
 #### 5.3.1 本書のイベント型を使う経路 (2026-08-02 追加)
 
@@ -632,6 +824,55 @@ PoC の 9 種の出典は [../../analysis/poc-conversation-flow.md](../../analys
 | `done` (`{elapsed_sec}`) | `done` (`{}`) + **`turn_summary` を新設** | 経過時間は `turn_summary.elapsed_ms` の 1 箇所に置く |
 | (無し) | **`turn_summary`** | 新設 |
 | `: keepalive` コメント | 同じ | イベントではない |
+
+### 5.5 Agent → FE の本文内ブロック (質問・選択肢。増分 proto-v4。AC-PV-4.4 / AC-PV-5.1)
+
+**新しい SSE イベントを足さない**。質問は `message_delta` の本文に置いた**宣言的ブロック**で表す。
+**本節がブロックの値域の SSOT**。判定と却下理由は §7 の **D-CV-20**。
+
+**形式** (Agent が本文の末尾に出す。`prompts/conversation/orchestrator.md` が指示する):
+
+```
+<question mode="choice">
+  <text>市場探索の次のアクションを選んでください</text>
+  <option value="他の市場を探す">他の市場を探す — まだ表示していない候補を追加探索します</option>
+  <option value="このままアイデア発散へ進む">このままアイデア発散へ進む</option>
+</question>
+```
+
+```
+<question mode="free_text" placeholder="例: 超音波センシング技術">
+  <text>起点となる自社の強み・アセット・顧客基盤を教えてください</text>
+  <hint>例:「超音波センシング技術」「化学プラント向け既存顧客基盤」</hint>
+</question>
+```
+
+| # | 契約 |
+|---|---|
+| 1 | **`mode` の値域は `choice` / `free_text` の 2 値**。**「自由記述かどうか」は `mode` の値だけで決まる** — **FE が本文の言い回し (「自由記述で」「教えてください」「?」で終わる等) から推定することを禁止する** (**AC-PV-4.4③**。FE-6 / FE-2 の再発点) |
+| 2 | **ブロックが無いターンは「質問ではない」**。ブロックの**不在から自由記述質問を推定しない** (入力欄は常に使えるので、推定する必要が無い) |
+| 3 | **1 ターンに最大 1 ブロック**。2 つ以上出た場合は**先頭の 1 つだけを質問として扱い、残りは本文としてそのまま表示する** (捨てない) |
+| 4 | **未知の `mode`・未知のタグは本文としてそのまま表示する** (§5.1 の「未知イベントを捨てない」= S-6 と同じ思想)。**壊れ方が「質問カードが出ずタグが本文に見える」= 目視で分かる形**になる。**無言で質問を落とす形にしない** |
+| 5 | **`option` の `value` は、ユーザーが選んだときに次ターンの `message` へそのまま入る文字列**。FE が独自のコード体系を作らない (`POST /conversations/{session_id}/messages` の `message` は自然文であり、選択も自由記述も**同じ 1 本の入口**を通る) |
+| 6 | **`free_text` の回答も同じ `message` として送る**。**専用のエンドポイント・専用の SSE イベント・専用の tool を作らない** |
+| 7 | **パーサは FE の `src/lib/parse/` の純粋関数 1 本**に置き、併置テストを必須にする ([../frontend.md](../frontend.md) §8.1 / §8.2 の機械強制対象)。**コンポーネント内でパースしない** (FE-4 / FE-5) |
+| 8 | **サーバはブロックを解釈しない**。`message_delta` はブロックを含んだまま流し、`conversation_messages` にもそのまま保存する (**同じ本文が 2 経路で別の形になるのを避ける** — 履歴 GET で再描画したときに質問カードが復元される) |
+| 9 | **ストリーム中の未完成ブロックの扱い**: FE は `<question` の開始を検出した時点で**以降の本文の表示を保留**し、**閉じタグを受け取ってからカードとして描画する** (生のタグを画面に出さない)。**閉じタグが来ないままターンが終わった場合 (`done` / `error`) は、保留した本文をそのまま表示する** — **保留したものを捨てない** (BE-7 の「取りこぼし」を FE 側で再発させない)。この判定も 7 のパーサ関数に閉じ込め、**部分入力のケースをテストに含める** |
+
+**PoC の本文タグとの対応** ([../../analysis/poc-conversation-flow.md](../../analysis/poc-conversation-flow.md) §1.4 の 5):
+
+| PoC のタグ | v3 の扱い |
+|---|---|
+| `<options>` / `<questions>` | **`<question mode="choice">` に 1 本化**。タグ集合が増えるとパーサの分岐と D-6 の検証点が増える |
+| (無し) | **`<question mode="free_text">` を新設** (v4 の `addInlineAnswerQuestion` = `docs/prototype/hassan_agent_prototype_v4.html:9347` に対応する契約) |
+| `<domain_select>` | **採らない**。領域の選択はアーティファクト (市場探索タブ) の操作で行い、次ターンの `POST .../messages` の **`selected_domains`** として送る (§2.1 のステップ 7 の既存経路)。**複数選択を質問ブロックで表さない** |
+| `<divergence_design>` | **採らない** (§4.1.5。v4 で機構ごと撤回された) |
+| `<idea_input>` | **採らない**。持ち込みアイデアは `generate_ideas` の `seed_idea` が受ける (§4.1 の変更点 4) |
+| `<turn type=".."/>` | **採らない**。ターンの区切りは SSE の `session` / `done` が表す (§5.3) |
+
+**全経路で使える** (§5.3.1): ブロックは本文なので、`message_delta` を出す経路
+(**会話ターン**と**企画書チャット**) で使える。`message_delta` を出さない経路 (企画書のタブ生成・再生成) では出ない。
+**経路ごとにイベント型を分岐させないという §5.3.1 の方針は変わらない**。
 
 ---
 
@@ -679,7 +920,7 @@ v3 は `CodedError` に包み直し、**原文は構造化ログ側にだけ残�
 |---|---|---|---|
 | 出力の切り詰め | `stop_reason == max_tokens` | ツール内なら構造化エラー + `tool_end.ok=false` / ターン本体なら `error` | **F-1** |
 | LLM 出力の JSON パース失敗 | 構造化出力のパースエラー | 同上。**フォールバックで成功にしない** | **F-2** |
-| ツール引数の不整合 (必須欠落・enum 外) | ハンドラのパース | 構造化エラー `{error, missing:[…]}` を Agent に返す | **F-3** |
+| ツール引数の不整合 (必須欠落・enum 外・**組の不整合**) | ハンドラのパース。**組の不整合 = `divergence_mode` と `lens` が §4.1.1 の表に無い組 / `mode=own_idea` で `lens` 指定** (増分 proto-v4) | 構造化エラー `{error, missing:[…]}` (欠落) / `{error, invalid:[…]}` (**enum 外・組の不整合**) を Agent に返す。**台帳を書かない** | **F-3** |
 | 安全弁の発火 | Runner の判定 | **`turn_summary.outcome`** (エラーではない) | **F-4** |
 | SSE の送出中の切断・書き込み失敗 | Controller | ログとメトリクスのみ (相手がいない) | **F-5** |
 | 所有者不一致 | ハンドラのクエリ結果 0 件 | Agent には「見つからない」/ サーバは warn + メトリクス | (§4.4 の④) |
@@ -728,6 +969,19 @@ v3 は `CodedError` に包み直し、**原文は構造化ログ側にだけ残�
 | **D-CV-14** | 持ち込み PDF の待ち方 | **ターン内で待たない。完了・確定後の次ターンから参照する** (§4.3) | §4.3 の却下 (a)(b)(c) |
 | **D-CV-15** | アイデア再評価の入口 | **tool にしない (REST)** (§4.2) | §4.2 の却下 |
 
+**増分 proto-v4 (発散フローの v4 化。2026-08-23。PV-D2 の帰結)**:
+
+| # | 論点 | 採用案 | 却下案と理由 |
+|---|---|---|---|
+| **D-CV-16** | 発散の起点の表現 (AC-PV-4.1) | **2 階層を 2 引数で表す** — `divergence_mode` (発散方針) + `lens` (両経路のレンズの合併集合)。**妥当な組は §4.1.1 の表が SSOT** で、ハンドラが検証する | (a) **単一の 4 値 enum** (依頼当初の案): `adjacency` はゼロベース経路のレンズであり、アセット経路の 3 種と同じ集合に入れると**プロトタイプに存在しない組**が表現可能になる。(b) **単一 enum への合併** (両経路のレンズを `approach` に足す): 2 階層が潰れ、mode ごとの妥当性を表せない。(c) **階層を文字列連結** (`zero_based.adjacency`): 値集合の機械照合が文字列分解を前提にし、プロンプトと 1 文字違いで黙って不一致になる。(d) **経路ごとに別引数** (`asset_lens` / `zero_based_lens`): 相互排他が schema に表れず、両方指定されたときの解釈がハンドラにしか無い (BE-8) |
+| **D-CV-17** | 旧 enum の扱い (AC-PV-4.2) | **`research_market.industry_mode` (3 値) と `generate_ideas.approach` (4 値) を廃止**し、`divergence_mode` / `lens` に置き換える。`research_market.pattern` (`domain` / `trend`) は**残す** | (a) **`industry_mode` を残す**: レンズと同じ軸を別名で二重に持ち、`lens` × `industry_mode` の**全組み合わせ**の妥当性をプロンプトに書くことになる。しかも `balanced` / `intra_industry_novel` は **PoC で挙動を変えない** ([../../analysis/poc-conversation-flow.md](../../analysis/poc-conversation-flow.md) の (e))。(b) **`approach` を残して `lens` を足す**: 矛盾組 (`lens=customer_pain` × `approach=spec`) を Agent が作れ、どちらに従うかがプロンプトの暗黙の優先順位になる (BE-1)。(c) **`pattern` も `lens` に畳む**: `pattern` は 1 回の検索の**出力形** (`trend` のみ `confidence` / `hype_warning` が付く) を切り替えるもので、畳むと「市場探索レンズのセッションではトレンド調査ができない」という機能欠落になる |
+| **D-CV-18** | ゼロベースの 3 スキャンの受け先 (AC-PV-4.3 / AC-PV-6.2) | **`research_market` の `lens` に畳む** (tool は 8 本のまま。`feature` 値も増えない) | (a) **v4 の表示どおり 3 tool を新設** (`scan_megatrends` / `map_adjacency` / `track_policies`): 出力スキーマは `Research` と同一なのに、**D-6 の再発行対象・3 者一致検査・A-6 の検証点が 3 本増える** (CV-D5 の足切り)。(b) **1 本の `zero_based_scan` を新設**: 同じ出力型に 2 つの入口ができ、追加探索・除外集合・台帳 append の規則を 2 箇所に書くことになる |
+| **D-CV-19** | 追加探索「他の市場を探す」(AC-PV-4.5) | **`research_market` に `exclude_researched`: boolean を足す**。除外集合は**ハンドラが台帳から作る**。重複除外キーは**正規化した `name`**、2 回目は `rows: []` + `expanded: true` で成功 (§4.1.3) | (a) **新 tool `expand_markets`**: 目的・入出力が同一で D-6 と A-6 の検証点だけが増える。(b) **v4 の `expand=true` を引数として踏襲**: v3 の `researched_domains` は常に append なので**値を変えても挙動が変わらない引数**になる (廃止した `balanced` と同型)。(c) **除外集合を引数で受け取る**: CV-D13 (サーバ注入の廃止) の逆で、**Agent が台帳の全領域名を列挙する**必要が生じ、入力トークンが探索回数に比例して増える |
+| **D-CV-20** | 自由記述インライン質問の表現 (AC-PV-4.4) | **新しい SSE イベントを足さない**。`message_delta` の本文に `<question mode="choice"\|"free_text">` の**宣言的ブロック**を置き、FE は `mode` 属性で分岐する (§5.5) | (a) **`question` イベントを新設**: §5.1 の値域表・§5.3 の順序契約・§5.3.1 の経路別表・[../frontend.md](../frontend.md) §6.2 の S-8 の 4 箇所と OpenAPI・FE の union が増える。さらに**サーバがストリーム中にタグ境界を検出して本文から切り出す**ことになり、**BE-7 (マルチラインの取りこぼし) と同じ性質のバグ**を新たに作る。(b) **FE が本文の言い回しから自由記述かどうかを推定する**: FE-6 の再発 (LLM 出力の文言に依存した分岐)。(c) **専用エンドポイントで回答を受ける**: 会話の入口が 2 系統になり、履歴 (`conversation_messages`) の連番が分裂する。**再オープン条件**: 質問に「選択肢 + 自由記述の併用」「回答期限」「複数選択」のような**構造** が必要になったとき (属性の追加で表せなくなった時点でイベント化を再検討する) |
+| **D-CV-21** | 発散方針・レンズ・起点の持ち方 (AC-PV-4.6 / PV-Q10) | **台帳に 1 オブジェクト `divergence {mode, lens, lens_input}` として持つ**。書き手・読み手は §4.5、更新規則 (上位が変わったら下位を消す) は §4.1.1 の 6 | (a) **3 つのフラットフィールド**: `lens_input` が `lens` に従属することが型に現れず、**古いレンズに新しい起点が付く組**が作れる (BE-1)。(b) **台帳に持たず tool 引数だけで済ませる**: レンズは後続ターンの市場探索・発散に効き続けるため、`focus` を持たない判断と**基準が逆**になる (判定基準は「後続ターンに効き続けるか」で一貫させる)。(c) **`lens_input` だけを台帳に持つ**: 起点はあるがレンズが無い状態が生まれ、読み手が「どのレンズの起点か」を推測することになる (**書き手だけ・読み手だけのフィールドを作らない** = BE-10 の隣接パターン) |
+| **D-CV-22** | 「自分のアイデアから発散」経路のレンズ (AC-PV-4.7) | **レンズを問わない。台帳にも入れない** (`divergence` は `mode` のみを持つ)。発散入力は `seed_idea` + テーマ + `constraints` | (a) **固定の既定値を入れる** (例 `market_exploration`): 後続の市場探索が「市場探索レンズで探索された」という**誤った前提**を持つ (BE-1)。(b) **`own_idea` 用のレンズ集合を作る**: v4 は第 2 階層を持たず (`:11597`〜`:11598` は種の入力へ直行)、**プロトタイプに無い選択肢を設計で発明することになる**。(c) **新 tool `diverge_from_my_idea`**: CV-D5 の既決事項 (§4.1 の変更点 4) に反する |
+| **D-CV-23** | 発散設計の一括指定 (AC-PV-5.1) | **コンポジットウィジェット (`addDivergenceDesignWidget` / `<divergence_design>`) を採らない**。発散条件は**逐次の質問**で指定する (方針 → レンズ → 起点の自由記述 → 領域選択) | (a) **v2 の一括指定を復活させる**: v4 は「質問数を 5 回 → 3 回に削減。発散設計を 1 メッセージで指定できます」という変更ログ (`docs/prototype/hassan_agent_prototype_v4.html:15704`) を残したまま**機構を削除している** = 撤回された判断であり、復活させるなら**撤回理由の確認が先** (§10 の CV-R11)。(b) **質問を 1 メッセージにまとめる (ウィジェットなしで一括入力させる)**: 自由記述 1 回で 3 項目を書かせることになり、**取りこぼした項目の再質問が必ず発生する** (質問数は減らない) |
+
 ---
 
 ## 8. 他文書への是正要求 / 受信欄
@@ -754,9 +1008,23 @@ v3 は `CodedError` に包み直し、**原文は構造化ログ側にだけ残�
 | **R-CVA-12** | [../../analysis/v2-feature-inventory.md](../../analysis/v2-feature-inventory.md) §2.5 | **V ラベルの誤記を訂正する** — `POST /ideas/generate/my-idea` と `.../draft` は **V-3 (マイアイデア補完)**、`POST /ideas/evaluate` は **V-2 (アイデア評価)** である ([../llm-migration.md](../llm-migration.md) §4.2 の V-1〜V-6 の定義)。旧記述は順に V-2 / V-3 / V-6 だった | 誤ったラベルのまま `ideas.md` が対応表を作ると、V-6 (企画書簡易モード) の受け先がアイデア側に紛れ込む | — | **実施済み** (2026-08-01。メインセッションが訂正。`.../draft` も同じ UseCase = `hassan-v2-backend/usecase/idea/create_my_idea.go:207` の `ExecuteDraft` であることを出典として追記した) |
 | **R-CVA-13** | [../data-model.md](../data-model.md) §4.5 / §8.4 | **`conversation_sessions.theme_id` を NOT NULL 化**する (FK の `SET NULL` とパーシャルインデックスの条件も連動)。**§8.4 の仮定 6 をクローズ**する | CV-D8 の帰結。NULL 可のままだと `llm_call_records.theme_id` に穴が空く | R-CV-3 | **実施済み** (2026-08-01。data-model.md §4.5 で `theme_id` を NOT NULL + FK CASCADE + 通常インデックスへ変更し、§8.4 の仮定 6 をクローズ) |
 
+**増分 proto-v4 (2026-08-23) で新たに起票するもの**:
+
+| ID | 起票先 | 内容 | 理由 (やらないと何が壊れるか) | 受け先 Task | 状態 |
+|---|---|---|---|---|---|
+| **R-CVA-14** | [../data-model.md](../data-model.md) §4.11.2 | ①台帳の **`approach` / `constraints` の行を分割**し、`approach` を **`divergence` (`mode` / `lens` / `lens_input`)** に置き換える (書き手 = `research_market` / `generate_ideas` の同名 3 引数、読み手 = 本書 §4.5 の 4 つ) ②`researched_domains` の**重複除外キー (正規化した `name`) と既存行の合併規則**を注記する (§4.1.3 の 4・5) ③**`seed_idea` の保存理由を「再発散ボタン」に依存しない書き方へ更新**する (PV-DF5。廃止されたのはボタンであり操作ではない) | ①が無いと `entity/conversation` の型が 2 系統 (`approach` と `divergence`) になり BE-12 の温床になる。②が無いと追加探索が同一領域を 2 行にし、注入ブロックと発散入力に同じ領域が 2 度出る。③は AC-PV-5.2 | **Task-PV-5** | **実施済み** (2026-08-23。Task-PV-5 — [../data-model.md](../data-model.md) §4.11.2 で①②③とも反映。値域・妥当な組は本書 §4.1.1 を定義元として参照する形 (DR-9)) |
+| **R-CVA-15** | [../architecture.md](../architecture.md) §3.8.4 | **検査 3 の照合対象に「enum の値集合」と「(mode, lens) の妥当な組」を加える** (現在は**引数名の一致しか見ない**)。導入時に故障注入 3 種で検出を確認する (§4.6 の 1〜3) | **本増分は引数名だけでなく enum の値集合を入れ替える**ため、値集合がずれても検査が緑のまま通る (DR-6 の「検査が対象を見ていない」)。レンズ値の不一致は「Agent が出した値が F-3 で弾かれ、発散が黙って止まる」形で出る | 実装リポ (C-3) | **実施済み** (2026-08-23。[../architecture.md](../architecture.md) §3.8.4 の検査 3 に「enum の値集合と (mode, lens) の組を照合する。SSOT は本書 §4.6 の 1〜3」を追記。スクリプト実装と故障注入は実装リポの C-3) |
+| **R-CVA-16** | [../llm-migration.md](../llm-migration.md) §4.1 (P-2 の行) / §6.2 の 1 / §7.1 | **「domain / trend / usage / spec の 4 軸」を v3 のレンズ (§4.1.1) へ更新**する。`prompts/idea/diverge.md` は `usage` / `spec` の 2 節を落とし、`customer_pain` / `megatrend` / `adjacency` / `policy_tailwind` の 4 節を持つ形にする | 同書が「4 軸を 1 ファイルで持つ」と書いたまま残ると、実装が廃止した軸のセクションを移植する。**移植元 (PoC の `idea_diverge_system.md` の `output_mode` 節) が生きている**ため、指示が無ければそのまま持ち込まれる | **Task-PV-6** | **実施済み** (2026-08-23。Task-PV-6 — [../llm-migration.md](../llm-migration.md) §4.1 P-2 / §6.1 / §6.2 の 1 をレンズ 2 階層 (本書 §4.1.1) への参照に更新) |
+| **R-CVA-17** | [../frontend.md](../frontend.md) §6.2 / §8.1 | ①**`<question>` ブロックのパーサ規約**を追加する (`src/lib/parse/` の純粋関数 1 本 + 併置テスト。**`mode` 属性で分岐し本文の言い回しから推定しない** / **未知の `mode` とタグは本文として表示する**) ②`Idea` 型の `evaluation.grade` の値域を **`A` / `B+` / `B` / `C`** にする (AC-PV-2.3⑤) | ①が無いと FE が本文の言い回しで自由記述質問を判定する実装になる (FE-6 の再発)。②が無いと FE が旧値 `D` の分岐を持ち続ける | orchestrator (①) / **Task-PV-3** (②) | **①②とも実施済み** (2026-08-23。①= メインセッションが [../frontend.md](../frontend.md) §8.1 の構造抽出行に規約を追記 — パーサは `src/lib/parse/` の純粋関数 1 本・`mode` 属性のみで分岐・未知は本文表示・部分入力を併置テストに必須。値域と契約の SSOT は本書 §5.5 への参照。②= Task-PV-3 が `Idea` 型の注記に「値域は A / B+ / B / C。定義元は `entity/idea` のバンド関数」を反映済み。**本増分は SSE イベントを増やさないため §6.2 の S-8 の変更は不要**) |
+| **R-CVA-18** | [../../../aidlc-docs/schedule-2026q3.md](../../../aidlc-docs/schedule-2026q3.md) §5 の C-3 / C-4 | **C-3 (tool 契約) の作業内容に「レンズ enum の 3 者一致 + (mode, lens) の組の検証」を、C-3 / C-4 の H-3 停止点に「enum 値の変更も再発行対象」**を追記する (§3.4 の 6・7) | enum の変更が Agent 再発行を伴うことがスケジュールに現れないと、**コードだけデプロイして Agent を再発行しない**形の障害になる (BE-8) | **Task-PV-8** | **実施済み** (2026-08-23。Task-PV-8 — [../../../aidlc-docs/schedule-2026q3.md](../../../aidlc-docs/schedule-2026q3.md) §5 の C-3 行に「enum 値集合と (mode, lens) の組の照合 + enum 値の変更も H-3 の対象」、C-4 行に §5.5 の `<question>` ブロックと `divergence` 注入を追記) |
+
 **R-CVA-1 / R-CVA-2 は列・フィールドの追加を伴う**ため、[../data-model.md](../data-model.md) の
 テーブル件数 (DR-9) には影響しない (**新規テーブルではない**) が、**台帳フィールド表の行が増える**ため
 §4.11.2 の CI 検査 (書き手の存在検査) の対象が 1 件増える。
+
+**R-CVA-14 も新規テーブルを作らない**ため `make check-table-counts` の期待値は動かない。
+台帳フィールドは **`approach` → `divergence` の置換 + `constraints` の行分割**であり、
+**行数は [../data-model.md](../data-model.md) §4.11.2 の表が正** (件数を本書に転記しない。DR-9)。
 
 ### 8.2 本書が受け取った是正要求 / 委譲 (受信欄。DR-8 の受信側)
 
@@ -772,6 +1040,8 @@ v3 は `CodedError` に包み直し、**原文は構造化ログ側にだけ残�
 | [requirements-conversation.md](../../../aidlc-docs/inception/productionization/requirements-conversation.md) §7 の 5 | 抽出ジョブの完了を会話がどう待つか | | **§4.3** (待たない) | **回答済み** (2026-08-01) |
 | [../data-model.md](../data-model.md) §8.4 の仮定 4 | `conversation_messages.status` の値域 | | **§2.4** (`complete`/`aborted`/`failed` で確定) | **回答済み** (2026-08-01) |
 | [../llm-migration.md](../llm-migration.md) §9.2 | **LM-R6** (評価軸の統合) | | **本書の範囲外** — **[ideas.md](ideas.md)** (CV-B) が調査して決める | **委譲** (2026-08-01) |
+| [requirements-proto-v4.md](../../../aidlc-docs/inception/productionization/requirements-proto-v4.md) §5 | **R-PV-2** | §2.2 (状態注入にレンズを含めるか) / §4.1 (enum・tool 本数) / §4.4 (A-6 の適用点) / §4.5 (台帳の書き手読み手) / §4.6 (3 者一致検査) / §5.1〜§5.3.1 (自由記述質問・`grade` 値域) | **§2.2.2** (`divergence` を注入。`approach` を置換) / **§4.1.1〜§4.1.5** (2 階層・enum の改訂・追加探索・8 本のまま・採らない残骸) / **§4.4** (新引数の A-6) / **§4.5** (`divergence` の書き手読み手) / **§4.6** (enum 値集合の照合を R-CVA-15 で要求) / **§5.1・§5.2・§5.3・§5.5** (イベントを増やさず本文ブロックで表す。`artifact(ideas)` の `grade` を `A`/`B+`/`B`/`C` に) / **§7 の D-CV-16〜D-CV-23** | **実施済み** (2026-08-23) |
+| 同 §4.4 / §4.5 / §4.6 | **AC-PV-4.1〜AC-PV-4.7 / AC-PV-5.1 / AC-PV-5.3 / AC-PV-6.1 / AC-PV-6.2 / AC-PV-6.3 / AC-PV-2.3②** | 発散フローの v4 化の受入基準 | 各節の見出し・行に AC 番号を明記した (§3.3 / §3.4 / §4.1.1〜§4.1.5 / §4.4 / §5.1〜§5.5 / §7) | **回答済み** (2026-08-23) |
 
 ---
 
@@ -780,9 +1050,12 @@ v3 は `CodedError` に包み直し、**原文は構造化ログ側にだけ残�
 ### 9.1 依存順序
 
 ```
-data-model.md の会話 4 テーブル (+ R-CVA-1/2/3/4/13 の反映)
+data-model.md の会話 4 テーブル (+ R-CVA-1/2/3/4/13/14 の反映)
    ↓
-entity/conversation (台帳の型・stage 導出・注入ブロック構築)  ← UT 必須
+entity/conversation (台帳の型・stage 導出・注入ブロック構築
+                     + divergence の更新規則 §4.1.1 の 6
+                     + 領域名の正規化 §4.1.3 の 4
+                     + レンズ enum と (mode, lens) の組の const)     ← UT 必須
 entity/toolresult   (8 tool の結果型 + marker interface)      ← 先に固める (後付け不可)
    ↓
 gateway/anthropic (CallMeta = usage 4 カウンタ + stop_reason) / gateway/exa
@@ -802,6 +1075,10 @@ controller (SSE ヘッダ・CodedError 変換 1 箇所)
 - **`scripts/check-tool-contract.sh` の実装**も並列可能 (期待値は §4.1 / §4.5 / §3.1 の表)
 - **`prompts/conversation/` の 8 ファイル** (`orchestrator.md` / `deepdive_*` 6 本 / `research_market.md` /
   `match_functions.md`) の起こしは Go の実装と並列 (レイアウトは [../llm-migration.md](../llm-migration.md) §6.1)
+- **増分 proto-v4 の並列単位**: ①`entity/conversation` のレンズ const + `divergence` の更新規則 + 領域名の正規化
+  ②`prompts/conversation/orchestrator.md` の 2 階層の質問順・`<question>` ブロックの指示・追加探索の呼び分け
+  ③`prompts/idea/diverge.md` のレンズ別セクション (R-CVA-16) ④FE の `src/lib/parse/` の `<question>` パーサ
+  (R-CVA-17)。**①が②③④の値域の SSOT** なので①を先に確定させる。**②③の変更は Agent 再発行を伴う** (§3.4 の 6)
 
 ### 9.3 参照すべき既存実装
 
@@ -809,7 +1086,8 @@ controller (SSE ヘッダ・CodedError 変換 1 箇所)
 |---|---|---|
 | SSE のマルチライン取りこぼし対策 (BE-7 の**修正済み**実装) | `claude_managed_agents/cmd/devui/conversation_stream.go` | **手本にする** (除外リスト方式・空行を本文として通す) |
 | 1 ターンの処理順序 | `claude_managed_agents/cmd/devui/conversation.go` | 順序の参考。**net/http・手書き store・`http.Error` は持ち込まない** |
-| tool schema の定義 (9 本) | `claude_managed_agents/cmd/update-agent-prompt/main.go:280` | 引数名・enum・description の**移植元**。`set_theme_name` は除く |
+| tool schema の定義 (9 本) | `claude_managed_agents/cmd/update-agent-prompt/main.go:280` | 引数名・enum・description の**移植元**。`set_theme_name` は除く。**`industry_mode` (`:333` 付近) と `approach` (`:412` 付近) の enum は移植しない** — 値域は本書 §4.1.1 が正 (§4.1.2 の判定) |
+| 発散軸の 1 件ごとの付与 (`ideas[].lens` の前身) | `claude_managed_agents/cmd/devui/conversation_tools_generate.go:605` | 台帳の値を解決して各アイデアに付ける構造は**手本にする**。**値域だけがレンズに変わる** (§5.2) |
 | `stage` 導出 | `claude_managed_agents/internal/db/conversation_store.go:250` | 判定順序をそのまま移す |
 | Managed Agent のツールループ | `claude_managed_agents/internal/session/run.go` | 同一 batch の**逐次** dispatch を維持する |
 | SSE ヘルパー | `hassan-v2-backend/controller/controller.go` の `SetupSSEHeaders` 系 | v3 の Controller 共通層の手本 (D-API-12) |
@@ -831,4 +1109,9 @@ controller (SSE ヘッダ・CodedError 変換 1 箇所)
 | **CV-R5** | **入れ子の Agent 実行 (P-1 → P-2 / P-4) が `llm_call_records` で二重計上にならないか** | **ならない**と仮定した — 明細は 1 呼び出し 1 行で `feature` が違うため、合算は集計側の責務。ただし「ターンのコスト」を出すときに内側を含めるかは集計クエリの定義次第 | [../observability.md](../observability.md) §6.1 の集計設計 |
 | **CV-R6** | **v2 の `idea_hassans` 既存データを v3 の `conversation_sessions` へ移行するか** | **移行しない**前提で設計した (v2 の発散条件は台帳の構造と対応が付かず、会話履歴も v2 に存在しない)。移行するなら `title` と `theme_id` のみの写像になる | 移行計画 (plan.md の Task-2f 系) |
 | **CV-R7** | **`GET /conversations` の `keyword` が台帳 JSONB を対象にする場合のインデックス** | `title` 列 + 台帳の `theme` を対象と仮定した。JSONB への GIN が要るかは実データ量次第 | [../data-model.md](../data-model.md) §3.5 |
-| **CV-R8** | **評価軸の統合 (LM-R6)** | **本書の範囲外**。[ideas.md](ideas.md) (CV-B) が v2 (V-2) と PoC (P-5) を突き合わせて決める。本書は「再評価を tool にしない」ことだけを確定させた | **解消済み** (2026-08-02。[ideas.md](ideas.md) §6.2 が対照表を確定し、[llm-migration.md](../llm-migration.md) §9.2 の LM-R6 もクローズした) |
+| **CV-R9** | **ゼロベース経路・自分のアイデア経路で `stage` の初期値が `asset` のままになる** (§2.3.1) | **`stage` の値域 (5 値) を変えない**前提で設計した。`asset` は「アセット段」ではなく**「起点が未確定」**の意味であり、**表示ラベルは FE が読み替える**。値域を増やす (`entry` 等) 案は、[themes.md](themes.md) の D-TH-4 / [idea-boards.md](idea-boards.md) の IB-Q7 で「ステージを他ドメインに配らない」と決めた範囲を再び動かすため本増分では採らない | [../frontend.md](../frontend.md) の会話画面の表示仕様 |
+| **CV-R10** | **`<question>` ブロックの値域が「プロンプト (Anthropic 側 Agent) と FE パーサ」の 2 言語に分かれ、機械照合の対象にできない** (§5.5。tool schema ではないので §4.6 の 3 者一致検査に載らない) | **未知の `mode` とタグを本文としてそのまま表示する** (§5.5 の 4) ことで、**ドリフトが「質問カードが出ずタグが本文に見える」= 目視で分かる形**に倒れる前提で設計した。**無言の機能喪失にはならない**。FE のパーサテストに**プロンプトと同じタグ文字列のフィクスチャ**を置くことで実質的な照合にする (R-CVA-17) | 実装リポ (C-3 / C-4) |
+| **CV-R11** | **v4 が「発散設計を 1 メッセージで指定」を撤回した理由が不明** (変更ログ `docs/prototype/hassan_agent_prototype_v4.html:15704` は削減を謳うが機構が無い) | **「逐次の質問に戻す」を採る**前提で設計した (§4.1.5 / D-CV-23)。**理由が「質問が多すぎた」ではなく「一括入力の取りこぼしが多かった」なら本設計は妥当**、逆に「質問数が離脱に直結した」なら**質問の統合 (方針とレンズを 1 問にする) を再検討する**必要がある。**ユーザーに確認できると設計の確度が上がる** (確認できなくても設計は進められる) | ユーザー確認 (未実施) |
+| **CV-R12** | **各レンズが探索方針にどう効くか** (プロンプトの具体的な指示文) | **§4.1.1 の第 2 階層表の「探索で優先するもの」列がプロンプトの入力になる**前提で設計した。**具体の言い回しは [../../../aidlc-docs/schedule-2026q3.md](../../../aidlc-docs/schedule-2026q3.md) の C-8 (チューニング) が生成物を見て調整する** — 本書は値域と 3 者一致の対象を確定させるところまで。**設計書に言い回しを書かない** (プロンプトが SSOT) | 実装リポ (C-8) |
+| **CV-R13** | **`ideas[].lens` (発散に使ったレンズ) を `ideas` テーブルに保存するか** — 現状 `artifact(ideas)` の payload にしか現れず、[ideas.md](ideas.md) の `Idea` は軸の列を持たない | **保存しない**前提で設計した (発散の条件はセッションの台帳が持ち、アイデア 1 件ごとの再現は `conversation_sessions` 経由で辿れる)。**保存が必要になる契機**は「アイデア一覧をレンズで絞り込みたい」という要求で、そのときは [ideas.md](ideas.md) と [../data-model.md](../data-model.md) の増分で列を足す (本増分では対象外 — 新エンドポイント・新列を作らない = PV-DF2) | [ideas.md](ideas.md) の増分 |
+| **CV-R8** | **評価軸の統合 (LM-R6)** | **本書の範囲外**。[ideas.md](ideas.md) (CV-B) が v2 (V-2) と PoC (P-5) を突き合わせて決める。本書は「再評価を tool にしない」ことだけを確定させた | **解消済み** (2026-08-02。[ideas.md](ideas.md) §6.2 が対照表を確定し、[llm-migration.md](../llm-migration.md) §9.2 の LM-R6 もクローズした。**その後 2026-08-23 の増分 proto-v4 で LM-R6 は再オープン → 3 軸で再クローズされた** (R-IDA-14) — 「再評価を tool にしない」という本書の確定は変わらない) |

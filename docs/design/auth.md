@@ -1169,7 +1169,7 @@ v2 の「クライアントコンポーネントが直接 BE を叩く」構成�
    |---|---|---|
    | email / password が不正 | **マスクする** (どちらが不正かを示さない) | アカウントの存在を漏らさない |
    | **アカウントがロックされている** | **ロックされていることを伝える** (専用の `CodedError`) | §6.9 の回復経路で最も起きやすいのは「管理者がパスワードを忘れて失敗ロックされる」(経路 2)。**本人がロックを知らないと管理者へ連絡する契機を失い、回復経路に到達しない**。ロックの事実は「そのメールアドレスが登録済み」を意味するが、**ロックはしきい値回数の失敗を要する**ため列挙の手段としては非効率であり、回復可能性を優先する |
-   | ロックが成立した瞬間 | **登録済みアドレスにロック通知メールを送る** | 本人が気付く経路を応答以外にも持たせる (第三者による誘発 = 経路 1 の検知にもなる) |
+   | ロックが成立した瞬間 | **通知メールは送らない** (2026-08-15 訂正。旧: 登録済みアドレスにロック通知メールを送る) | v2 に前例の無い機能として一度実装した (`aillio-dev-org/hassan-v3` issue #35 / PR #62) が、プロダクトオーナーが不要と判断し撤回した。本人がロックに気付く経路は、次回サインイン試行時の応答 (上表の行。ロックの事実を伝える) に一本化する |
 2. **アカウント単位のロックは v2 の機構を踏襲する。ただし発火側と解除側を対で設計する** —
    踏襲するのは `failed_sign_in_attempts` の加算としきい値超過での `last_locked_at` 設定
    (`hassan-v2-backend/db/queries/account.sql:56-64`。しきい値はパラメータ化されている)。
@@ -1271,6 +1271,158 @@ v2 の「クライアントコンポーネントが直接 BE を叩く」構成�
 **失効の扱い**: (b) のボードメンバーからの削除は即時失効 (次リクエストから 404)。
 (a) の移行後は `sharing_settings` を参照しない — **移行実行のタイミングは
 [operations.md](operations.md) の RL-3 に含まれる**。
+
+### 6.13 認証フローのシーケンス (§6.1〜§6.11 の統合ビュー)
+
+**2026-08-13 新設。本節は新しい決定を持たない** — §6.1〜§6.11 と
+[API/auth-accounts.md](API/auth-accounts.md) で確定済みの判断を、時間軸で 1 枚にしたものである。
+**判定内容・エラーコード・しきい値の SSOT は各節**であり、図と各節が食い違ったら**各節が正**。
+図には合成の出典を注記してあるので、変更するときは注記先の節を先に直す。
+
+**状態遷移 (S1 未認証 / S2 MFA 未検証 / S3 利用可) は
+[API/auth-accounts.md](API/auth-accounts.md) §3.2、パスワードリセットと招待は同 §3.3 が図を持つ**。
+本節はそれらと軸が異なる「1 リクエストが層をどう通るか」だけを描き、同じ内容を再掲しない。
+
+図中のパッケージ名・関数名は**実装リポ (`aillio-dev-org/hassan-v3`) に実在するもの**に合わせてある
+(実装者が図と実物を対応づけられるようにするため)。**どこが実装済みでどこが未実装かは §6.13.3 の表**。
+
+#### 6.13.1 サインイン (公開系統 → トークン発行)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as 利用者
+    participant FE as FE (Next.js)
+    participant RL as レート制限 MW
+    participant C as controller/account
+    participant UC as usecase/account (SignIn)
+    participant RP as repository/account
+    participant DB as PostgreSQL
+    participant AU as 監査記録
+
+    U->>FE: メールアドレス + パスワード
+    FE->>RL: POST /accounts/signin
+    Note over RL: キー = IP + エンドポイント + メールアドレス<br/>カウンタは共有ストア (既定 DB)。§6.11-3
+    alt しきい値を超過
+        RL-->>FE: 429 + Retry-After
+    else 共有ストアが判定不能
+        RL-->>FE: 503 (fail-closed。§6.6)
+    else 通過
+        RL->>C: ハンドラへ
+    end
+    C->>UC: SignIn(email, password)
+    UC->>RP: GetAccountByEmailForSignIn
+    Note over RP: 所有者条件を持たない数少ないクエリ。<br/>§6.4 の許可リストに登録して初めて書ける
+    RP->>DB: SELECT ... WHERE email = $1
+    DB-->>RP: 該当行 または なし
+    alt ロック済み (last_locked_at が非ゼロ)
+        UC->>AU: signin_failed
+        UC-->>FE: 401 AU-C-00002 (ロックの事実は伝える。§6.11-1)
+    else 無効化済み
+        UC-->>FE: 401 AU-C-00006
+    else 該当なし または パスワード不一致
+        UC->>RP: failed_sign_in_attempts += 1
+        opt しきい値に到達
+            UC->>RP: last_locked_at = now()
+        end
+        UC->>AU: signin_failed (detail.email_hash。平文は保存しない)
+        UC-->>FE: 401 AU-C-00001 (email と password のどちらが不正かをマスク)
+    else 一致
+        UC->>RP: failed_sign_in_attempts = 0
+        UC->>UC: HS256 で署名 (署名は常に最新鍵 1 本。§6.8-3)
+        Note over UC: クレームは user_uid / role /<br/>required_mfa_type / mfa_verified の 4 つ (§6.1)
+        UC->>AU: signin_success
+        UC-->>FE: 200 SignInResult
+    end
+```
+
+- **エラー応答の書き出しは 1 本に集約されている** — `CodedError` → HTTP ステータスの変換は
+  `controller/errresp.go` の変換表のみ、本文 (`code` / `message` / `request_id`) と warn ログと
+  `X-Server-Latency` ヘッダの書き込みは `common/httperror` の `Write` のみ (実装リポ実測)。
+  図では往路の矢印を省いて `UC-->>FE` と描いているが、実際は Controller を経由する
+- **サインインの 401 は本文を持つ** (分類 C)。§6.6 の「401 は本文なし」に対する唯一の例外であり、
+  FE はセッションを破棄せずフォーム内エラーとして表示する
+- **`required_mfa_type != "none"` の場合、この時点のトークンは `mfa_verified = false`**。
+  以降の遷移は [API/auth-accounts.md](API/auth-accounts.md) §3.2
+
+#### 6.13.2 認証済みリクエスト 1 本 (ユーザー認証系統 → 所有者スコープの強制)
+
+`GET /themes?scope=contract` を例にとる (層の通り方はドメインによらず同じ)。
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant FE as FE (Next.js)
+    participant M1 as RequestContext MW
+    participant M2 as Recovery / SecurityHeaders / CORS / RequestLogger
+    participant AT as AuthRequired MW (ユーザー認証系統)
+    participant DB as PostgreSQL
+    participant C as controller/theme
+    participant UC as usecase/theme
+    participant SV as service/theme
+    participant RP as repository/theme
+
+    FE->>M1: GET /themes?scope=contract (X-Token: JWT)
+    M1->>M1: request_id を採番 (上流の X-Request-Id があれば引き継ぐ)
+    M1->>M2: 共通ミドルウェアを通す
+    M2->>AT: 認証系統のグループへ
+    Note over AT: 判定順序は §1.3 (v2) の踏襲 + §6.1 の変更点 3 / 4。<br/>公開系統との分離は §6.7 のグループ既定
+    AT->>AT: a. X-Token が空でないか
+    AT->>AT: b. パース・署名・有効期限 (検証は旧鍵も許容。§6.8-3)
+    AT->>AT: c. role が enum のいずれか (空 role と未知の値は拒否)
+    AT->>AT: d. MFA 必須かつ未検証なら §6.7 のホワイトリスト外を拒否
+    AT->>DB: e. accounts の実在確認 (user_uid)
+    DB-->>AT: 該当行 または なし
+    AT->>AT: f. last_locked_at がゼロ値か
+    alt a〜f のいずれかが不成立
+        AT-->>FE: 401 (本文なし。§6.6。FE はセッションを破棄する)
+    end
+    AT->>C: entity.Scope{ContractID, AccountID} を context に載せて通す
+    C->>C: scope / sort / limit / offset を検証
+    Note over C: 所有者 ID をクエリパラメータで受け取らない。<br/>Scope は認証 MW が載せた値だけを使う (A-4)
+    C->>UC: ListThemesInput{Scope, ListScope, ...}
+    UC->>SV: List(scope, ...)
+    SV->>SV: scope=contract を include_contract_visibility に変換
+    SV->>RP: ThemeListCondition{ContractID, AccountID, ...}
+    RP->>DB: sqlc 生成クエリを実行
+    Note over DB: WHERE deleted_at IS NULL<br/>AND contract_id = $1<br/>AND (account_id = $2 OR (include_contract_visibility AND visibility = 'contract'))
+    DB-->>RP: 自テナントの行のみ
+    RP-->>SV: []entity.Theme
+    SV-->>UC: ListResult
+    UC-->>C: ListThemesOutput
+    C-->>FE: 200 (RequestLogger が status と duration_ms を記録)
+```
+
+この図が表現している設計上の要点:
+
+| # | 要点 | SSOT |
+|---|---|---|
+| 1 | **所有者条件は Repository の `WHERE` に入る** — 上位層が絞り込みを忘れても他テナントの行は返らない | §6.4 |
+| 2 | **他テナントのリソースは 0 件として返る**ので、403 と 404 の取り違えが構造的に起きない | §6.6 |
+| 3 | **判定 e が毎リクエスト `accounts` を引く** — ステートレス JWT ではなく「JWT + アカウント実在確認」の混成。**手動ロック (判定 f) が即時失効の手段になる**のはこの構造による | §6.9 |
+| 4 | **無効化 (`DELETE /accounts/{account_id}`) は既存トークンを失効させない** — 判定 e / f のどちらにも該当しないため、最大 7 日アクセスが続く | [data-model.md](data-model.md) §4.2 の DM-A5 補足 |
+| 5 | 公開系統に載るルートは有限列挙であり、認証系統はグループ既定で付く (書き忘れが素通りにならない) | §6.7 |
+
+#### 6.13.3 実装リポの対応箇所と実装状況 (2026-08-13 時点)
+
+**この表は実装リポの実測であり、実装が進めば古くなる** — 状態が食い違ったら実装リポの実体が正。
+行番号は書かない (動く実装を指すため。ファイルと識別子で辿る)。
+
+| 図の要素 | 実装リポ (`aillio-dev-org/hassan-v3`) の実体 | 状態 |
+|---|---|---|
+| 共通ミドルウェア鎖 (M1 / M2) | `backend/common/router/router.go` の `New` の `r.Use(...)` | 実装済み |
+| 認証系統のグループ分け (§6.7) | 同 `registerRoutes` (公開グループ = `GET /alive` のみ / ユーザー認証グループ = それ以外) | 実装済み。**公開系統の実体は `/alive` 1 本のみ** — §6.7 が列挙する認証系エンドポイントは未実装 |
+| 認証ミドルウェアの判定 a〜f | `backend/common/auth/devscope.go` の `DevScopeMiddleware` | **未実装** — `X-Contract-Id` / `X-Account-Id` を**無検証で所有者スコープとして信頼する暫定実装**。安全弁として `APP_ENV != local` では `router.New` が起動を拒否する |
+| `entity.Scope` の受け渡し | `devscope.go` の `Scope(c)` / `controller/theme.go` の `auth.Scope(c)` | 実装済み (ミドルウェアを通らない route が自作できない形になっている) |
+| Scope の層伝播 (Controller → Repository) | `usecase/theme/list_themes.go` → `service/theme/lister.go` → `repository/theme/theme.go` → `db/queries/theme/theme.sql` | 実装済み |
+| エラー応答の 1 本化 | `controller/errresp.go` の `httpStatusByErrorCode` + `common/httperror` の `Write` | 実装済み |
+| サインイン (§6.13.1) 一式 | — | **未実装** |
+| レート制限ミドルウェア (§6.11-3) | — | **未実装** |
+| 監査記録 (O-6) | — | **未実装** |
+
+**認証を実装する PR で同時に外すもの** (実装リポのコード内に明示されている):
+`router.New` の `APP_ENV != local` 起動拒否、`CORSMiddleware` の許可ヘッダから
+`X-Contract-Id` / `X-Account-Id`、`common/auth/devscope.go` そのもの。
 
 ---
 
@@ -1513,7 +1665,7 @@ v2 の「クライアントコンポーネントが直接 BE を叩く」構成�
 |---|---|---|---|
 | **R-9** | [API/README.md](API/README.md) **D-API-8'** / §3 の `scope` 記述 / §5 の A-7 行 / §5 API-Q3 / 「増分 2 の作業単位」 | **`scope=contract` を増分 1 で有効化する**。「増分 1 は `mine` のみ・`contract` は 400」を撤回し、**増分 2 に残るのはテーマメンバー機能のみ**にする。A-7 行は「回答」に更新し §6.12 を参照する。**API-Q3 は A-7 の判断部分を閉じ、テーマメンバーの権限差 (TH-Q5) の要件確認のみに縮小する** | **実施済み** (2026-08-02)。[API/README.md](API/README.md) の D-API-8' を「増分 1 から有効」に改訂し、§1.4 の `scope` 値域・§2.2・§2.5 の 400 行・§5 の A-7 行・§5 API-Q3・§6.1 の「増分 2 の作業単位」を追随させた。**増分 2 に残るのはテーマメンバー機能のみ**。API-Q3 は A-7 の判断部分をクローズし TH-Q5 の確認だけに縮小した |
 | **R-12** | [API/README.md](API/README.md) §3 の総覧 / [frontend.md](frontend.md) §11.1 | **`GET /ideas/csv` の追加に伴う反映** (2026-07-31 の TH-Q1 決着 = v2 の CSV エクスポートを引き継ぐ。仕様は [API/idea-boards.md](API/idea-boards.md) §2.4)。①README §3 の総覧に 1 本追加し**合計値を更新する** (idea-boards の `/ideas` 系は 3 本 → **4 本**) ②frontend.md にエクスポートボタンの配置を追加する (**v2 は発散画面から落とす形。テーマ一覧のヘッダではない** — 2026-07-30 のプロトタイプにボタンが無いのは「テーマ管理ヘッダ」であって、アイデア一覧のエクスポート自体が不要という根拠にはならない) | **対応済み (2026-08-01)**: ①README §3 の総覧 (idea-boards 22 本・小計 79・合計 116) と §3.4 の明細に追加。あわせて §3.2 に不足していたアセット 5 本 (bulk×2 / asset-imports×2 / recent) も反映 ②frontend.md §11.1 の `/ideas` 行にボタン配置と `GET /ideas/csv` を追記 |
-| **R-11** | [API/auth-accounts.md](API/auth-accounts.md) **AA-D-15** / §4 の A-7 行 (`:686` 付近) | **根拠の差し替えのみ** (判断内容は妥当なので変えない)。「`GET /contracts/me` から `sharing_settings` を落とす」の根拠が「**§7 の『本増分では共有機能を持たない』と整合させた**」になっているが、**その記述は §6.12 の新設で撤回された**。新しい根拠は「**契約単位の共有既定は [API/settings.md](API/settings.md) の `/settings/workspace` が持ち、per-resource の可視性は各リソースが持つため、契約情報の応答に共有設定を載せる必要が無い**」。§4 の A-7 行の「本書は共有機能を持たない」も同様に書き換える | **未対応のまま「実施済み」と誤記されていた**（本行の旧状態列は R-12 の内容 (README の CSV 集計・frontend.md のボタン) が誤って貼られており、AA-D-15 の根拠差し替え自体は未反映だった。2026-08-03 の独立検証 (`grep -n "visibility.*増分 2" docs/design/API/auth-accounts.md`) で発覚し、同日修正: [API/auth-accounts.md](API/auth-accounts.md) §4 の A-7 行の根拠を上記の新根拠に差し替え、`visibility` の増分表記も「増分 2」→「増分 1」に是正した |
+| **R-11** | [API/auth-accounts.md](API/auth-accounts.md) **AA-D-15** / §4 の A-7 行 (`:686` 付近) | **根拠の差し替えのみ** (判断内容は妥当なので変えない)。「`GET /contract` (旧 `/contracts/me` — 2026-08-15 の AA-D-25 で改名) から `sharing_settings` を落とす」の根拠が「**§7 の『本増分では共有機能を持たない』と整合させた**」になっているが、**その記述は §6.12 の新設で撤回された**。新しい根拠は「**契約単位の共有既定は [API/settings.md](API/settings.md) の `/settings/workspace` が持ち、per-resource の可視性は各リソースが持つため、契約情報の応答に共有設定を載せる必要が無い**」。§4 の A-7 行の「本書は共有機能を持たない」も同様に書き換える | **未対応のまま「実施済み」と誤記されていた**（本行の旧状態列は R-12 の内容 (README の CSV 集計・frontend.md のボタン) が誤って貼られており、AA-D-15 の根拠差し替え自体は未反映だった。2026-08-03 の独立検証 (`grep -n "visibility.*増分 2" docs/design/API/auth-accounts.md`) で発覚し、同日修正: [API/auth-accounts.md](API/auth-accounts.md) §4 の A-7 行の根拠を上記の新根拠に差し替え、`visibility` の増分表記も「増分 2」→「増分 1」に是正した |
 | **R-10** | [frontend.md](frontend.md) §5.4 / §11.1 のルート表 / §14 の A-7 行 | **共有・可視性の UI を増分 1 に含める** (`scope` セレクタと `PUT /visibility` の導線を出す。BE が 400 を返す前提の記述を撤回)。**`/themes/[themeId]/members` は増分 2 のまま** (v2 にテーマメンバーが無いため C-16 の対象外)。**`/settings/workspace` は増分 1 へ前倒し** — v2 の契約単位スイッチの後継であり、**ST-Q8=a (増分 2 へ後ろ倒し) は C-16 の下で再確認が必要** | **未対応** (並行編集) |
 
 **併せてユーザー確認が必要な既存決定** (C-16 より前の決定で、C-16 と衝突する可能性がある。一覧は [requirements.md](../../aidlc-docs/inception/productionization/requirements.md) の「C-16 の承認済み例外」表):

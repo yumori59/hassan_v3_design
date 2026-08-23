@@ -37,9 +37,13 @@
 | 4 | [observability.md](observability.md) **§4.1** | 構造化ログの必須フィールド |
 
 **ドメインと設計書の対応**: テーマ = [API/themes.md](API/themes.md) / アセット = [API/assets.md](API/assets.md) /
-ナレッジ = [API/knowledge.md](API/knowledge.md) / アイデアボード・アイデア = [API/idea-boards.md](API/idea-boards.md) /
+ナレッジ = [API/knowledge.md](API/knowledge.md) / アイデアボード = [API/idea-boards.md](API/idea-boards.md) /
 お知らせ = [API/news.md](API/news.md) / 設定 = [API/settings.md](API/settings.md) /
-**認証・アカウント基盤** = [API/auth-accounts.md](API/auth-accounts.md)。
+**会話型アイデア創出** = [API/conversation.md](API/conversation.md) /
+**アイデア (参照・人手編集・版・タグ・評価)** = [API/ideas.md](API/ideas.md) /
+**企画書** = [API/plans.md](API/plans.md) /
+**認証・アカウント基盤** = [API/auth-accounts.md](API/auth-accounts.md)
+(**1 リクエストが層をどう通るか・サインインの分岐は [auth.md](auth.md) §6.13 のシーケンス図**)。
 **総覧 (どのエンドポイントがどのファイルか) は [API/README.md](API/README.md) §3**。
 
 ### バックエンド: LLM を呼ぶ処理を実装する
