@@ -526,6 +526,12 @@ const SEED = [
   t("design", "設計", "一般ユーザー向けで対応先が無い 5 件の決着 (会社情報の LLM 生成 / 最近使ったアセット / アセット一括作成・削除 / 企画書のお気に入り / 版履歴のプロンプト編集)"),
   t("design", "設計", "C-16 の照合で発見した assets.md の欠落 4 件を引き継ぐ (CSV 取り込み / 一括作成 / 一括削除 / 最近使ったアセット)。AS-Q3 のクローズを撤回し D-AS-14〜18 を新設", 2),
   t("design", "レビュー", "todo.html の stale な status を実態へ同期 (git init 済み / Task-3i 重複エントリ / auth-accounts 反映済み)", 2),
+  t("design", "調査", "プロトタイプ v4 の棚卸しと現行設計との突き合わせ (17,844 行。評価軸・発散フロー・招待・ナレッジ等の差分を判断リスト化)", 2),
+  t("design", "設計", "増分 proto-v4 の Inception (questions/requirements/plan。AC-PV 34 件。評価軸 3 軸化 + 発散フロー v4 化のユーザー決定と C-16 承認を証跡化。編集機能は増分 2 へ先送り)", 2),
+  t("design", "設計", "proto-v4 の設計反映 (ideas.md 3 軸化・判定ランク / conversation.md レンズ 2 階層・<question> ブロック・追加探索 / data-model・llm-migration・表示側・settings・operations・schedule への波及)", 2),
+  t("design", "レビュー", "proto-v4 の design-reviewer レビューと指摘反映 (重大 2 / 中 4 / 軽微 5 → 全件反映。check-endpoint-mapping に検査⑨ CSV 列数を新設・故障注入 2/2 検出)", 2),
+  t("design", "設計", "増分 2: 評価基準の契約ごと編集 + 変更履歴 + settings の評価基準 CRUD (proto-v4 で先送り。受け皿は ideas.md §6.8 / settings.md §2)"),
+  t("design", "設計", "v4 プロトタイプの未採用差分の採否判断 (メール一括招待フロー / ナレッジの添付・フォローアップ / 設定画面の他セクション / テーマウィザード変更はテーマ担当へ連携)"),
 
   // ── インフラ (構築すべき要素の一覧) ──
   t("infra", "設計", "環境分離方針 (local / dev / prod) と FE(Vercel)⇔BE(AWS) の環境対応表", 2),

@@ -635,7 +635,7 @@ backend (SSE)
 | 対象 | 置き場 | 規約 |
 |---|---|---|
 | 数値・レンジ・単位のパース (「120-420億円」「約 3 割」「2026年Q2」) | **`src/lib/parse/`** (domain 非依存) | **必ず `export`** / **`*.test.ts` を併置** / **`react` を import しない** (L-F1) |
-| markdown・`<options>` 等の構造抽出 | `src/lib/parse/` | 同上。**SSE の本文をそのまま入力に取れる純粋関数**にする |
+| markdown・**`<question>` ブロック**等の構造抽出 (**2026-08-23 proto-v4 更新** — 旧 `<options>` は `<question mode="choice">` に 1 本化。**ブロックの値域と契約の SSOT は [API/conversation.md](API/conversation.md) §5.5** (契約の集合は同節の表が定義元 — 件数を転記しない = DR-9)) | `src/lib/parse/` | 同上。**SSE の本文をそのまま入力に取れる純粋関数 1 本**にする。**分岐は `mode` 属性の値だけで行い、本文の言い回しから質問かどうかを推定しない** (同 §5.5 の契約 1 = AC-PV-4.4③)。**未知の `mode`・未知のタグは本文としてそのまま表示** (契約 4)。**ストリーム中の部分入力 (閉じタグ未着) のケースを併置テストに必ず含める** (契約 9 — 保留した本文を捨てない) |
 | ドメイン固有の整形 (ステータス表示・スコアの丸め) | `features/<d>/lib/` | 同上 |
 | 図表用のデータ整形 (Recharts 等への変換) | `features/<d>/lib/` | 同上。**コンポーネント内で整形しない** |
 
@@ -793,6 +793,10 @@ type StreamState =
 > `tag` (単数) → **`tags`** (配列)、`evaluation.rank` → **`evaluation.grade`** に変わっており、
 > 旧型を正として実装すると生成型と手書きの期待が食い違う。新たに読める項目は
 > `market_size` / `cagr` / `stage` / `has_knowledge` / `is_owner` / `latest_version`。
+> **`evaluation.grade` の値域は A / B+ / B / C の 4 段**である
+> (2026-08-23 の proto-v4 増分で A/B/C/D から変更。AC-PV-2.3)。
+> 値域そのものの定義元は `entity/idea` のバンド関数 ([API/ideas.md](API/ideas.md) §6.3 が SSOT) —
+> 本書では値域を再定義しない。
 
 **ロック操作の UI 要件** (2026-07-30 の 2 巡目レビューで追加。[auth.md](auth.md) §6.9 のガードに対応):
 

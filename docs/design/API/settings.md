@@ -20,6 +20,12 @@
 したがって**このビューから確定できる仕様は「どの情報を表示するか」までであり、
 更新系の挙動はプロトタイプから読み取れない** (DR-7)。
 
+> **v4 プロトタイプ (2026-08-23) の設定画面について**: `../../prototype/hassan_agent_prototype_v4.html` は
+> 設定にセクションを追加している (セキュリティ / 組織管理 / 多要素認証 / **評価基準** / メンバー管理 / 利用状況分析)。
+> このうち増分 proto-v4 が扱うのは**評価基準の先送り (§2 の行) だけ**であり、
+> 他セクションの採否は本増分の対象外 ([requirements-proto-v4.md](../../../aidlc-docs/inception/productionization/requirements-proto-v4.md) §1.2 の PV-DF6)。
+> 対象外 = 採用しないではなく、設定ドメインの増分で改めて判断する。
+
 ---
 
 ## 2. セクション別の判断 (v3 で移植 / v3 新設 / 対象外)
@@ -48,6 +54,7 @@
 | **audit** | メトリクス — **更新版プロトタイプで表示形が変わった**: 旧版の 4 指標 (生成アイデア・アクティブテーマ・アセット登録・アクティブ率) は消え、**月選択 + メンバー × 活動種別 6 種 (テーマ作成 / アイデア発散 / 企画書ドラフト / ナレッジチャット / アセット登録 / コメント) の月次クロス集計表 + CSV 出力 (配線なし)** になった (`ACTIVITY_TYPES`/`ACTIVITY_MONTHS` `:14771`〜、表描画 `:14852-14925`、CSV ボタン `:14840`) | **v3 新設** (`GET /usage-summary`) — **返す指標の形は ST-Q9 で再確定** | **集計対象データ (themes / assets / ideas) が v3 の DB にある**ため v2 では算出できない (§4 D-ST-4) |
 | | アクティビティログ | **v3 新設** (`GET /activity-logs`) | v2 に `activity_logs` テーブルはある (`hassan-v2-backend/db/schema.sql:482-489`) が、**参照する API が無い** (`hassan-v2-backend/router/router.go` に該当ルートなし)。O-6 の回答として v3 が持つ |
 | **plan** (**2026-07-30 更新版プロトタイプでセクション消滅 — 対象外の判断が補強された**) | プラン・使用量 (AI 生成回数等) | **対象外 (先送り)** | **C-12 によりコスト上限を設けない**方針のため、ユーザー向けの使用量制限表示は要件になっていない。課金は v2 でも API 化されていない (社内管理者向け `GET /admin/companies/usage_status/csv` のみ)。O-3 の可視化は**運用者向け**として [../observability.md](../observability.md) §4.2 / §6.1 で扱う (§4 D-ST-5) |
+| **評価基準** (**v4 プロトタイプ (2026-08-23) で新設されたセクション** — `../../prototype/hassan_agent_prototype_v4.html` の `_evalCriteriaState` `:17061`〜) | 評価軸の重み・サブ基準・数値アンカー・判定ランク条件の閲覧/編集 + 変更履歴 | **増分 2 へ先送り** — 増分 1 は評価軸の 3 軸化のみで、重み・アンカー・判定条件の SSOT は `entity/idea` の Go 定数 ([ideas.md](ideas.md) §6.3)。**契約ごとの編集 / 変更履歴 / 評価基準 CRUD の 3 項目が増分 2 の対象** (先送りの決定と増分 2 を見越した制約は [ideas.md](ideas.md) の増分 2 節 = AC-PV-7.1 / AC-PV-7.2) | ユーザー決定 2026-08-23 ([requirements-proto-v4.md](../../../aidlc-docs/inception/productionization/requirements-proto-v4.md) PV-D1 / PV-D4)。評価基準テーブル + settings API + 履歴テーブルを伴い、[schedule-2026q3.md](../../../aidlc-docs/schedule-2026q3.md) §5 の 3 週間に入らない |
 | **help** | 外部リンク | **API 不要** | 静的リンク |
 | **logout** | ログアウト | **API 不要** | **FE のトークン破棄のみ**。JWT は 7 日で失効する ([../auth.md](../auth.md) §6.9 で据え置き確定)。**サーバ側の即時失効は手動ロック API が担う** (同 §6.9) ため、logout 用の revoke エンドポイントは設けない。**ST-Q4 は決着済み** |
 
@@ -63,9 +70,9 @@
 |---|---|---|---|---|---|---|
 | GET | `/settings/notifications` | 通知設定取得 | 個人 | R: `{diverge_completed: "email_and_slack"\|"email"\|"none", weekly_summary: "monday_09"\|"none"}` | 200 | 1 |
 | PUT | `/settings/notifications` | 通知設定更新 | 個人 | B: 上と同じ項目 — R: 同じ | 200 / **400** (列挙外の値) | 1 |
-| GET | `/settings/workspace` | v3 側ワークスペース設定取得 | 契約 | R: `{default_asset_visibility: "private"\|"contract"}` (**`timezone` は ST-Q1 の結論が「使う」の場合のみ追加。`timezone` は ST-Q1 の結論が「使う」の場合のみ追加**) | 200 | 1 |
+| GET | `/settings/workspace` | v3 側ワークスペース設定取得 | 契約 | R: `{default_asset_visibility: "private"\|"contract"}` (**`timezone` は ST-Q1 の結論が「使う」の場合のみ追加**) | 200 | 1 |
 | PUT | `/settings/workspace` | 同 更新 | 契約 | B: 上と同じ項目 — R: 同じ | 200 / **403** (契約内管理者以外) / **400** (列挙外の値) | 1 |
-| GET | `/usage-summary` | 契約の利用量集計 (**月 × メンバー × 活動種別のクロス集計** — ST-Q9=a) | 契約 | Q: `from_month` / `to_month` (`YYYY-MM`) — R: `{months:[...], members:[{account_id, name}], counts:{<action>: {<month>: {<account_id>: n}}}}`。**活動種別の値域は [../observability.md](../observability.md) §4.5 の `action` 定義と揃える** (D-ST-6 と同じ委譲)。集計元は `audit_logs` ([../data-model.md](../data-model.md) §4.10) | 200 / **403** (契約内管理者以外) / **400** (月形式・期間) | 1 |
+| GET | `/usage-summary` | 契約の利用量集計 (**月 × メンバー × 活動種別のクロス集計** — ST-Q9=a) | 契約 | Q: `from_month` / `to_month` (`YYYY-MM`) — R: `{months:[...], members:[{account_id, name}], counts:{<action>: {<month>: {<account_id>: n}}}}`。**活動種別の値域は [../observability.md](../observability.md) §4.5.1 の**「利用状況の集計対象」行の 6 種のみ** (同表の認証・メンバー設定系の action はクロス集計の軸に含めない。D-ST-6 と同じ委譲)。集計元は `audit_logs` ([../data-model.md](../data-model.md) §4.10) | 200 / **403** (契約内管理者以外) / **400** (月形式・期間) | 1 |
 | GET | `/activity-logs` | 契約の活動ログ一覧 | 契約 | Q: `from` / `to` / `account_id` (**自契約のメンバーのみ**) / `limit` / `offset` — R: `{items:[{occurred_at, actor:{account_id, name}, action, target}], total_count}` | 200 / **403** (契約内管理者以外) / **400** (契約外の `account_id`) | 1 |
 
 ### 3.1 契約内管理者限定の 3 本 (A-2 / [README.md](README.md) §2.2 の **R-1**)
