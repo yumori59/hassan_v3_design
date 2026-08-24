@@ -218,6 +218,12 @@ v3 の対応先は [../design/API/plans.md](../design/API/plans.md) (**2026-08-0
 (2026-07-30 のユーザー決定)。**その決定は C-16 より前**であり、下表の「対象外 (要確認)」は
 **C-16 の例外表に未登録**である。
 
+**2026-08-25 の更新**: 上記のうち**契約管理は対象に入った** — `auth.md` §6.2 に
+**例外 2 件目 (社内管理者による契約管理)** が加わり、`auth-accounts.md` §2.4 の②として
+作成・一覧・詳細・更新の 4 本が確定した (**AA-D-26** / questions.md の **Q-10 = A**)。
+したがって §6.2 の「それ以外」は現在**社内向けの利用状況閲覧・CSV 出力**を指す。
+**下表で「対象外 (要確認)」が残るのは社内管理者アカウントの自己管理系と CSV 出力**である。
+
 | v2 エンドポイント | 行 | v2 が搭載していた機能 | v3 の対応 | 状態 |
 |---|---|---|---|---|
 | `POST /admin/signin` | `:195` | 社内管理者のサインイン | auth-accounts.md §2.4 | **引き継ぐ** |
@@ -235,18 +241,23 @@ v3 の対応先は [../design/API/plans.md](../design/API/plans.md) (**2026-08-0
 | `PUT /admin/accounts/password` | `:204` | 管理者のパスワード変更 | 同 | **対象外 (要確認)** |
 | `PUT /admin/accounts/details` | `:209` | 管理者の詳細更新 (ロール等) | 同 | **対象外 (要確認)** |
 | `GET /admin/accounts/auth_roles` | `:210` | 管理者ロールのマスタ一覧 | 同 | **対象外 (要確認)** |
-| `GET /admin/companies` | `:215` | **契約 (会社) の一覧** | 同 | **対象外 (要確認)** |
-| `GET /admin/companies/:contract_id` | `:218` | 契約の個別取得 | 同 | **対象外 (要確認)** |
-| `POST /admin/companies` | `:220` | **契約の新規作成 (顧客のオンボーディング)** | 同 | **対象外 (要確認)** |
-| `PUT /admin/companies` | `:221` | 契約の更新 | 同 | **対象外 (要確認)** |
-| `DELETE /admin/companies/:contract_id` | `:219` | **契約の削除** | 同 | **対象外 (要確認)** |
-| `GET /admin/companies/accounts` | `:216` | 全契約横断のアカウント検索 | 同 (auth-accounts.md R-AA-3 ①が起票済み) | **対象外 (要確認)** |
+| `GET /admin/companies` | `:215` | **契約 (会社) の一覧** | auth-accounts.md §2.4 の `GET /admin/contracts` (**AA-D-26**) | **引き継ぐ** |
+| `GET /admin/companies/:contract_id` | `:218` | 契約の個別取得 | 同 `GET /admin/contracts/{contract_id}` | **引き継ぐ** |
+| `POST /admin/companies` | `:220` | **契約の新規作成 (顧客のオンボーディング)** | 同 `POST /admin/contracts` | **引き継ぐ** |
+| `PUT /admin/companies` | `:221` | 契約の更新 | 同 `PUT /admin/contracts/{contract_id}` | **引き継ぐ** |
+| `DELETE /admin/companies/:contract_id` | `:219` | **契約の削除** | **作らない** (auth-accounts.md §2.7。AA-D-26 — 物理削除は AA-D-13 の「削除せず無効化」と一貫しない。契約の終了は `end_date` で表す) | **例外 (承認済み)** |
+| `GET /admin/companies/accounts` | `:216` | 全契約横断のアカウント検索 | auth-accounts.md §2.4 の `GET /admin/accounts` (R-AA-3 ① の対応先) | **引き継ぐ** |
 | `GET /admin/companies/clients/csv` | `:222` | **顧客一覧の CSV エクスポート** | 同 | **対象外 (要確認)** |
 | `GET /admin/companies/usage_status/csv` | `:223` | **利用状況の CSV エクスポート** | 同 | **対象外 (要確認)** |
 
-> **重要**: `POST /admin/companies` (**契約の新規作成**) が対象外のままだと、
+> ~~**重要**: `POST /admin/companies` (**契約の新規作成**) が対象外のままだと、
 > **v3 単独では新規顧客を受け入れられない** (契約を作る経路が製品内に無い)。
-> 全面切替 (C-15) で v2 が退役する前提と両立しないため、**優先して判断が必要**。
+> 全面切替 (C-15) で v2 が退役する前提と両立しないため、**優先して判断が必要**。~~
+>
+> **→ 2026-08-25 に解決した** (questions.md の **Q-10 = A** / auth-accounts.md の **AA-D-26**)。
+> 契約管理 4 本 (作成・一覧・詳細・更新) が同書 §2.4 の②として本増分の対象に入り、
+> **`auth.md` §6.2 の例外 2 件目**として登録された。**削除だけは引き続き作らない**。
+> **残る「対象外 (要確認)」は社内管理者アカウントの自己管理系と CSV 出力**である。
 
 ---
 

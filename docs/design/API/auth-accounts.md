@@ -32,7 +32,10 @@
 
 **対応する画面** ([../frontend.md](../frontend.md) §11.1 の `[未確定] (Task-3i)` 行がすべて本書に対応する):
 `/login` / `/mfa` / `/mfa/setup` / `/signup` / `/reset-password` / `/settings/members` /
-`/admin/signin` / `/admin/mfa` / `/admin/mfa/setup` / `/admin/accounts` / `/admin/admins` (**11 ルート**)。
+`/admin/signin` / `/admin/mfa` / `/admin/mfa/setup` / `/admin/accounts` / `/admin/admins` /
+**`/admin/contracts` / `/admin/contracts/[contractId]`** (2026-08-25 追加 = AA-D-26)。
+**`/admin/mfa` / `/admin/mfa/setup` は AA-D-22 で消滅済み**なので、実在するのは残りである
+(**実数は [../frontend.md](../frontend.md) §11.1 の表が正** — ここに件数を転記しない = DR-9)。
 **FE の画面仕様は書かない** (同節が SSOT)。本書は API 契約のみを定める。
 
 **API → 画面の逆引き (2026-07-31 に実施。上の 11 ルートは「画面 → API」の方向しか見ていなかった)**:
@@ -44,7 +47,8 @@
 | §2.3.1 の **`GET /accounts/me`** | 全画面のヘッダ・セッション初期化 ([../frontend.md](../frontend.md) §5.2.2) | 既存 |
 | §2.3.1 の **残り 6 本** (`PUT /accounts/me` / `PUT /accounts/me/email` / `PUT /accounts/me/password` / `POST /accounts/me/icon` / `DELETE /accounts/me/icon` / `POST /mfa/totp/reset`) | **`/settings/profile`** | **新設済み** ([../frontend.md](../frontend.md) §11.1。2026-07-31。§5 **R-AA-16** = 実施済み)。**6 本すべてに消費者となる画面がある**ので、本増分から外す条件分岐は消滅した |
 | §2.3.2 の 9 本 + §2.3.3 の 4 本 | `/settings/members` | 既存 (会社情報も同画面) |
-| §2.4 の 5 本 | `/admin/accounts` / `/admin/admins` | 既存。**`/admin/mfa*` は AA-D-22 で消滅** |
+| §2.4 の①アカウント回復・閲覧 (5 本) | `/admin/accounts` / `/admin/admins` | 既存。**`/admin/mfa*` は AA-D-22 で消滅** |
+| §2.4 の②契約管理 (4 本) | **`/admin/contracts` / `/admin/contracts/[contractId]`** | **新設** ([../frontend.md](../frontend.md) §11.1。2026-08-25 = AA-D-26)。**4 本すべてに消費者となる画面がある** |
 
 ### 1.2 v2 の事実 (移植の入力。出典付き)
 
@@ -96,7 +100,7 @@
 
 ---
 
-## 2. エンドポイント一覧 (合計 **33 本**)
+## 2. エンドポイント一覧 (合計 **37 本**)
 
 ### 2.0 表記と共通規約
 
@@ -194,11 +198,16 @@
 > 「設定できるが認証が成立しない」状態になる (BE-10)。**列そのものは v2 と同じ 3 値で持つ**
 > ([../data-model.md](../data-model.md) §4.2 の「列を変えない」) が、**API は 2 値のみ受け付ける**。
 
-### 2.4 系統: 社内管理者認証 (5 本)
+### 2.4 系統: 社内管理者認証 (9 本)
 
 **`X-Admin-Token`**。**社内管理者に MFA を課さない** (2026-08-10 のユーザー決定 = AA-D-22)。
 したがって**この系統に「MFA 未検証で到達可」の区分は無く**、系統は **3 系統**になる ([../auth.md](../auth.md) §6.7)。
-全 5 本が**契約スコープを持たない** (全契約横断が目的)。
+全 9 本が**契約スコープを持たない** (全契約横断が目的)。
+
+**内訳は 2 群**: **①アカウントの回復・閲覧** (上 5 行。[../auth.md](../auth.md) §6.2 の例外 1 件とその付随機構) と
+**②契約管理** (下 4 行。**2026-08-25 の Q-10 = A で追加** = **AA-D-26**)。
+**②は SuperAdmin 限定にしない** — v2 も `AdminAuthRequiredMiddleware` のみで
+SuperAdmin を要求していない (`hassan-v2-backend/router/router.go:214`, `:220`)。
 
 | メソッド | パス | 概要 | 主な入出力 | 固有ステータス | 移植元 |
 |---|---|---|---|---|---|
@@ -207,7 +216,23 @@
 | DELETE | `/admin/accounts/{account_id}/lock` | ロック解除 (**解除専用。ロックは持たない**) | R: `AdminAccountView` | 200 / **404** (不存在) | `同:211`、`hassan-v2-backend/usecase/admin_account/unlock_account_by_admin.go:25-33` |
 | POST | `/admin/accounts/{account_id}/mfa/reset` | **一般アカウント**の TOTP リセット (全契約横断。AA-Q2) | R: なし | 204 / **404** | `同:217`、`hassan-v2-backend/controller/account.go:1046-1082` |
 | GET | `/admin/admins` | 社内管理者の一覧 | Q: `limit` / `offset` — R: `{items: [{id, name, email, admin_auth_role}], total_count}` | 200 | `同:205`、`hassan-v2-backend/controller/admin_account.go:90`。**`mfa_registered` を返さない** (AA-D-22) |
+| POST | `/admin/contracts` | **契約の新規作成** — `contracts` + 代表者 `accounts` (パスワード無し・`is_completed=false`) + `companies` + 招待リンクを**1 トランザクションで作り**、代表者へ招待メールを送る (AA-D-26) | B: `{company_name, num_of_members, start_date, end_date, representative_name, representative_email, division}` — R: `AdminContractView` | **201** / 400 (日付形式・メール形式・`num_of_members` の範囲) / **409** (代表者メールが既存アカウントと重複) | `同:220`、`hassan-v2-backend/usecase/company/create_company_for_admin.go:56-155` |
+| GET | `/admin/contracts` | **契約の一覧** (会社名・代表者・期間・人数つき) | Q: `keyword` (会社名・代表者名・メール) / `limit` / `offset` — R: `{items: AdminContractView[], total_count}` | 200 / 400 | `同:215`、`hassan-v2-backend/controller/company.go:215` |
+| GET | `/admin/contracts/{contract_id}` | 契約の詳細 | R: `AdminContractView` | 200 / **404** (不存在) | `同:218`、`hassan-v2-backend/controller/company.go:244` |
+| PUT | `/admin/contracts/{contract_id}` | 契約の更新 (会社名・人数・期間・代表者・部署) | B: 作成と同じ項目 — R: `AdminContractView` | 200 / 400 / **404** | `同:221`、`hassan-v2-backend/controller/company.go:318` |
 
+> **②契約管理を `/admin/companies` (v2 のパス) にしない理由** (AA-D-26):
+> v3 で作る主体は **`contracts`** であり、`companies` は契約に従属して同一トランザクションで作られる。
+> v2 のパス名は「会社」と「契約」を同一視しており (`DELETE /admin/companies/{contract_id}` のように
+> **パスの語と path param が食い違っている**)、**契約内ユーザー向けの `GET /company` (§2.3.3) とも紛らわしい**。
+> **`companies` 行を契約作成と同時に作るのは AA-D-14 の前提を保つため** — 同判断は
+> 「行が無い = 移行の失敗なので `PUT /company` は upsert せず 404 で観測する」ことを根拠にしており、
+> **行を作る経路を契約作成 1 本に閉じることでこの前提が新規契約でも成り立つ**。
+>
+> **契約の削除 (`同:219`) は引き続き対象外** — v2 は `ON DELETE CASCADE` の物理削除だが、
+> **メンバーですら AA-D-13 で「削除せず無効化」に変えた**ため、契約単位の不可逆な物理削除だけが残るのは
+> 一貫しない。契約の終了は `end_date` の更新で表す。必要になったら AA-D-13 と同じ形 (無効化列) で別途決める。
+>
 > **削除した 3 本と、その根拠** (2026-08-10 = AA-D-22):
 > `POST /admin/mfa/totp/generate` / `POST /admin/mfa/totp/verify` / `POST /admin/admins/{admin_account_id}/mfa/reset`。
 > **いずれも v2 に実体が無い** — [settings.md](settings.md) §5 の移植チェックリストで移植元に挙がっていたのは
@@ -272,6 +297,21 @@
 }
 ```
 
+```json
+// AdminContractView (§2.4 の契約管理 4 本。AA-D-26)
+{
+  "contract_id": "9ab2…", "company_name": "アイリオ株式会社",
+  "num_of_members": 20, "start_date": "2026-09-01", "end_date": "2027-08-31",
+  "representative_name": "森下 太郎", "representative_email": "taro@example.com",
+  "division": "経営企画部",
+  "active_account_count": 7,
+  "created_at": "2026-04-01T00:00:00Z", "updated_at": "2026-07-30T09:00:00Z"
+}
+// ⚠️ `language_type` を返さない (AA-Q4 = 日本語のみ。列は `DEFAULT 'ja'` のまま触らない)
+// `active_account_count` は `num_of_members` (上限) に対する現在の在籍数で、**一覧・詳細でのみ返す**
+// (作成直後は代表者 1 名)。上限判定そのものは `POST /accounts` 側が持つ (§2.3.2 の 409)
+```
+
 **`SignInResult` が [../frontend.md](../frontend.md) §5.2.2 の是正要求 (§16.2-6) への回答である** —
 同節が「セッションに載せる属性の出所はサインイン応答の 1 経路」とし、**`role` が v2 の応答に無い**ことを
 Task-3i への是正要求として出している。本書は `account.auth_role` / `mfa.required_type` /
@@ -320,8 +360,9 @@ Task-3i への是正要求として出している。本書は `account.auth_rol
 |---|---|---|
 | `GET /companies/genai` (`hassan-v2-backend/router/router.go:94`) | **本書の対象外** | 生成 AI で会社情報を作る経路であり、**Dify 廃止 (C-9) の影響を受ける**。移行先の判定は [../llm-migration.md](../llm-migration.md) が担う ([settings.md](settings.md) §5 の注と同じ扱い)。**移植する場合も LLM 呼び出しは `gateway/` 経由が必須** (O-2) |
 | 社内管理者アカウントの作成・削除・権限変更 API (`同:206-209`) | **対象外** | [../auth.md](../auth.md) §6.2 が「API を作らず移行スクリプトで投入」と確定済み。**帰結として `register_admin_password_requests` は v3 で読み手も書き手も無い** → §5 の R-AA-5 |
-| 社内管理者向けの会社・利用状況管理 (`同:215-223`) | **対象外** | 同 §6.2 が本増分の対象外と確定 |
-| 契約の作成・削除 (`同:219-221`) | **対象外** | 同上。契約は移行スクリプトで投入する ([../data-model.md](../data-model.md) §6.5) |
+| 社内管理者向けの利用状況・CSV 出力 (`同:222-223`) | **対象外** | [../auth.md](../auth.md) §6.2 が本増分の対象外と確定。利用量の可視化は**運用者向け**として [../observability.md](../observability.md) §4.2 / §6.1 が扱う ([settings.md](settings.md) §4 の D-ST-5 と同じ扱い) |
+| **契約の削除 (`同:219`)** | **対象外** | v2 は `ON DELETE CASCADE` の物理削除だが、**メンバーですら AA-D-13 で「削除せず無効化」に変えた**ため、契約単位の不可逆な物理削除だけが残るのは一貫しない (AA-D-26)。契約の終了は `PUT /admin/contracts/{contract_id}` の `end_date` で表す |
+| ~~契約の作成・一覧・詳細・更新 (`同:215`, `:218`, `:220-221`)~~ | **§2.4 の②として対象に入った** (2026-08-25) | **旧記述は「対象外。契約は移行スクリプトで投入する」だった** — 根拠は §6.3 の仮定 2 (作成経路は移行スクリプトのみ) であり、同仮定が明記していた後続条件「**v3 で新規契約を獲得する運用が必要になると本増分の対象に戻る**」が発火した (Q-10 = A。**AA-D-26**)。**既存契約の移送 ([../data-model.md](../data-model.md) §6.4 / §6.5) は引き続き必要**で、新規作成 API とは並存する |
 | `POST /accounts/{account_id}` 相当の「管理者がパスワードを直接設定する」経路 | **作らない** | v2 に無い (`CreateFullAccount` は社内管理者経路の DTO のみ — `hassan-v2-backend/controller/dto/account.go:18-27`)。管理者が他人のパスワードを知る経路を作らない |
 | ログアウト (revoke) API | **作らない** | [settings.md](settings.md) §2 で決着済み (ST-Q4)。FE のトークン破棄 + 手動ロックが担う |
 | 言語切替 (`language_type` の API 露出) | **作らない** | v2 は Host で日英を切り替える (V2-F11) が、**v3 のホスト名は環境ごとに 1 つ** ([../infrastructure.md](../infrastructure.md) INF-J)。メールは日本語のみ。**仮定として §6 に記載** |
@@ -351,7 +392,7 @@ Task-3i への是正要求として出している。本書は `account.auth_rol
 | **AA-D-11** | **ロック / 解除の表現** | **`POST /accounts/{account_id}/lock` / `DELETE /accounts/{account_id}/lock`** (契約内管理者)、**`DELETE /admin/accounts/{account_id}/lock`** (社内管理者・解除のみ)。テナント検証は Repository のクエリ条件 (`WHERE id = $1 AND contract_id = $2`) | (a) v2 の `POST /accounts/unlock` + ボディ (`hassan-v2-backend/controller/account.go:895-916`): AA-D-3 の理由。(b) `PATCH /accounts/{account_id}` の `is_locked` フィールドで表す: 一般更新と権限・ガードが違う操作が同じエンドポイントに同居し、**監査記録の粒度も落ちる** (O-6)。加えて v2 に `PATCH` の前例が無い ([themes.md](themes.md) D-TH-8 と同じ理由)。(c) 社内管理者側にもロックを持たせる: **回復手段がロックアウト手段を兼ねる** ([../auth.md](../auth.md) §6.9 の禁止事項) |
 | **AA-D-12** | **不変条件ガードのステータス (R-3)** | **403 に統一する** — 対象は ①最後の未ロック契約内管理者のロック ②自分自身のロック ③最後の契約内管理者の降格 ④最後の契約内管理者の削除 ⑤自分自身の削除 ⑥SuperAdmin が自分の MFA をリセット。**ロックのカウントは `AND last_locked_at IS NULL` を含める** | (a) v2 の 400 (`CannotDeleteLastAdmin` / `CannotDemoteLastAdmin` — `hassan-v2-backend/controller/account.go:621-624`, `:473-476`): [../frontend.md](../frontend.md) §11.1 が**この 2 ケースを「403 = 正常系」として操作前無効化 + 理由表示**で扱うと既に決めており、コードが分かれると FE が 2 系統の分岐を持つ。(b) 409: 意味は近いが [../auth.md](../auth.md) §6.9 が**ロックのガードを 403 と確定済み**で、同種のガードが 2 コードに分かれる。**代償**: [README.md](README.md) §2.5 の「403 は R-1 / R-2 の 2 系統のみ」に**第 3 系統 (R-3) が増える** → §5 の R-AA-2a (auth.md §6.6) / R-AA-2b (README.md §2.5。実施済み) |
 | **AA-D-13** | **メンバー削除の既定挙動** | **削除せず無効化のみ** (2026-08-10 のユーザー回答 = DM-Q2)。`DELETE /accounts/{account_id}` は **204 の同期 API**とし、`accounts` の行を物理削除しない。**所有物の移管を行わない**ため、非同期ジョブ・`account_deletions` テーブル・`GET /account-deletions/{deletion_id}` はいずれも**作らない** | (a) **202 + 非同期ジョブで所有物を移管してから物理削除** (2026-07-31 までの本書の設計): [../data-model.md](../data-model.md) §3.4.3 の移管方式を要し、対象は最大 29 テーブル・ジョブの状態テーブル・冪等キー・heartbeat 回収が付随する。**無効化のみなら所有物の帰属が変わらない**ため、これらがすべて不要になる。(b) v2 のまま CASCADE で消す: 同 DM-6 が却下済み (契約の資産が消える)。**帰結**: §5 の **R-AA-27** (`accounts` に無効化列) を出し、**R-AA-4** (`account_deletions`) を取り下げる |
-| **AA-D-14** | **会社情報の作成と更新** | **`PUT /company` の 1 本にし、行が無ければ 404 を返す** (upsert しない) | (a) v2 の `POST` / `PUT` 2 本 (`hassan-v2-backend/router/router.go:95-96`): クライアントが「行があるか」を知って呼び分ける必要がある (v2 の `GET /companies` は行が無いとき 404 — `hassan-v2-backend/controller/company.go:80-83`)。(b) **upsert にする (起草時の採用案。2026-07-31 のレビュー S-6 で撤回)**: 採用理由が「クライアントが呼び分けなくてよい」だったが、**同じ理由づけの中で「契約と会社は移行スクリプトで同時に投入するため行が無い状態は通常発生しない」と書いており** ([../data-model.md](../data-model.md) §6.5。新規契約の作成経路も移行スクリプトのみ = §6.3-2 の仮定)、**upsert が救うケースが存在しない**。加えて `GET /company` は 404 を返すため、**GET は「無い」と言うのに PUT は黙って作る**非対称が残る。**行が無い = 移行の失敗**なので、静かに作らず **404 として観測できる方がよい** (静かなデータ生成で移行漏れを隠さない = BE-5 の型)。**帰結**: §2.3.3 の `PUT /company` に 404 を追加し、§2.6 の 17 行目を「POST を作らない」に読み替える |
+| **AA-D-14** | **会社情報の作成と更新** | **`PUT /company` の 1 本にし、行が無ければ 404 を返す** (upsert しない) | (a) v2 の `POST` / `PUT` 2 本 (`hassan-v2-backend/router/router.go:95-96`): クライアントが「行があるか」を知って呼び分ける必要がある (v2 の `GET /companies` は行が無いとき 404 — `hassan-v2-backend/controller/company.go:80-83`)。(b) **upsert にする (起草時の採用案。2026-07-31 のレビュー S-6 で撤回)**: 採用理由が「クライアントが呼び分けなくてよい」だったが、**同じ理由づけの中で「契約と会社は移行スクリプトで同時に投入するため行が無い状態は通常発生しない」と書いており** ([../data-model.md](../data-model.md) §6.5。新規契約の作成経路も移行スクリプトのみ = §6.3-2 の仮定)、**upsert が救うケースが存在しない**。加えて `GET /company` は 404 を返すため、**GET は「無い」と言うのに PUT は黙って作る**非対称が残る。**行が無い = 移行の失敗**なので、静かに作らず **404 として観測できる方がよい** (静かなデータ生成で移行漏れを隠さない = BE-5 の型)。**帰結**: §2.3.3 の `PUT /company` に 404 を追加し、§2.6 の 17 行目を「POST を作らない」に読み替える。**2026-08-25 の補足 (AA-D-26)**: §6.3 の仮定 2 が撤回され `POST /admin/contracts` が新設されたが、**本判断は変わらない** — 同エンドポイントが `companies` 行を**契約と同一トランザクションで作る**ため、「行が無い = 作成経路の失敗」という前提は新規契約でも成り立つ (**`companies` 行を作る経路は契約作成 1 本に閉じたまま**であり、`PUT /company` を upsert にする理由は依然として無い) |
 | **AA-D-15** | **契約情報から `sharing_settings` を落とす** | `GET /contract` は `sharing_settings` を返さない。代わりに `member_count` (在籍数) を返す | (a) v2 の応答をそのまま維持 (`hassan-v2-backend/controller/dto/contract.go:31-42`): **v3 は契約 × カテゴリの共有スイッチを持たない** ([settings.md](settings.md) D-ST-3 / [README.md](README.md) D-API-8')。返しても読み手がおらず、**「設定できるように見えて効かない」** 形になる (BE-10)。**`member_count` を足す理由**: `POST /accounts` が契約の人数上限で 409 を返す (V2-F4) ため、**残枠を画面に出せないと管理者は上限に当たるまで分からない** |
 | **AA-D-16** | **アイコンの保存と配布** | **非公開バケット + 署名付き URL**。応答は `icon_url` + `icon_url_expires_at` ([README.md](README.md) D-API-14') | (a) v2 方式 (`ACL: ObjectCannedACLPublicRead` + 恒久 URL — `hassan-v2-backend/aws/s3.go:46`, `:58`): D-API-14' が明示的に禁止している。**アイコンだけ例外にすると「公開バケットが 1 つ存在する」状態**になり、次の実装者が置き場所を判断する余地が生まれる。(b) `GET /accounts/{account_id}/icon` で 302 リダイレクトを返す: エンドポイントが 1 本増え、一覧の N 行に対して N 回の往復が発生する。**代償**: 一覧 1 回で N 件の署名を生成する (HMAC のみでネットワーク往復は無い) |
 | **AA-D-21** | **actor / contract が確定しない認証イベント (未登録メールへのサインイン失敗など) をどこに記録するか**。**経緯**: 起草時点の [../data-model.md](../data-model.md) §4.10 は `audit_logs.actor_id uuid` / `contract_id NOT NULL` を維持すると書いており、**そのスキーマでは `signin_failed` が書けない** (BE-10) ことを本書が指摘した。**同節は 2026-07-31 に改訂され、本判断と同じ方向で NULL 可 + `CHECK` を採用済み** (同 §4.10 の「主体も対象契約も確定しない認証イベントだけは NULL を許す」)。**本行は改訂後のスキーマに合わせた確定版である** | **`audit_logs` に書けるようにする** (**[../data-model.md](../data-model.md) §4.10 の採用形に合わせる**。スキーマの SSOT は同節): ①**`actor_type` に 3 番目の値 `unauthenticated` を追加**し、**`actor_id` / `contract_id` を NULL 可**にする。**NULL を許す条件は `action` ではなく `actor_type` を基準に `CHECK` で表明する** — `CHECK ((actor_type = 'unauthenticated' AND actor_id IS NULL AND contract_id IS NULL) OR (actor_type <> 'unauthenticated' AND actor_id IS NOT NULL AND contract_id IS NOT NULL))` (同 §4.10 が採用した形。**`action` 基準にすると `action` の値域の追加ごとに `CHECK` の書き換えが必要**になり、値域を Go 定数 + CI 照合で持つ決定 ([../observability.md](../observability.md) §4.5.1) と噛み合わない) ②**アカウントが解決できた失敗は `actor_type = 'account'` / `'admin_account'` として両列を埋める**。`actor_type = 'unauthenticated'` になるのは未登録メール・存在しない管理者アカウントへの試行のみ ③**メールアドレスは平文で保存せず `detail.email_hash` に入れる** — **HMAC-SHA256 (サーバ側 pepper `AUDIT_EMAIL_HMAC_KEY`)**。同一アドレスへの試行を突き合わせられ、かつ辞書攻撃で復元されない (**pepper 無しの SHA-256 は既知アドレスの総当たりで復元できるため採らない** — メールアドレスは低エントロピーで候補が有限であり、ハッシュだけでは「監査ログを見られてもアドレスが分からない」が成立しない。**2026-07-31 ユーザー決定**)。pepper は §4 の D-5 で棚卸し対象に加える。**[../observability.md](../observability.md) §4.5.2 は既に HMAC + pepper で確定済み**だが、**[../data-model.md](../data-model.md) §4.10 の `detail` の例が pepper 無しの SHA-256 のまま**であり、**是正は §5 R-AA-19** (同節自身が「値域と記録項目の SSOT は observability.md §4.5」と書いているため、参照先と例が矛盾している) | (a) **認証失敗を `audit_logs` に書かず、構造化ログ + レート制限カウンタだけで観測する**: **v2 でできていた `signin_failed` / `mfa_verify_failed` (V2-F17) が監査記録から落ちる** — [../auth.md](../auth.md) §9.3 Q-A2 の「v2 でできていたことは満たす」に対する明示の後退になる。加えて §6.11-3 が名指しで防ぐと宣言した**パスワードスプレー (多数アカウントに 1 回ずつ) の検知は「失敗の分布」でしか行えず**、保持期間の短いログでは月次の突き合わせができない。(b) **認証イベント専用の append-only テーブルを新設する**: 監査記録が 2 本になり、[../data-model.md](../data-model.md) DM-15 が却下した v2 の 2 本構成 (`activity_logs` + `event_logs`) に戻る。`GET /usage-summary` の集計も 2 本の UNION になる。(c) **`actor_type` に値を足さず NULL だけで表現する** (**起草時の採用案。2026-07-31 に撤回し、値を足す形へ転じた**): 起草時の却下理由は「値を増やすと『`actor_type` ごとに `actor_id` が何を指すか』が 3 通りになる」だったが、**[../data-model.md](../data-model.md) §4.10 が `unauthenticated` を追加する形を採用済み**であり、**そちらの方が `CHECK` の条件を `action` の値域から切り離せる** (①の理由)。3 通りになる懸念は「`unauthenticated` のとき `actor_id` は常に NULL」という 1 行の規則で閉じ、`CHECK` がそれを機械的に強制する。**スキーマの SSOT は data-model 側**なので本書が独自案を維持しない (ルート `CLAUDE.md`「判断が割れたら既存の規約・SSOT に寄せる」)。(d) **`detail` にメールアドレスを平文で入れる**: v2 が `activity_logs.account_email` で採った方式 (V2-F17) だが、**監査ログ閲覧権限が「どのアドレスが本製品を使っているか」の名簿になる**。AA-D-4 (秘密を ALB ログに残さない) と同じ論法を DB にも適用する。**代償 (採用案の)**: ①[../data-model.md](../data-model.md) §4.10 の「`contract_id` は NOT NULL を維持できる」という決定の**明示の反転**になる (**同節が 2026-07-31 に反転済み。反転理由も同節に記録された**) ②`(contract_id, occurred_at DESC)` インデックスに NULL 行が集まる。**補償の形は data-model §4.10 の採用形に従う** = `(contract_id, …)` は部分化せず、認証イベント用に **`(action, occurred_at DESC) WHERE actor_type = 'unauthenticated'`** を持つ。**本書が起草時に要求した「`(contract_id, …)` を `WHERE contract_id IS NOT NULL` で部分化する」は採らない** — 認証イベントを引く経路が専用の部分インデックスに閉じるため、`(contract_id, …)` 側の NULL 行は読まれず、部分化の利得が「インデックスサイズの節約」だけになる (SSOT 側の形を変える理由に足りない) |
@@ -359,6 +400,7 @@ Task-3i への是正要求として出している。本書は `account.auth_rol
 | **AA-D-23** | **監査ログの拡張** | **行わない** (2026-08-10 のユーザー決定)。§3.7 の記録対象を **v2 に前例のある事象のみ**に限定する。v3 独自の対象 (`POST /admin/signin` の成否 / ロック・解除 / メンバー作成・権限変更・削除 / 招待の発行・受諾 / リセットの実行・パスワード / メール変更 / `PUT /companies/me/mfa`) は**記録しない**。**2026-08-14 の AA-D-24 により、本行の「v2 に前例が無い」という前提の一部が誤りだったと判明し訂正された — 本行はその訂正前の記録として残す** | (a) 10 行すべてを記録する (2026-07-31 までの本書の設計): [../observability.md](../observability.md) §4.5.1 の値域に 7 値を追加する必要があり、各 UseCase への `audit_logs` 書き込みが実装量として全 issue に薄く広がる。**失うもの**: ①O-7 のアラート入力「社内管理者のサインイン失敗」が成立しない (§5 R-AA-26) ②不可逆操作の実行者が追跡できない。**再開の入口は §6.1 の AA-Q14** |
 | **AA-D-24** | **AA-D-23 の前提の訂正 (v2 前例の再確認)** | **メンバー作成・メール変更・パスワード変更・会社 MFA 設定変更の 4 件を記録対象に復帰させる** (2026-08-14 のユーザー決定。実装リポ issue #28 の調査で発覚)。**AA-D-23 は「メンバー作成・権限変更・削除 / パスワード・メール変更 / `PUT /companies/me/mfa` はいずれも v2 に前例が無い」と述べたが、`hassan-v2-backend/auth/event_mapper.go:45-75` を直接確認すると次の 6 件に明確な前例がある**: `POST /accounts` → `member_create` / `PUT /accounts/admin` → `member_update_by_admin` / `DELETE /accounts/:id` → `member_delete_by_admin` / `PUT /accounts/email` → `account_update_email` / `PUT /accounts/password` → `account_update_password` / `PUT /companies/mfa` → `contract_update_mfa`。**このうち復帰させるのは 4 件のみ** (`member_create` / `account_update_email` / `account_update_password` / `contract_update_mfa`)。**`member_update_by_admin` / `member_delete_by_admin` は前例があることを認めつつ、ユーザーが引き続きスコープを広げない判断をした** (事実誤認ではなく意図的な除外として維持)。**`POST /admin/signin` の成否・ロック・解除・招待の発行・受諾・リセットの実行は v2 に前例が無いという AA-D-23 の判定は変更なし** (本書 §3.7 直後の 2026-08-10 注記のうち、この 3 系統に対応する記述は妥当だった) | (a) AA-D-23 を全面的に撤回し 10 行構成へ戻す: 誤認は 6 件中 4 件の復帰で足り、`POST /admin/signin` 等の残り 6 対象は AA-D-23 の判断 (前例なし・スコープを広げない) が妥当なままなので過剰な巻き戻し。(b) 6 件全てを復帰させる: `member_update_by_admin` / `member_delete_by_admin` は前例があるが、ユーザーが「事実誤認の訂正」と「スコープ拡大」を区別して後者は採らないと判断した — 前例の有無だけで機械的に復帰させると判断の余地を奪う |
 | **AA-D-25** | **AA-D-2 の適用範囲の訂正 (`/me` を付けるのは誰の視点か)** | **契約・会社は `/me` を付けない**。`/contracts/me` → **`/contract`**、`/companies/me` → **`/company`**、`/companies/me/mfa` → **`/company/mfa`** (2026-08-15。実装リポ issue #17 の着手前レビューでユーザーが指摘し確定)。**`/accounts/me` 系はそのまま** (対象が変わらない) | AA-D-2 は「自分自身を指す操作は `/me` に集める」を**認証ユーザー個人**の意味で意図していたが、§2.3.3 の文面がそれを「認証ユーザーが所属する契約・会社」にまで拡張して適用していた。**契約・会社はアカウント個人のレコードではなく、同一契約に属する全ユーザーで共有される 1 レコード**であり (`PUT /company/mfa` は契約内の全ユーザーに一律で効く — §2.3.3 の概要列)、`/me` が示唆する「自分専用」という意味と食い違う。(a) 現状維持 (`/contracts/me` 等): **意味の食い違いを残したまま**。実装者・利用者が「`/me` = 個人設定」と誤読し、`PUT /companies/me/mfa` を「自分のMFA設定」と取り違える実害がある (実装リポでの質疑で実際に発生)。(b) `/contracts/mine` 等 `me` を保ちつつ語を変える: 「誰の視点か」という本質的な曖昧さ (個人か所属先か) を解消しない。(c) `{contract_id}` を path param にして明示する: **契約・会社は認証コンテキストから一意に解決でき、クライアントが ID を知る必要も渡す必要も無い** (AA-D-3 が `account_id` に要求する path param の理由 — 「越境を防ぐため対象を明示させる」— は、そもそも他契約を指定できない本エンドポイントには当てはまらない)。**ID 不要の単一リソースは単数形パスで表す**方が、`/accounts/{account_id}` (他者操作) との対比でも一貫する |
+| **AA-D-26** | **社内管理者向けの契約管理を本増分に含める** | **`POST` / `GET /admin/contracts` と `GET` / `PUT /admin/contracts/{contract_id}` の 4 本を §2.4 に追加する** (2026-08-25 の Q-10 = A)。**削除は作らない** (§2.7)。作成は `contracts` + 代表者 `accounts` + `companies` + 招待リンクを**1 トランザクション**で作り、代表者へ招待メールを送る。**権限は `Admin` でも可** (SuperAdmin 限定にしない)。**`language_type` は API に出さない** (AA-Q4)。**監査ログの記録対象に含める** (§3.7。AA-D-23 / AA-D-24 のスコープ限定に対する明示の例外) | **本判断は §6.3 の仮定 2 が明記していた後続条件の発火である** — 同仮定は「作成経路は移行スクリプトのみ」と置きつつ「**v3 で新規契約を獲得する運用が必要になると本増分の対象に戻る**」と書いており、2026-08-25 にオーナーが「新規契約を作る手段は必要」と判断した。(a) **移行スクリプト / 手動 SQL のまま運用する (旧採用案)**: 契約獲得のたびに人間が本番 DB へ直接 INSERT することになり、**承認機構 (H-2) の外側に書き込み経路が常設される** — 実装リポの `.claude/rules/04-human-checkpoints.md` §3.3 が「エージェントに prod の DB 接続情報を配らない」を担保の中心に置いているのと噛み合わない。(b) **作成 1 本だけ追加する**: 作った契約を製品内で確認できず、投入の成否を本番 DB を見に行って確かめることになる (**BE-10 = 読む側と書く側を対で設計する**と同型の穴)。v2 も `GET /admin/companies` を持っていた (`hassan-v2-backend/router/router.go:215`)。(c) **v2 のパス `/admin/companies` を踏襲する**: パスの語と path param が食い違い (`DELETE /admin/companies/{contract_id}`)、契約内ユーザー向けの `GET /company` とも紛らわしい。**認証系統の数は 3 のまま変わらない** — 増えるのは既存の `X-Admin-Token` 系統の route だけで、[../auth.md](../auth.md) §6.7 の系統宣言は触らない |
 
 ### 3.1.1 401 / 400 の分類と `CodedError` の値域 (AA-D-9 / AA-D-17 / AA-D-18)
 
@@ -669,6 +711,7 @@ V2-F5) で決まるため、**E2E 専用契約の `companies.mfa_type = 'none'` 
 | `PUT /accounts/me/email` | 実行 | `account_update_email` (`hassan-v2-backend/auth/event_mapper.go:73`)。**2026-08-14 の AA-D-24 で復帰** |
 | `PUT /accounts/me/password` | 実行 | `account_update_password` (`hassan-v2-backend/auth/event_mapper.go:74`)。**2026-08-14 の AA-D-24 で復帰** |
 | `PUT /company/mfa` | 実行 | `contract_update_mfa` (`hassan-v2-backend/auth/event_mapper.go:67`)。**2026-08-14 の AA-D-24 で復帰**。**パスは 2026-08-15 の AA-D-25 で `/companies/me/mfa` から改名** |
+| `POST /admin/contracts` (契約の新規作成) | 実行 (actor = `admin_accounts.id`。`actor_type = 'admin_account'` / `contract_id` = 作成した契約) | **v2 に前例が無い** (`event_mapper.go` は社内管理者経路を通らない) — **AA-D-23 / AA-D-24 のスコープ限定に対する明示の例外として 2026-08-25 に追加した** (AA-D-26)。**契約作成は不可逆かつ課金に直結する操作**であり、実行者が追えないことの代償が「v2 相当に留める」原則より大きい。値域 `contract_create` は [../observability.md](../observability.md) §4.5.1 に登録する |
 
 > **2026-08-10 (AA-D-23): 監査ログを v2 相当に留め、v3 での拡張を行わない** (ユーザー決定)。
 > **⚠ 2026-08-14 の AA-D-24 で当時の削除対象のうち 4 件が復帰した** (上表参照) —
@@ -872,9 +915,14 @@ v2 は招待メール送信失敗時にリンクを保存しないまま 500 を
 
 1. **v3 の FE は [../frontend.md](../frontend.md) §11.1 のルート構成を採る**と仮定した。
    `/mfa` と `/mfa/setup` が分かれていることが `mfa.registered` を応答に含める根拠 (§3.2)
-2. **契約 (`contracts`) と会社 (`companies`) の作成経路は移行スクリプトのみ**と仮定した
-   ([../data-model.md](../data-model.md) §6.5)。**v3 で新規契約を獲得する運用が必要になると、
-   社内管理者向けの契約作成 API (v2 の `POST /admin/companies`) が本増分の対象に戻る**
+2. ~~**契約 (`contracts`) と会社 (`companies`) の作成経路は移行スクリプトのみ**と仮定した~~
+   **→ 2026-08-25 に撤回した (Q-10 = A / AA-D-26)**。同仮定が明記していた後続条件
+   「**v3 で新規契約を獲得する運用が必要になると、社内管理者向けの契約作成 API が本増分の対象に戻る**」が
+   発火し、**§2.4 の②契約管理 4 本が対象に入った**。
+   **移行スクリプトが不要になったわけではない** — 既存契約の移送
+   ([../data-model.md](../data-model.md) §6.4 / §6.5) は引き続き必要で、**新規作成 API と並存する**。
+   両経路が `contracts` を作るため、**代表者メールの重複チェックを同じ規則にする**
+   (揃えないと同じメールのアカウントが二重に作られる = BE-11 と同型。要求は同 §6.4 の項目 4)
 3. **メンバーの契約間移動は無い**と仮定した (同 §3.4.1-1)。あると `PUT /accounts/{account_id}` に
    `contract_id` の変更が入り、非正規化した `contract_id` の再計算が必要になる
 

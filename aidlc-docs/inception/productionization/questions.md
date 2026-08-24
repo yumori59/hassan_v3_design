@@ -396,4 +396,63 @@ v3 側で再実装する対象になるため:
 
 ---
 
+## Q-10. 新規契約の作成経路 — 社内管理者向けの契約管理 API を本増分に含めるか (2026-08-25 追加)
+
+**起票の経緯**: [auth-accounts.md](../../../docs/design/API/auth-accounts.md) §6.3 の仮定 2 は
+「**契約 (`contracts`) と会社 (`companies`) の作成経路は移行スクリプトのみ**」と置き、同 §2.7 で
+「契約の作成・削除 (v2 `hassan-v2-backend/router/router.go:219-221`) は**対象外**」と確定していた。
+同じ仮定 2 が「**v3 で新規契約を獲得する運用が必要になると、社内管理者向けの契約作成 API
+(v2 の `POST /admin/companies`) が本増分の対象に戻る**」と後続条件を明記している。
+**2026-08-25 にオーナーが「新規契約を作る手段は必要」と判断し、この後続条件が発火した**。
+
+**実装リポ hassan-v3 の現状** (2026-08-25 実測): `backend/db/queries/account/contract.sql` と
+`company.sql` は Get / Update のみで **INSERT が 1 本も無い**。`backend/common/auth/whitelist.go` に
+**`TierAdmin` の route が 0 本** (`POST /admin/signin` は公開系統) で、ミドルウェア `RequireAdmin` と
+`admin_accounts` テーブルは実装済みだが**系統だけが未使用**。移行スクリプト
+(`backend/cmd/migrate-from-v2`) も未実装のため、**製品内にも運用手順にも契約を作る手段が存在しない**。
+
+- **A. 本増分に含める — 契約管理 4 本 (作成・一覧・詳細・更新) を `X-Admin-Token` 系統に追加する**
+- **B. 含めない — 新規契約も移行スクリプト / 手動 SQL で投入する運用を続ける**
+- **C. 最小 — 作成 1 本だけ追加する**
+- D. Other
+
+> 推奨: **A**。
+> **B の却下理由**: 契約獲得のたびに人間が ECS RunTask か手動 SQL で本番 DB に INSERT することになる。
+> 実装リポの `.claude/rules/04-human-checkpoints.md` §3.3 は「エージェントに prod の DB 接続情報を配らない」を
+> 担保の中心に置いているが、**運用手順の側が恒常的に本番 DB への直接書き込みを要求する**形になり、
+> 承認機構 (H-2) の外側に書き込み経路が常設される。
+> **C の却下理由**: 作成だけでは**作った契約を製品内で確認する手段が無い**。一覧が無いと投入の成否を
+> 本番 DB を見に行って確かめることになり、`feedback_review_patterns.md` の **BE-10 (読む側と書く側を
+> 対で設計する)** と同型の穴になる。v2 も `GET /admin/companies` を持っていた
+> (`hassan-v2-backend/router/router.go:215`)。
+
+[Answer]:(2026-08-25) **A**。下表の 9 点もすべて推奨どおりで確定。
+
+### A の付随決定 (回答と同時に確定した 9 点)
+
+| # | 決めたこと | 確定 | 根拠 / 却下案 |
+|---|---|---|---|
+| 1 | エンドポイントの範囲 | **`POST` / `GET /admin/contracts`・`GET` / `PUT /admin/contracts/{contract_id}`** | v2 の `/admin/companies` を踏襲しない — v3 で作る主体は `contracts` で `companies` は従属して作られる (下の 3)。v2 のパス名は会社と契約を同一視しており、契約内ユーザー向けの `GET /company` と紛らわしい |
+| 2 | 削除を持つか | **持たない** | v2 は `ON DELETE CASCADE` の物理削除 (`hassan-v2-backend/controller/contract.go:64`)。**メンバーですら AA-D-13 で「削除せず無効化」に変えた**ため、契約単位の不可逆な物理削除だけが残るのは一貫しない。契約終了は `end_date` の更新で表す |
+| 3 | `companies` 行を同時に作るか | **同一トランザクションで作る** (会社名を作成の必須項目にする) | 作らないと `PUT /company` が 404 のままで会社情報を保存できない。**AA-D-14 が upsert を却下した根拠 (行が無い = 移行の失敗として観測する) は変えない** — 行を作るのは契約作成 API だけ、という形を維持する |
+| 4 | 代表者への招待メール | **送る** (v2 と同じ) | ただしリンクの形は v2 と別物 — v3 は平文を保存せず `token_hash` で引き、参照は `POST /accounts/signup-links/lookup` (AA-D-4 / AA-D-5)。実装リポの既存部品 (`usecase/account/create_signup_link.go` / `sign_up.go`) を流用できる |
+| 5 | `signup_links.contract_id` | **作成した契約の ID をそのまま入れる** | DM-A4 = B で `NOT NULL` + FK が確定済み。同一トランザクション内なので解決できる |
+| 6 | 権限 | **`Admin` でも可** (SuperAdmin 限定にしない) | v2 も SuperAdmin を要求していない (`hassan-v2-backend/router/router.go:214`, `:220`)。[auth.md](../../../docs/design/auth.md) §9.3 Q-A2 の「新しいロール差を作らない」に従う |
+| 7 | `language_type` の露出 | **出さない** | AA-Q4 の仮定 (日本語のみ)。`contracts.language_type` は `DEFAULT 'ja'` を持つので **DDL 変更は不要** |
+| 8 | 監査ログ | **記録対象に含める** (配線は実装リポ issue #34 に申し送る) | 契約作成は不可逆かつ課金に直結し、実行者が追えないのは望ましくない。**AA-D-23 / AA-D-24 のスコープ限定に対する明示の例外**として決めた。`audit_logs` 自体が #34 で未着手のため書き込み先が無く、値域の追加のみ先行する |
+| 9 | 移行スクリプトとの共存 | **代表者メールの重複チェックを両経路で同じ規則にする** | `contracts` を作る経路が 2 つになる。規則を揃えないと移行と新規作成が同じメールのアカウントを二重に作る (BE-11 と同型) |
+
+### 回答の含意 (2026-08-25 追記)
+
+- **認証系統の数は 3 のまま変わらない** — `X-Admin-Token` 系統は AA-D-22 後も存在し、
+  [auth.md](../../../docs/design/auth.md) §6.7 の宣言も実装リポの `TierAdmin` も既にある。**増えるのはその系統の route だけ**
+- **DDL 変更は発生しない** — `contracts` / `companies` / `signup_links` / `accounts` は v2 と同型で投入済み。
+  実装リポの人間承認点 H-2 (マイグレーション適用) には該当しない
+- **[frontend.md](../../../docs/design/frontend.md) §11.1 の `(admin)` グループに画面が増える** — 従来は
+  `/admin/signin` `/admin/accounts` `/admin/admins` だけで、契約を作る画面が無かった
+- **移行スクリプトは不要にならない** — 既存契約の移送 ([data-model.md](../../../docs/design/data-model.md) §6.4 / §6.5) は引き続き必要で、
+  新規作成 API はそれと**並存**する (上の 9 が両経路の重複防止を要求する理由)
+
+---
+
 > 未回答のまま設計を進める場合、requirements.md に「既定採用 (推奨案)」と明記する。
