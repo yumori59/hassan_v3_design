@@ -313,7 +313,7 @@ db/
 
 ### 4.1 テーブル一覧
 
-#### 4.1.1 機能テーブル (42 件。**所有者列は全件必須**)
+#### 4.1.1 機能テーブル (43 件。**所有者列は全件必須**)
 
 「境界」= 個人 (`account_id` + `contract_id` を持つ) / 契約 (`contract_id` のみ)。
 「増分」= 1 (第 1 リリース) / 2 ([API/README.md](API/README.md) D-API-8' の増分 2) / 併用 (v2 併用期間中の移送で使う)。
@@ -362,8 +362,9 @@ db/
 | 40 | `workspace_settings` | 契約 | `contract_id` | 1 | §4.9 |
 | 41 | `llm_call_records` | 個人 | `contract_id` + `account_id` | 1 | §4.10 |
 | 42 | `audit_logs` | 契約 | `contract_id` | 1 | §4.10 |
+| 43 | `eval_criteria_settings` | 契約 | `contract_id` | 1 | §4.9 |
 
-> 行番号 1〜42 のうち欠番は無い (**42 行**)。§3.3 の検査①はこの表を入力にする。
+> 行番号 1〜43 のうち欠番は無い (**43 行**)。§3.3 の検査①はこの表を入力にする。
 
 #### 4.1.2 機能テーブル以外の 11 テーブル (2 種類の例外を分けて列挙する)
 
@@ -639,7 +640,7 @@ db/
 | 3 | **説明文列は改称して残す** (`uniqueness` → `advantage_note` / `mission_alignment` → `feasibility_note`)。**列を落とさない・中身の意味と列名を一致させる**という判断とその却下案は [API/ideas.md](API/ideas.md) §7 の **D-IDA-20** が SSOT |
 | 4 | **`grade text` を列として持つ**。値域の定義元は [API/ideas.md](API/ideas.md) §6.3.3 で、**本節に値を再掲しない**。§3.2 の列挙値の規約どおり `text` + `CHECK` とし、**`CHECK` に書く値の集合と判定は `entity/idea` の Go 型・関数が SSOT** (`grade` は `score` と 3 軸から導出される値であり、DB では計算しない) |
 | 5 | **新設・改称した列はすべて NULL 可** — 評価が未実行のアイデア (人手作成・発散直後で未評価) が存在するため。**`NOT NULL DEFAULT 0` にしない**: 0 は「最低スコア」と読めてしまい、「未評価」と区別できなくなる (欠損を値で埋めない = [API/ideas.md](API/ideas.md) §6.3.4 の欠損の扱いと同じ思想) |
-| 6 | **`idea_evaluations.criteria_version` は `NOT NULL`** — 「どの軸定義・どの重みで採点したか」の記録で、値は `entity/idea` の定数 1 箇所が持つ (増分 1 は 1 種のみ)。判断と却下案は [API/ideas.md](API/ideas.md) §7 の **D-IDA-23** / §6.8 の②。**列は増分 2 でも追加しない** (値の意味を「契約 ID + 基準の版」へ拡張する) |
+| 6 | **`idea_evaluations.criteria_version` は `NOT NULL`** — 「どの軸定義・どの重みで採点したか」の記録で、値は契約行 (`eval_criteria_settings.criteria_version` — §4.9) があればその値、無ければ `entity/idea` の定数が持つ (~~増分 1 は 1 種のみ~~ **2026-08-24 PV-D5 で契約ごとの版が増分 1 から発生**)。判断と却下案は [API/ideas.md](API/ideas.md) §7 の **D-IDA-23** / §6.8 の②。**列は増分 2 でも追加しない** (「契約 ID + 基準の版」への意味の拡張は前倒しにより増分 1 で済んでいる — 増分 2 で残るのは変更履歴のみ) |
 | 7 | **v2 の 4 列 (`uniqueness_score` / `mission_alignment_score` / `market_size_score` / `cagr_score`) を受ける先を作らない** — 移行は「引き継がず NULL」で、**規則と理由の SSOT は [API/ideas.md](API/ideas.md) §3.3** (同名の `market_size_score` / `cagr_score` も校正が違うため移行しない)。**説明文 2 列も移行しない** (改称した列に旧軸の文章が入ると、再評価後の内容と混ざりどちらの軸の説明か判別できない)。§6.4 の 2a も参照 |
 | 8 | **本改訂はすべて列の追加・改称でテーブルは 1 件も増減しない** — 上の表の行数は変わらず、`make check-table-counts` の期待値・§4.1 の一覧・§3.4.2 の 3 分類はいずれも更新不要 (DR-9)。**確認済み** (2026-08-23) |
 
@@ -708,7 +709,8 @@ db/
 
 ### 4.9 お知らせ・設定
 
-対応 API: [API/news.md](API/news.md) (5 本) / [API/settings.md](API/settings.md) (6 本)。
+対応 API: [API/news.md](API/news.md) (5 本) / [API/settings.md](API/settings.md) (8 本。
+**2026-08-24 に `GET/PUT /settings/eval-criteria` を追加** — PV-D5)。
 **所有者列と FK の扱いは §4.3 の共通前置きのとおり**。ただし**本節の 2 テーブルだけは
 `account_id` の `ON DELETE` が例外 (CASCADE)** なので、下表では所有者列の FK も明示する。
 
@@ -717,6 +719,7 @@ db/
 | `read_news_accounts` | 既読状態 | `(account_id, news_id)` | `news_id text` (CMS のコンテンツ ID) / `read_at` | `contract_id`→`contracts` (CASCADE) / **`account_id`→`accounts` (CASCADE ← §3.3-2 / DM-6 の `NO ACTION` 規約の例外。§3.4.2 の分類②)** | `(account_id, read_at DESC)` |
 | `account_notification_settings` | 通知設定 | `account_id` | `diverge_completed text` / `weekly_summary text` | `contract_id`→`contracts` (CASCADE) / **`account_id`→`accounts` (CASCADE ← 同じ例外)** | — |
 | `workspace_settings` | ワークスペース設定 | `contract_id` | `timezone text` / **`default_theme_visibility` / `default_asset_visibility` / `default_idea_visibility`** (いずれも `text`、値域は `private`\|`contract`。[API/settings.md](API/settings.md) D-ST-3 の 3 カテゴリ = v2 の `sharing_settings` と 1:1) | `contract_id`→`contracts` (CASCADE) | — |
+| `eval_criteria_settings` | 契約単位の評価基準 (**2026-08-24 追加 — PV-D5**) | `contract_id` | `criteria jsonb NOT NULL` (軸・重み・サブ基準・アンカー・判定ランク。形と検証規則は [API/settings.md](API/settings.md) §3 / D-ST-8) / `criteria_version text NOT NULL` (PUT ごとに更新。`idea_evaluations.criteria_version` — §4.6 — が指す) / `updated_by uuid` / `updated_at` | `contract_id`→`contracts` (CASCADE) | — |
 
 **判断の適用**:
 
@@ -732,6 +735,11 @@ db/
 - **お知らせ本文のテーブルを持たない** ([API/news.md](API/news.md) D-NW-1: 本文は MicroCMS)
 - **`news_email_logs` 相当を持つかは未確定** ([API/news.md](API/news.md) NW-Q5)。§8 の DM-Q4。
   **推測で列を作らない**
+- **`eval_criteria_settings` は契約境界で `account_id` を持たない** (`workspace_settings` と同型)。
+  **`updated_by` は所有者列ではなく監査用の記録**であり、FK を張らない (更新者アカウントが削除されても
+  契約の基準は残る — §3.4.2 の分類③が append-only テーブルに FK を張らないのと同じ理由)。
+  **履歴テーブルは持たない** (変更履歴は増分 2 — [API/settings.md](API/settings.md) §2 の評価基準行 / PV-D5)。
+  基準の中身を jsonb 1 列で持つ判断と却下案は [API/settings.md](API/settings.md) **D-ST-8** が SSOT
 - **契約単位の既定 `visibility` は増分 1 で意味を持つ** (**2026-07-31 改訂**。C-16 / [auth.md](auth.md) §6.12 の 3)。
   v2 は 1 スイッチで契約全体の共有を切り替えられたため (`sharing_settings` の 3 カテゴリ)、
   **既定値を持たないと「新規リソースを毎回個別に共有する」操作の後退**になる。
@@ -951,7 +959,7 @@ conversation_sessions.ledger.deep_dive_results ──> plan_tab_versions (ground
 
 | ID | 状態 | 対応 AC | 回答 |
 |---|---|---|---|
-| **A-3** テナント境界 | **回答** | **AC-1.2** | §3.3 / §4.1。**機能テーブル 42 件すべてが `contract_id NOT NULL` + FK を持ち、個人スコープの 34 件は `account_id` も持つ** (DM-2。契約スコープは 8 件。**2026-07-31 に `idea_tags` を追加** — [API/idea-boards.md](API/idea-boards.md) §8.2 / IB-Q14-1)。所有者への到達は 1 段 (§3.1)。例外は §4.1.2 の**有限の列挙**のみで、**2 種類 (所有者列を持たない / 所有者列を持つが認証系のクエリ経路を持つ) を分けて列挙**する (**件数は §4.1.2 の 2 表と `make check-table-counts` の出力が正**。本行に転記しない = DR-9)。**[auth.md](auth.md) §6.3 の列挙との差分は 2026-07-31 に解消した** — `auth_rate_limit_counters` / `account_mfa_configs` / `signup_links` / `admin_mfa_configs` の 4 件すべてが同節の例外表に反映され、**規約本体 (同 §6.3-1) への DM-2 の強化も反映済み** (R-DM-4 ①〜④はすべて実施済み。同節の状態列と auth.md §10.3 の受信欄を参照)。`company_id` は作らない |
+| **A-3** テナント境界 | **回答** | **AC-1.2** | §3.3 / §4.1。**機能テーブル 43 件すべてが `contract_id NOT NULL` + FK を持ち、個人スコープの 34 件は `account_id` も持つ** (DM-2。契約スコープは 9 件。**2026-07-31 に `idea_tags` を追加** — [API/idea-boards.md](API/idea-boards.md) §8.2 / IB-Q14-1。**2026-08-24 に `eval_criteria_settings` を追加** — PV-D5 / AC-PV-8.2)。所有者への到達は 1 段 (§3.1)。例外は §4.1.2 の**有限の列挙**のみで、**2 種類 (所有者列を持たない / 所有者列を持つが認証系のクエリ経路を持つ) を分けて列挙**する (**件数は §4.1.2 の 2 表と `make check-table-counts` の出力が正**。本行に転記しない = DR-9)。**[auth.md](auth.md) §6.3 の列挙との差分は 2026-07-31 に解消した** — `auth_rate_limit_counters` / `account_mfa_configs` / `signup_links` / `admin_mfa_configs` の 4 件すべてが同節の例外表に反映され、**規約本体 (同 §6.3-1) への DM-2 の強化も反映済み** (R-DM-4 ①〜④はすべて実施済み。同節の状態列と auth.md §10.3 の受信欄を参照)。`company_id` は作らない |
 | **A-4** 絞り込みの層 | **回答 (スキーマ側)** | **AC-1.2** | 層の規約は [auth.md](auth.md) §6.4 が SSOT。**本書が担保するのは「所有者条件を書ける形になっていること」**: ①所有者列が全テーブルにある ②一覧・検索用インデックスが所有者列を先頭に持つ (§3.5) ③ドメイン別 sqlc 出力で他ドメインのクエリへ到達できない (§3.6 / DM-18) ④引用・メンバー等の関連を FK にして「存在確認だけで通る」経路を消した (§4.7 / §4.8) |
 | **A-5** ステータスコード | **参照** | AC-1.4 | 判定規則は [auth.md](auth.md) §6.6。本書は 409 / 404 の**根拠となる制約**を定義する (部分 UNIQUE・FK・楽観ロック列) |
 | **A-6** LLM への越境 | **参照 + 部分回答** | AC-1.3 | 強制点は [architecture.md](architecture.md) §3.8.2。**本書の寄与は 2 点**: ①引用を子テーブル + FK にして LLM 出力の ID が保存され得ない形にした (§4.7) ②ベクトル検索の所有者フィルタを必須引数として設計に明記した (§4.7) |
@@ -1044,7 +1052,7 @@ conversation_sessions.ledger.deep_dive_results ──> plan_tab_versions (ground
                             knowledge_message_citations / knowledge_thread_files / knowledge_file_chunks
 ⑥ ボード                  : idea_board_phases → idea_boards → idea_board_members / items / comments
 ⑦ お知らせ・設定・運用     : read_news_accounts / account_notification_settings / workspace_settings /
-                            llm_call_records / audit_logs
+                            eval_criteria_settings / llm_call_records / audit_logs
 ```
 
 **prod への初期投入は「いつ・どのジョブが・誰の承認で」行うか (D-4 / AC-3.4 の 1 回目)**:
@@ -1253,6 +1261,7 @@ auth.md §6.3 / §6.4 への転記は同文書の担当セッションが行う 
 | 同 | **R-AA-28** | `admin_mfa_configs` を削除する (AA-D-22) | **実施済み (2026-08-10)** — §4.1.2 (a) から削除し、§3.3 / §7.2 / §4.1.2 の件数を `make check-table-counts` の実測に合わせた |
 | [API/ideas.md](API/ideas.md) §8.1 | **R-IDA-12** (= R-PV-3。AC-PV-3.5) | `ideas` の軸カラムを 3 軸に改め、サブ基準スコア 2 列・`grade`・`idea_evaluations.criteria_version` を確定する | **実施済み (2026-08-23)** — §4.6 の表と「評価の 3 軸化に伴う列の改訂」(決定 1〜8)。v2 の評価列を引き継がない帰結は §6.4 の 2a にも反映。**テーブル件数は不変** (`make check-table-counts` で確認) |
 | [API/conversation.md](API/conversation.md) §8.1 | **R-CVA-14** (= AC-PV-4.6 / AC-PV-5.2) | ①台帳の `approach` を `divergence` (`mode` / `lens` / `lens_input`) に置き換え `constraints` を独立行にする ②`researched_domains` の重複除外キーと合併規則を注記する ③`seed_idea` の保存理由を UI 部品に依存しない書き方へ改める | **実施済み (2026-08-23)** — §4.11.2 の表の 3 行 + 「`divergence` を 1 つのオブジェクトとして持つ」+ スキーマ変更の決定 3 (`ledger_schema_version` を上げない理由)。**新規テーブルなし** |
+| [requirements-proto-v4.md](../../aidlc-docs/inception/productionization/requirements-proto-v4.md) §5 | **R-PV-12** (= AC-PV-8.2) | `eval_criteria_settings` (契約単位の評価基準。PV-D5 の前倒し) を追加する | **実施済み (2026-08-24)** — §4.1.1 の 43 件目 / §4.9 の表と判断 / §6 のグループ⑦。**テーブル件数 42 → 43** (`make check-table-counts` の実測に追随。履歴テーブルは増分 2 のため追加しない) |
 
 ## 8. 残課題 / 要確認
 

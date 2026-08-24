@@ -54,7 +54,7 @@
 | **audit** | メトリクス — **更新版プロトタイプで表示形が変わった**: 旧版の 4 指標 (生成アイデア・アクティブテーマ・アセット登録・アクティブ率) は消え、**月選択 + メンバー × 活動種別 6 種 (テーマ作成 / アイデア発散 / 企画書ドラフト / ナレッジチャット / アセット登録 / コメント) の月次クロス集計表 + CSV 出力 (配線なし)** になった (`ACTIVITY_TYPES`/`ACTIVITY_MONTHS` `:14771`〜、表描画 `:14852-14925`、CSV ボタン `:14840`) | **v3 新設** (`GET /usage-summary`) — **返す指標の形は ST-Q9 で再確定** | **集計対象データ (themes / assets / ideas) が v3 の DB にある**ため v2 では算出できない (§4 D-ST-4) |
 | | アクティビティログ | **v3 新設** (`GET /activity-logs`) | v2 に `activity_logs` テーブルはある (`hassan-v2-backend/db/schema.sql:482-489`) が、**参照する API が無い** (`hassan-v2-backend/router/router.go` に該当ルートなし)。O-6 の回答として v3 が持つ |
 | **plan** (**2026-07-30 更新版プロトタイプでセクション消滅 — 対象外の判断が補強された**) | プラン・使用量 (AI 生成回数等) | **対象外 (先送り)** | **C-12 によりコスト上限を設けない**方針のため、ユーザー向けの使用量制限表示は要件になっていない。課金は v2 でも API 化されていない (社内管理者向け `GET /admin/companies/usage_status/csv` のみ)。O-3 の可視化は**運用者向け**として [../observability.md](../observability.md) §4.2 / §6.1 で扱う (§4 D-ST-5) |
-| **評価基準** (**v4 プロトタイプ (2026-08-23) で新設されたセクション** — `../../prototype/hassan_agent_prototype_v4.html` の `_evalCriteriaState` `:17061`〜) | 評価軸の重み・サブ基準・数値アンカー・判定ランク条件の閲覧/編集 + 変更履歴 | **増分 2 へ先送り** — 増分 1 は評価軸の 3 軸化のみで、重み・アンカー・判定条件の SSOT は `entity/idea` の Go 定数 ([ideas.md](ideas.md) §6.3)。**契約ごとの編集 / 変更履歴 / 評価基準 CRUD の 3 項目が増分 2 の対象** (先送りの決定と増分 2 を見越した制約は [ideas.md](ideas.md) の増分 2 節 = AC-PV-7.1 / AC-PV-7.2) | ユーザー決定 2026-08-23 ([requirements-proto-v4.md](../../../aidlc-docs/inception/productionization/requirements-proto-v4.md) PV-D1 / PV-D4)。評価基準テーブル + settings API + 履歴テーブルを伴い、[schedule-2026q3.md](../../../aidlc-docs/schedule-2026q3.md) §5 の 3 週間に入らない |
+| **評価基準** (**v4 プロトタイプ (2026-08-23) で新設されたセクション** — `../../prototype/hassan_agent_prototype_v4.html` の `_evalCriteriaState` `:17061`〜) | 評価軸の重み・サブ基準・数値アンカー・判定ランク条件の閲覧/編集 + 変更履歴 | **最小形 (DB 保存 + `GET/PUT /settings/eval-criteria`) を増分 1 へ前倒し** (**2026-08-24 ユーザー決定 PV-D5**。旧判断「増分 2 へ先送り」のうち①契約ごとの編集 ③CRUD の 2 項目)。**②変更履歴のみ増分 2 のまま** (履歴テーブルと「過去の基準で採点された評価」の関係が未設計 — [ideas.md](ideas.md) §6.8 の②)。`entity/idea` の Go 定数は**契約行が無い場合の既定値の SSOT** へ縮小 ([ideas.md](ideas.md) §6.3 / AC-PV-8.1〜8.4)。仕様は §3 / §3.1 / §3.2 / §4 D-ST-8 | ユーザー決定 2026-08-24 ([requirements-proto-v4.md](../../../aidlc-docs/inception/productionization/requirements-proto-v4.md) PV-D5。旧判断は同 PV-D1 / PV-D4)。旧先送り理由のうち「管理者のみ編集可のロール粒度が無い」は実装リポ #52 の `IsAdmin()` 導入で解消。起票: 実装リポ #110 |
 | **help** | 外部リンク | **API 不要** | 静的リンク |
 | **logout** | ログアウト | **API 不要** | **FE のトークン破棄のみ**。JWT は 7 日で失効する ([../auth.md](../auth.md) §6.9 で据え置き確定)。**サーバ側の即時失効は手動ロック API が担う** (同 §6.9) ため、logout 用の revoke エンドポイントは設けない。**ST-Q4 は決着済み** |
 
@@ -74,10 +74,14 @@
 | PUT | `/settings/workspace` | 同 更新 | 契約 | B: 上と同じ項目 — R: 同じ | 200 / **403** (契約内管理者以外) / **400** (列挙外の値) | 1 |
 | GET | `/usage-summary` | 契約の利用量集計 (**月 × メンバー × 活動種別のクロス集計** — ST-Q9=a) | 契約 | Q: `from_month` / `to_month` (`YYYY-MM`) — R: `{months:[...], members:[{account_id, name}], counts:{<action>: {<month>: {<account_id>: n}}}}`。**活動種別の値域は [../observability.md](../observability.md) §4.5.1 の**「利用状況の集計対象」行の 6 種のみ** (同表の認証・メンバー設定系の action はクロス集計の軸に含めない。D-ST-6 と同じ委譲)。集計元は `audit_logs` ([../data-model.md](../data-model.md) §4.10) | 200 / **403** (契約内管理者以外) / **400** (月形式・期間) | 1 |
 | GET | `/activity-logs` | 契約の活動ログ一覧 | 契約 | Q: `from` / `to` / `account_id` (**自契約のメンバーのみ**) / `limit` / `offset` — R: `{items:[{occurred_at, actor:{account_id, name}, action, target}], total_count}` | 200 / **403** (契約内管理者以外) / **400** (契約外の `account_id`) | 1 |
+| GET | `/settings/eval-criteria` | 契約の評価基準取得 (**2026-08-24 前倒し — PV-D5**) | 契約 | R: `{axes:[{id, name, weight, subs:[{name, points, note}], anchors:[...]}], verdicts:[{rank, label, cond}], criteria_version}` (形は v4 の `_evalCriteriaState` を snake_case 化したもの)。**行なしは 200 + 既定基準** (`entity/idea` の Go 定数。[ideas.md](ideas.md) §6.3) | 200 | 1 |
+| PUT | `/settings/eval-criteria` | 同 更新 | 契約 | B: 上と同じ項目 (`criteria_version` は送らない — サーバが更新) — R: 同じ。**upsert** (行なしは作成)。バリデーションは §4 D-ST-8 | 200 / **403** (契約内管理者以外) / **400** (軸 3 本固定・重み合計 100・値域違反) | 1 |
 
-### 3.1 契約内管理者限定の 3 本 (A-2 / [README.md](README.md) §2.2 の **R-1**)
+### 3.1 契約内管理者限定の 4 本 (A-2 / [README.md](README.md) §2.2 の **R-1**)
 
-`PUT /settings/workspace` / `GET /usage-summary` / `GET /activity-logs` は
+`PUT /settings/workspace` / `GET /usage-summary` / `GET /activity-logs` /
+`PUT /settings/eval-criteria` (**2026-08-24 追加 — PV-D5**。v4 プロトタイプのコメント
+「組織で共有・管理者のみ編集可」`:17060` を要件として採る) は
 **契約内管理者のみ**が実行できる。判定は v2 の前例に倣う:
 
 ```
@@ -90,9 +94,10 @@ if !authAccount.AuthRoleID.IsAdmin() { 403 }     // 契約内ロールの判定
 ロール定義は `hassan-v2-backend/entity/auth_role.go:7-10` (1 = 管理者 / 2 = メンバー)。
 
 これが [../auth.md](../auth.md) §9 の **Q-A2** に対する本ディレクトリからの回答である
-(「契約内管理者/メンバー区別を v3 で使うか」→ **使う。ただし用途はこの 3 本に限る**)。
+(「契約内管理者/メンバー区別を v3 で使うか」→ **使う。ただし用途はこの 4 本に限る**。
+2026-08-24 に `PUT /settings/eval-criteria` を追加して 3 本 → 4 本)。
 
-**403 の全体像**: 本ディレクトリの 403 は合計 **11 本** — 本節の 3 本 (R-1 = 契約内ロール) と
+**403 の全体像**: 本ディレクトリの 403 は合計 **12 本** — 本節の 4 本 (R-1 = 契約内ロール) と
 [idea-boards.md](idea-boards.md) §3.1 の 8 本 (R-2 = リソース単位ロール)。
 **`AuthRoleUser` のみという A-2 の方針と矛盾しない** (認証ロールは全員同じで、
 その上に契約内ロールとリソース単位ロールが乗る — [README.md](README.md) §2.2)。
@@ -130,6 +135,13 @@ if !authAccount.AuthRoleID.IsAdmin() { 403 }     // 契約内ロールの判定
   per-resource の可視性を表現できない ([themes.md](themes.md) D-TH-3 / [assets.md](assets.md) D-AS-12)。
   **v2 の操作は「契約単位の既定値 3 カテゴリ」として引き継がれる** ([../auth.md](../auth.md) §6.12 (a))
 
+**評価基準 (`/settings/eval-criteria`) の読む側** (2026-08-24 追加 — PV-D5 / AC-PV-8.4):
+書く側は本ファイル、**読む側は評価実装 (C-6。[ideas.md](ideas.md) §6.3 / §6.8)** — 評価ジョブが
+①契約行があればそれを ②無ければ `entity/idea` の Go 定数の既定を、
+**重み・配点・閾値を引数で受け取る純粋関数** (AC-PV-7.2 の①) に渡して採点する (キャッシュなし。同③)。
+**書く側単独のマージでは採点に反映されない** (BE-10。実装リポ #110 の非スコープ節と同じ構図 —
+読む側の接続は C-6 の issue が担う)。
+
 ---
 
 ## 4. 設計判断
@@ -144,6 +156,7 @@ if !authAccount.AuthRoleID.IsAdmin() { 403 }     // 契約内ロールの判定
 | D-ST-5 | **プラン・課金の扱い** | **本増分の対象外** (先送り) | (a) 使用量表示だけ作る: C-12 (上限なし) により**ユーザーが見て行動を変える必要がない**情報になり、O-3 の可視化は運用者向けで足りる。(b) プロトタイプのプラン表示をそのまま実装: 「Business プラン月額」「AI 生成回数」は静的モックで、課金基盤 (請求・プラン変更) の設計が存在しない。**先送り先**: 課金要件が確定した増分 |
 | D-ST-6 | **活動ログの記録項目** | **API の形 (`occurred_at` / `actor` / `action` / `target`) を本ファイルで決め、記録する `action` の値域は [../observability.md](../observability.md) §4.5 に委ねる** | (a) 値域まで本ファイルで決める: 監査対象イベントは全ドメイン横断で決まる (O-6) ため、API 設計ファイルに閉じると各ドメインの追加のたびに本ファイルを直すことになる。(b) v2 の `activity_log_type` enum をそのまま使う: v3 の機能 (会話型アイデア創出・ナレッジ) のイベントが値域に無い |
 | D-ST-7 | **FE から見た 2 系統の API** | ~~FE は v2 API (認証・アカウント) と v3 API (機能) の 2 つのベース URL を持つ~~ → **D-ST-1' により反転。認証・アカウントも v3 が提供するため、v3 の API だけで完結する**。**ただし併用期間中は未移植の v2 機能があるため 2 系統が残る** — 変換層 (エラー形式・命名) を API 境界の 1 箇所に閉じる方針と `orval` の生成先分離は**そのまま有効** | (b) 変換層を作らず両形式をコンポーネントまで持ち込む: FE-2 (snake_case 漏れ) と同じ構造の問題になる。**併用期間中の追加論点**: v2 と v3 でトークンが別になるため (`../auth.md` §9.3 Q-A1)、**FE は両系統のトークンを保持する** ([../auth.md](../auth.md) §10.2 R-2) |
+| **D-ST-8** | **契約単位の評価基準の保存形式** (2026-08-24 新設 — PV-D5 / AC-PV-8.2 / AC-PV-8.3) | **`eval_criteria_settings` (所有者列 = `contract_id` = PK) に jsonb 1 列 (`criteria`) + `criteria_version text NOT NULL` + `updated_by` / `updated_at` で持つ**。`criteria` の形は §3 の GET レスポンス (v4 の `_evalCriteriaState` の snake_case 化。`history` を除く)。**構造の検証は `entity` の純粋関数**で行う — ①軸 3 本固定 (id は `market_appeal` / `advantage` / `feasibility` — [ideas.md](ideas.md) §6.3.1 と同一) ②重みの合計 = 100 ③サブ基準は各軸 3 つ・配点合計 10 ④アンカーは 5 段 (score 10/8/6/4/2) ⑤判定ランクは 4 段 (A/B+/B/C)・閾値は 0.0〜10.0 尺度。**PUT 成功のたびに `criteria_version` を更新** (値は「契約 ID + 単調増加の版」を表す形式。`idea_evaluations.criteria_version` が過去の採点の基準を指せる — [ideas.md](ideas.md) §6.8 AC-PV-7.2 の②) | (a) 軸・サブ基準・アンカーを正規化テーブル群で持つ: テーブルが 4 つ以上増え、増分 1 では軸数・構造が固定 (部分更新・履歴・構造の可変性の要件は増分 2 の履歴と同時にしか生じない)。jsonb 1 列なら構造変更が増分 2 で正規化する余地も残る。(b) 重みだけを列で持つ: アンカー・判定条件が持てず、v4 の編集 UI (アンカー数値・判定条件) を受けられない。(c) `criteria_version` を持たない: [ideas.md](ideas.md) §6.8 の②の却下 (a) と同じ — 基準を変えた瞬間に過去のスコアと比較できなくなる。**代償 (履歴を増分 2 に送ったことによる)**: 変更の痕跡は `updated_by` / `updated_at` の**最終 1 件のみ**で「誰がいつ何を変えたか」の履歴は残らない。監査 `action` ([../observability.md](../observability.md) §4.5.1) への「評価基準の変更」の追加は #34/#71 と同枠の申し送り (v2 の共有設定変更の監査と同じ扱い) |
 
 ### 4.1 この構成の代償 (明示しておく事項)
 
@@ -210,10 +223,10 @@ if !authAccount.AuthRoleID.IsAdmin() { 403 }     // 契約内ロールの判定
 | ID | 回答 | 備考 |
 |---|---|---|
 | A-1 | [README.md](README.md) §2.1。v3 新設の 6 本すべて認証必須。**§5 の移植対象のうち signin / signup / reset-password / signup-links 取得は本質的に未認証**であり、[../auth.md](../auth.md) §6.7 の**公開エンドポイントのホワイトリスト + CI 検査**で管理する (D-ST-1' により v3 が持つことになったため、v2 での公開範囲 — 同 §1.6 — をそのまま引き継ぐ) | AC-1.1 |
-| A-2 | **回答**: 本ディレクトリのエンドポイントは `AuthRoleUser` のみ。契約内管理者限定は §3.1 の 3 本 ([../auth.md](../auth.md) §9.3 Q-A2 への回答を含む)。**ただし §5 の移植対象には社内管理者認証 (`X-Admin-Token`) を要するものが含まれる** — ロック解除 / MFA 登録・検証・リセット ([../auth.md](../auth.md) §6.2 の例外。**社内管理者は MFA 必須**)。**本ディレクトリ外**であり、認証系統の分離は同 §6.7 の **3 系統**ホワイトリストが担う | — |
+| A-2 | **回答**: 本ディレクトリのエンドポイントは `AuthRoleUser` のみ。契約内管理者限定は §3.1 の 4 本 (2026-08-24 に 3 → 4 — PV-D5。[../auth.md](../auth.md) §9.3 Q-A2 への回答を含む)。**ただし §5 の移植対象には社内管理者認証 (`X-Admin-Token`) を要するものが含まれる** — ロック解除 / MFA 登録・検証・リセット ([../auth.md](../auth.md) §6.2 の例外。**社内管理者は MFA 必須**)。**本ディレクトリ外**であり、認証系統の分離は同 §6.7 の **3 系統**ホワイトリストが担う | — |
 | A-3 | v3 が新設する `account_notification_settings` / `workspace_settings` / `activity_logs` (v3 側) は、それぞれ `account_id` / `contract_id` を持つ | data-model で確定 |
 | A-4 | 通知設定は `account_id`、ワークスペース設定・サマリ・活動ログは `contract_id` を Repository のクエリ条件に入れる。`GET /activity-logs` の `account_id` パラメータは**自契約メンバーであることをサーバが検証**する ([README.md](README.md) D-API-8) | — |
-| A-5 | 本表の「固有ステータス」列 + [README.md](README.md) §2.5。**本ファイルの 403 は §3.1 の 3 本** (R-1)。ディレクトリ全体では 11 本 ([idea-boards.md](idea-boards.md) の 8 本を含む) | **AC-1.4** |
+| A-5 | 本表の「固有ステータス」列 + [README.md](README.md) §2.5。**本ファイルの 403 は §3.1 の 4 本** (R-1。2026-08-24 に 3 → 4 — PV-D5)。ディレクトリ全体では 12 本 ([idea-boards.md](idea-boards.md) の 8 本を含む) | **AC-1.4** |
 | A-6 | v3 新設分に LLM 経路は無い。**`GET /companies/genai` (会社情報の AI 生成) は §5 の移植対象に含まれるため v3 の管轄になった** — 移植時は [../architecture.md](../architecture.md) §3 の `gateway` 経由を必須とし (O-2 の全経路計測)、Dify 依存の判定は [../llm-migration.md](../llm-migration.md) が担う | §5 の注 |
 | A-7 | ワークスペース設定の `default_*_visibility` が共有の既定値を持つ (D-ST-3)。**書く側と読む側をどちらも増分 1 に置く** (**2026-07-31 に C-16 で改訂**。旧記述は「どちらも増分 2・増分 1 では共有が発生しない」だったが、**v2 で共有していた契約が切替後に共有を変更できなくなる**ため成立しない。[../auth.md](../auth.md) §6.12) | [README.md](README.md) §5 API-Q3 |
 | O-3 | **部分回答**: ユーザー向けのコスト表示は作らない (D-ST-5)。`GET /usage-summary` は**件数のみ**でコストを含まない。運用者向けの可視化は [../observability.md](../observability.md) §4.2 / §6.1 へ | C-12 と整合 |
