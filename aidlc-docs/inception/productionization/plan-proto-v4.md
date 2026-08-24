@@ -127,6 +127,15 @@
 | **AC-PV-7.2** | 増分 2 への移行時の 3 論点 (SSOT の移動先 / 採点時の重みの記録 / キャッシュ) に記述がある。「後で検討」が 0 件 | — |
 | **AC-PV-7.3** | 対象外の 3 領域が列挙されている | — |
 
+### 3.6 前倒し分 (2026-08-24 増補。PV-D5 — requirements §3.4 / §4.8)
+
+| AC | 設計側の検証 | 実装リポでの検証 |
+|---|---|---|
+| **AC-PV-8.1** | `settings.md` §3 に `GET/PUT /settings/eval-criteria` (増分 1) があり、`make check-endpoint-mapping` が緑 | 実装リポ #110 (行なし GET = 200 + 既定 / PUT 403 のテスト) |
+| **AC-PV-8.2** | `data-model.md` §4.1.1 に `eval_criteria_settings` (契約境界・43 件目) があり、`make check-table-counts` が緑 | スキーマ適用 + `check-owner-scope` 系検査 |
+| **AC-PV-8.3** | PUT のバリデーション列挙 (軸 3 本固定 / 重み合計 100 / 値域) と `criteria_version` の更新規則が `settings.md` §4 にある | 400 系のテーブル駆動テスト |
+| **AC-PV-8.4** | `ideas.md` §6.8 に読む側 (C-6) の接続規則 (契約行 > Go 定数既定・引数渡し・キャッシュなし) と「書く側単独では採点に反映されない」がある | C-6 の評価実装 (別 issue) |
+
 ## 4. タスクと依存関係
 
 ### 4.1 直列必須
