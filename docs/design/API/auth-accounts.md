@@ -312,8 +312,11 @@ R-1 の 8 本のうち 3 本は**契約の不変条件ガード (R-3。§3.4)** 
   "created_at": "2026-04-01T00:00:00Z", "updated_at": "2026-07-30T09:00:00Z"
 }
 // ⚠️ `language_type` を返さない (AA-Q4 = 日本語のみ。列は `DEFAULT 'ja'` のまま触らない)
-// `active_account_count` は `num_of_members` (上限) に対する現在の在籍数で、**一覧・詳細でのみ返す**
-// (作成直後は代表者 1 名)。上限判定そのものは `POST /accounts` 側が持つ (§2.3.2 の 409)
+// `active_account_count` は `num_of_members` (上限) に対する現在の在籍数 (`deactivated_at IS NULL`)。
+// **§2.4 の②契約管理 4 本すべてが返す** — 作成直後は代表者 1 名なので必ず 1 になる。
+// (**2026-08-25 訂正**: 旧記述は「一覧・詳細でのみ返す」だったが、§2.4 が POST の応答も
+//  AdminContractView と定めているため自己矛盾していた。実装リポ #116 の S-7 レビューで検出)
+// 上限判定そのものは `POST /accounts` 側が持つ (§2.3.2 の 409)
 ```
 
 **`SignInResult` が [../frontend.md](../frontend.md) §5.2.2 の是正要求 (§16.2-6) への回答である** —
