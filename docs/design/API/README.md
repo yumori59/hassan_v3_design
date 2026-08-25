@@ -281,7 +281,8 @@ RAG 検索のスコープ強制は [knowledge.md](knowledge.md) §4 が詳細を
 **conversation.md / plans.md に 403 を返すエンドポイントは無い** (会話ターンは個人スコープのみ、企画書は個人スコープのみで見える他人が存在しない)。
 **認証・アカウント基盤 ([auth-accounts.md](auth-accounts.md)) は第 3 系統 (R-3 = 不変条件ガード。
 「最後の契約内管理者をロック / 降格 / 削除できない」「自分自身をロック / 削除できない」) を持ち、
-同書の 403 は 8 本ある** — 系統と本数の SSOT は同書 §3.1 (**実測は `make check-endpoint-mapping` が正**。2026-08-10 の AA-D-22 で 10 → 8)。
+同書の 403 は 12 本ある** — 系統と本数の SSOT は同書 §3.1 (**実測は `make check-endpoint-mapping` が正**。2026-08-10 の AA-D-22 で 10 → 8、**2026-08-25 の AA-D-26 で 8 → 12**)。
+**第 4 系統 (R-4 = 社内管理者の SuperAdmin 限定) も同書だけが持つ** — §2.4 の②契約管理 4 本が該当する。
 それ以外のすべての権限エラーは 404 に落ちる — Repository が所有者条件を `WHERE` に持つため
 0 件として返り、UseCase が `NotFound` 系 `CodedError` に変換するだけでよい
 ([../auth.md](../auth.md) §6.6 の帰結)。
@@ -376,8 +377,8 @@ X-Token: <JWT>
 | アイデア (参照・人手編集・版・タグ・評価) | [ideas.md](ideas.md) | **13** | **1** | 0 | **5** |
 | 企画書 | [plans.md](plans.md) | **17** | **4** | **3** | 0 |
 | **小計 (9 ドメイン)** | — | **114** | **9** | **6** | **17** |
-| 認証・アカウント基盤 | [auth-accounts.md](auth-accounts.md) | **37** | 0 | 0 | **8** |
-| **合計** | — | **151** | **9** | **6** | **25** |
+| 認証・アカウント基盤 | [auth-accounts.md](auth-accounts.md) | **37** | 0 | 0 | **12** |
+| **合計** | — | **151** | **9** | **6** | **29** |
 
 LLM 9 本 = `POST /asset-extractions` / `POST /knowledge-threads/{thread_id}/messages` /
 `POST /knowledge-files` (埋め込み生成) / `POST /conversations/{session_id}/messages` (会話ターン) /
@@ -386,7 +387,7 @@ LLM 9 本 = `POST /asset-extractions` / `POST /knowledge-threads/{thread_id}/mes
 **O-2 の計測対象はこの 9 本** (§4 の O-2 行)。
 **認証・アカウント基盤に LLM / SSE 経路は無い** ([auth-accounts.md](auth-accounts.md) §4 の A-6 / O-2 / O-5)。
 403 の 17 本 = §2.2 の R-1 (4 本。**2026-08-24 に `PUT /settings/eval-criteria` を追加** — PV-D5) + R-2 (idea-boards 8 本 + ideas 5 本 = 13 本)。
-**認証・アカウント基盤の 8 本は別勘定** = 契約内管理者限定 8 本 (同書 §2.3)。**SuperAdmin 限定の 1 本は AA-D-22 で消滅**。
+**認証・アカウント基盤の 12 本は別勘定** = 契約内管理者限定 8 本 (同書 §2.3) + **SuperAdmin 限定 4 本 (同 §2.4 の②契約管理。AA-D-26)**。**旧 SuperAdmin 限定の 1 本 (`POST /admin/admins/{id}/mfa/reset`) は AA-D-22 で消滅**。
 **§3.1〜§3.9 は 9 ドメインの内訳**であり、認証・アカウント基盤の一覧は
 [auth-accounts.md](auth-accounts.md) §2 が持つ (系統別に 4 節)。
 
