@@ -228,7 +228,7 @@ v3 の対応先は [../design/API/plans.md](../design/API/plans.md) (**2026-08-0
 |---|---|---|---|---|
 | `POST /admin/signin` | `:195` | 社内管理者のサインイン | auth-accounts.md §2.4 | **引き継ぐ** |
 | `GET /admin/me` | `:196` | 自分の管理者アカウント取得 | 同 | **引き継ぐ** |
-| `POST /admin/accounts/unlock` | `:211` | **全契約横断のロック解除** (**v2 は `CheckSuperAdminRole` を持たず Admin でも実行できる**) | 同 (**v3 は SuperAdmin 限定** — auth.md §6.2) | **引き継ぐ** |
+| `POST /admin/accounts/unlock` | `:211` | **全契約横断のロック解除** (**v2 は `CheckSuperAdminRole` を持たず Admin でも実行できる**) | 同 (**v3 も Admin で実行できる** — 2026-08-26 のオーナー判断。auth.md §6.2 の「社内管理者のロールによる制限の範囲」。**ロール制限は契約管理 4 本のみ**) | **引き継ぐ** (**権限も v2 と同じ** = C-16 の後退なし) |
 | `POST /admin/companies/accounts/mfa/reset` | `:217` | 一般アカウントの MFA リセット | auth-accounts.md §2.4 (AA-Q2=a) | **引き継ぐ** |
 | `GET /admin/accounts/register/password/check` | `:199` | パスワード登録トークンの検証 (公開) | **v3 は API を作らず移行スクリプト投入 + 一時パスワード** (auth.md §6.2「初回登録の窓を閉じる」) | **例外 (承認済み)** |
 | `POST /admin/accounts/register/password` | `:200` | パスワード登録 (公開。**`math/rand` トークン経由 = §5-8**) | 同上 | **例外 (承認済み)** |
