@@ -789,7 +789,7 @@ type StreamState =
 | **`/admin/accounts`** | `(admin)` | **アカウント検索 + ロック状態表示 + ロック解除** (全契約横断・**解除専用**) | [auth-accounts.md](API/auth-accounts.md) §2.4.2 (アカウント検索 + ロック解除) | **[API]**。[auth.md](auth.md) §6.9 の実行者 2 経路 (社内管理者は解除のみ) | 1 |
 | **`/admin/admins`** | `(admin)` | 社内管理者の一覧 (**MFA リセットは AA-D-22 で消滅**) | [auth-accounts.md](API/auth-accounts.md) `GET /admin/admins` | **[API]** (同書 §2.4) |
 | **`/admin/contracts`** | `(admin)` | **契約の一覧 + 新規作成** (会社名・代表者・期間・人数。作成すると代表者へ招待メールが飛ぶ) | [auth-accounts.md](API/auth-accounts.md) `GET` / `POST /admin/contracts` | **[API]** (同書 §2.4 の②。**2026-08-25 追加 — AA-D-26**)。**作成の 409 (代表者メールが既存アカウントと重複) は `representative_email` のフィールドエラーとして描く** (§9 の 400 行と同じ扱い) | 1 |
-| **`/admin/contracts/[contractId]`** | `(admin)` | **契約の詳細・編集** (会社名・人数・期間・代表者・部署)。**削除は無い** (AA-D-26。契約の終了は `end_date` で表す) | [auth-accounts.md](API/auth-accounts.md) `GET` / `PUT /admin/contracts/{contract_id}` | **[API]** (同書 §2.4 の②。**2026-08-25 追加 — AA-D-26**) | 1 |
+| **`/admin/contracts/[contractId]`** | `(admin)` | **契約の詳細・編集** (会社名・人数・期間・代表者・部署) + **代表者への招待の再送ボタン** (**2026-08-26 追加 — AA-D-27**。招待メールが届かなかった契約を回復する唯一の経路で、**押すと未使用リンクが失効して新しいリンクが代表者のメールへ送られる**。**409 (既にサインアップ済み) は正常系**として「この代表者は既にサインアップ済みです」と表示し、ボタンを無効化する)。**削除は無い** (AA-D-26。契約の終了は `end_date` で表す) | [auth-accounts.md](API/auth-accounts.md) `GET` / `PUT /admin/contracts/{contract_id}` + `POST …/signup-links` | **[API]** (同書 §2.4 の②。**2026-08-25 追加 — AA-D-26**。再送は **AA-D-27**) | 1 |
 
 > **`Idea` 型の SSOT は [API/ideas.md](API/ideas.md) §2.1** (2026-08-02 確定。同書 §8 の R-IDA-11)。
 > **手書きの型を作らず orval の生成型を使う** (§6.2 の FE-2 対策)。**旧 `idea-boards.md` §2.1 の型を参照しないこと** —

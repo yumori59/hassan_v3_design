@@ -48,7 +48,7 @@
 | §2.3.1 の **残り 6 本** (`PUT /accounts/me` / `PUT /accounts/me/email` / `PUT /accounts/me/password` / `POST /accounts/me/icon` / `DELETE /accounts/me/icon` / `POST /mfa/totp/reset`) | **`/settings/profile`** | **新設済み** ([../frontend.md](../frontend.md) §11.1。2026-07-31。§5 **R-AA-16** = 実施済み)。**6 本すべてに消費者となる画面がある**ので、本増分から外す条件分岐は消滅した |
 | §2.3.2 の 9 本 + §2.3.3 の 4 本 | `/settings/members` | 既存 (会社情報も同画面) |
 | §2.4 の①アカウント回復・閲覧 (5 本) | `/admin/accounts` / `/admin/admins` | 既存。**`/admin/mfa*` は AA-D-22 で消滅** |
-| §2.4 の②契約管理 (4 本) | **`/admin/contracts` / `/admin/contracts/[contractId]`** | **新設** ([../frontend.md](../frontend.md) §11.1。2026-08-25 = AA-D-26)。**4 本すべてに消費者となる画面がある** |
+| §2.4 の②契約管理 (5 本) | **`/admin/contracts` / `/admin/contracts/[contractId]`** | **新設** ([../frontend.md](../frontend.md) §11.1。2026-08-25 = AA-D-26)。**5 本すべてに消費者となる画面がある** (招待の再発行は詳細画面のボタン = AA-D-27) |
 
 ### 1.2 v2 の事実 (移植の入力。出典付き)
 
@@ -100,7 +100,7 @@
 
 ---
 
-## 2. エンドポイント一覧 (合計 **37 本**)
+## 2. エンドポイント一覧 (合計 **38 本**)
 
 ### 2.0 表記と共通規約
 
@@ -147,7 +147,11 @@
 
 **スコープ列の意味**: **自分** = `WHERE account_id = <認証ユーザー>` / **契約** =
 `WHERE contract_id = <認証ユーザーの契約>` ([README.md](README.md) §2.3)。
-**403 の 8 本は契約内管理者限定 (R-1)** (**実測は `make check-endpoint-mapping` が正**。2026-08-10 の AA-D-22 / AA-D-13 で 9 → 8)、そのうち 3 本は**契約の不変条件ガード (R-3。§3.4)** でも 403 を返す。
+**403 の 13 本は契約内管理者限定 (R-1) 8 本と SuperAdmin 限定 (R-4) 5 本**
+(**実測は `make check-endpoint-mapping` が正**。2026-08-10 の AA-D-22 / AA-D-13 で 9 → 8、
+**2026-08-25 の AA-D-26 で §2.4 の契約管理 4 本が加わり 8 → 12、2026-08-26 の AA-D-27 で招待の再発行が加わり 12 → 13**)。
+R-1 の 8 本のうち 3 本は**契約の不変条件ガード (R-3。§3.4)** でも 403 を返す。
+**R-4 = 社内管理者の SuperAdmin 限定** — §2.4 の②契約管理 (招待の再発行を含む) が該当し、`admin` ロールでは 403 になる。
 
 #### 2.3.1 自分のアカウント (7 本)
 
@@ -198,16 +202,20 @@
 > 「設定できるが認証が成立しない」状態になる (BE-10)。**列そのものは v2 と同じ 3 値で持つ**
 > ([../data-model.md](../data-model.md) §4.2 の「列を変えない」) が、**API は 2 値のみ受け付ける**。
 
-### 2.4 系統: 社内管理者認証 (9 本)
+### 2.4 系統: 社内管理者認証 (10 本)
 
 **`X-Admin-Token`**。**社内管理者に MFA を課さない** (2026-08-10 のユーザー決定 = AA-D-22)。
 したがって**この系統に「MFA 未検証で到達可」の区分は無く**、系統は **3 系統**になる ([../auth.md](../auth.md) §6.7)。
-全 9 本が**契約スコープを持たない** (全契約横断が目的)。
+全 10 本が**契約スコープを持たない** (全契約横断が目的)。
 
 **内訳は 2 群**: **①アカウントの回復・閲覧** (上 5 行。[../auth.md](../auth.md) §6.2 の例外 1 件とその付随機構) と
-**②契約管理** (下 4 行。**2026-08-25 の Q-10 = A で追加** = **AA-D-26**)。
-**②は SuperAdmin 限定にしない** — v2 も `AdminAuthRequiredMiddleware` のみで
-SuperAdmin を要求していない (`hassan-v2-backend/router/router.go:214`, `:220`)。
+**②契約管理** (下 5 行。**2026-08-25 の Q-10 = A で追加** = **AA-D-26**。**招待の再発行は 2026-08-26 に AA-D-27 で追加**)。
+**②は SuperAdmin 限定 (R-4)** — `admin` ロールでは **403**。判定は Controller が行う
+(AA-D-19 の①ロール判定と同じ位置)。
+**①はロール判定を課さない** — **`admin` ロールでも実行できる** (**2026-08-26 のオーナー判断**。
+理由と代償は [../auth.md](../auth.md) §6.2 の「社内管理者のロールによる制限の範囲」が正)。
+**したがって①群の Controller に `IsSuperAdmin()` 相当の判定を置かない** —
+①群の固有ステータス列に **403 が無い**のはこの決定の帰結であり、書き漏れではない。
 
 | メソッド | パス | 概要 | 主な入出力 | 固有ステータス | 移植元 |
 |---|---|---|---|---|---|
@@ -216,10 +224,11 @@ SuperAdmin を要求していない (`hassan-v2-backend/router/router.go:214`, `
 | DELETE | `/admin/accounts/{account_id}/lock` | ロック解除 (**解除専用。ロックは持たない**) | R: `AdminAccountView` | 200 / **404** (不存在) | `同:211`、`hassan-v2-backend/usecase/admin_account/unlock_account_by_admin.go:25-33` |
 | POST | `/admin/accounts/{account_id}/mfa/reset` | **一般アカウント**の TOTP リセット (全契約横断。AA-Q2) | R: なし | 204 / **404** | `同:217`、`hassan-v2-backend/controller/account.go:1046-1082` |
 | GET | `/admin/admins` | 社内管理者の一覧 | Q: `limit` / `offset` — R: `{items: [{id, name, email, admin_auth_role}], total_count}` | 200 | `同:205`、`hassan-v2-backend/controller/admin_account.go:90`。**`mfa_registered` を返さない** (AA-D-22) |
-| POST | `/admin/contracts` | **契約の新規作成** — `contracts` + 代表者 `accounts` (パスワード無し・`is_completed=false`) + `companies` + 招待リンクを**1 トランザクションで作り**、代表者へ招待メールを送る (AA-D-26) | B: `{company_name, num_of_members, start_date, end_date, representative_name, representative_email, division}` — R: `AdminContractView` | **201** / 400 (日付形式・メール形式・`num_of_members` の範囲) / **409** (代表者メールが既存アカウントと重複) | `同:220`、`hassan-v2-backend/usecase/company/create_company_for_admin.go:56-155` |
-| GET | `/admin/contracts` | **契約の一覧** (会社名・代表者・期間・人数つき) | Q: `keyword` (会社名・代表者名・メール) / `limit` / `offset` — R: `{items: AdminContractView[], total_count}` | 200 / 400 | `同:215`、`hassan-v2-backend/controller/company.go:215` |
-| GET | `/admin/contracts/{contract_id}` | 契約の詳細 | R: `AdminContractView` | 200 / **404** (不存在) | `同:218`、`hassan-v2-backend/controller/company.go:244` |
-| PUT | `/admin/contracts/{contract_id}` | 契約の更新 (会社名・人数・期間・代表者・部署) | B: 作成と同じ項目 — R: `AdminContractView` | 200 / 400 / **404** | `同:221`、`hassan-v2-backend/controller/company.go:318` |
+| POST | `/admin/contracts` | **契約の新規作成** — `contracts` + 代表者 `accounts` (パスワード無し・`is_completed=false`) + `companies` + 招待リンクを**1 トランザクションで作り**、代表者へ招待メールを送る (AA-D-26) | B: `{company_name, num_of_members, start_date, end_date, representative_name, representative_email, division}` — R: `AdminContractView` | **201** / **403** (SuperAdmin 以外) / 400 (日付形式・メール形式・`num_of_members` の範囲) / **409** (代表者メールが既存アカウントと重複) | `同:220`、`hassan-v2-backend/usecase/company/create_company_for_admin.go:56-155` |
+| GET | `/admin/contracts` | **契約の一覧** (会社名・代表者・期間・人数つき) | Q: `keyword` (会社名・代表者名・メール) / `limit` / `offset` — R: `{items: AdminContractView[], total_count}` | 200 / **403** (SuperAdmin 以外) / 400 | `同:215`、`hassan-v2-backend/controller/company.go:215` |
+| GET | `/admin/contracts/{contract_id}` | 契約の詳細 | R: `AdminContractView` | 200 / **403** (SuperAdmin 以外) / **404** (不存在) | `同:218`、`hassan-v2-backend/controller/company.go:244` |
+| PUT | `/admin/contracts/{contract_id}` | 契約の更新 (会社名・人数・期間・代表者・部署)。**代表者メールを変更したとき、代表者が未サインアップ (`accounts.is_completed = false`) なら `accounts.email` も同一トランザクションで追随させる** (**2026-08-26 追加 = AA-D-28**) | B: 作成と同じ項目 — R: `AdminContractView` | 200 / **403** (SuperAdmin 以外) / 400 / **404** / **409** (新しい代表者メールが既存アカウントと重複。AA-D-28) | `同:221`、`hassan-v2-backend/controller/company.go:318` |
+| POST | `/admin/contracts/{contract_id}/signup-links` | **代表者への招待リンクの再発行・再送** (**2026-08-26 追加 = AA-D-27**)。**未使用リンクを失効させてから発行する** (§2.3.2 の再送と同じ手続き) | **B: なし** — 宛先は `contracts.representative_email` から引く。R: `{expires_at}` (**トークンは応答に含めない**) | **201** / **403** (SuperAdmin 以外) / **404** (契約が不存在) / **409** (代表者が既にサインアップ済み) | v2 に相当機能なし (v2 は平文トークンを DB から復元できたため必要が無かった — AA-D-27) |
 
 > **②契約管理を `/admin/companies` (v2 のパス) にしない理由** (AA-D-26):
 > v3 で作る主体は **`contracts`** であり、`companies` は契約に従属して同一トランザクションで作られる。
@@ -308,8 +317,11 @@ SuperAdmin を要求していない (`hassan-v2-backend/router/router.go:214`, `
   "created_at": "2026-04-01T00:00:00Z", "updated_at": "2026-07-30T09:00:00Z"
 }
 // ⚠️ `language_type` を返さない (AA-Q4 = 日本語のみ。列は `DEFAULT 'ja'` のまま触らない)
-// `active_account_count` は `num_of_members` (上限) に対する現在の在籍数で、**一覧・詳細でのみ返す**
-// (作成直後は代表者 1 名)。上限判定そのものは `POST /accounts` 側が持つ (§2.3.2 の 409)
+// `active_account_count` は `num_of_members` (上限) に対する現在の在籍数 (`deactivated_at IS NULL`)。
+// **§2.4 の②契約管理 4 本すべてが返す** — 作成直後は代表者 1 名なので必ず 1 になる。
+// (**2026-08-25 訂正**: 旧記述は「一覧・詳細でのみ返す」だったが、§2.4 が POST の応答も
+//  AdminContractView と定めているため自己矛盾していた。実装リポ #116 の S-7 レビューで検出)
+// 上限判定そのものは `POST /accounts` 側が持つ (§2.3.2 の 409)
 ```
 
 **`SignInResult` が [../frontend.md](../frontend.md) §5.2.2 の是正要求 (§16.2-6) への回答である** —
@@ -400,8 +412,10 @@ Task-3i への是正要求として出している。本書は `account.auth_rol
 | **AA-D-23** | **監査ログの拡張** | **行わない** (2026-08-10 のユーザー決定)。§3.7 の記録対象を **v2 に前例のある事象のみ**に限定する。v3 独自の対象 (`POST /admin/signin` の成否 / ロック・解除 / メンバー作成・権限変更・削除 / 招待の発行・受諾 / リセットの実行・パスワード / メール変更 / `PUT /companies/me/mfa`) は**記録しない**。**2026-08-14 の AA-D-24 により、本行の「v2 に前例が無い」という前提の一部が誤りだったと判明し訂正された — 本行はその訂正前の記録として残す** | (a) 10 行すべてを記録する (2026-07-31 までの本書の設計): [../observability.md](../observability.md) §4.5.1 の値域に 7 値を追加する必要があり、各 UseCase への `audit_logs` 書き込みが実装量として全 issue に薄く広がる。**失うもの**: ①O-7 のアラート入力「社内管理者のサインイン失敗」が成立しない (§5 R-AA-26) ②不可逆操作の実行者が追跡できない。**再開の入口は §6.1 の AA-Q14** |
 | **AA-D-24** | **AA-D-23 の前提の訂正 (v2 前例の再確認)** | **メンバー作成・メール変更・パスワード変更・会社 MFA 設定変更の 4 件を記録対象に復帰させる** (2026-08-14 のユーザー決定。実装リポ issue #28 の調査で発覚)。**AA-D-23 は「メンバー作成・権限変更・削除 / パスワード・メール変更 / `PUT /companies/me/mfa` はいずれも v2 に前例が無い」と述べたが、`hassan-v2-backend/auth/event_mapper.go:45-75` を直接確認すると次の 6 件に明確な前例がある**: `POST /accounts` → `member_create` / `PUT /accounts/admin` → `member_update_by_admin` / `DELETE /accounts/:id` → `member_delete_by_admin` / `PUT /accounts/email` → `account_update_email` / `PUT /accounts/password` → `account_update_password` / `PUT /companies/mfa` → `contract_update_mfa`。**このうち復帰させるのは 4 件のみ** (`member_create` / `account_update_email` / `account_update_password` / `contract_update_mfa`)。**`member_update_by_admin` / `member_delete_by_admin` は前例があることを認めつつ、ユーザーが引き続きスコープを広げない判断をした** (事実誤認ではなく意図的な除外として維持)。**`POST /admin/signin` の成否・ロック・解除・招待の発行・受諾・リセットの実行は v2 に前例が無いという AA-D-23 の判定は変更なし** (本書 §3.7 直後の 2026-08-10 注記のうち、この 3 系統に対応する記述は妥当だった) | (a) AA-D-23 を全面的に撤回し 10 行構成へ戻す: 誤認は 6 件中 4 件の復帰で足り、`POST /admin/signin` 等の残り 6 対象は AA-D-23 の判断 (前例なし・スコープを広げない) が妥当なままなので過剰な巻き戻し。(b) 6 件全てを復帰させる: `member_update_by_admin` / `member_delete_by_admin` は前例があるが、ユーザーが「事実誤認の訂正」と「スコープ拡大」を区別して後者は採らないと判断した — 前例の有無だけで機械的に復帰させると判断の余地を奪う |
 | **AA-D-25** | **AA-D-2 の適用範囲の訂正 (`/me` を付けるのは誰の視点か)** | **契約・会社は `/me` を付けない**。`/contracts/me` → **`/contract`**、`/companies/me` → **`/company`**、`/companies/me/mfa` → **`/company/mfa`** (2026-08-15。実装リポ issue #17 の着手前レビューでユーザーが指摘し確定)。**`/accounts/me` 系はそのまま** (対象が変わらない) | AA-D-2 は「自分自身を指す操作は `/me` に集める」を**認証ユーザー個人**の意味で意図していたが、§2.3.3 の文面がそれを「認証ユーザーが所属する契約・会社」にまで拡張して適用していた。**契約・会社はアカウント個人のレコードではなく、同一契約に属する全ユーザーで共有される 1 レコード**であり (`PUT /company/mfa` は契約内の全ユーザーに一律で効く — §2.3.3 の概要列)、`/me` が示唆する「自分専用」という意味と食い違う。(a) 現状維持 (`/contracts/me` 等): **意味の食い違いを残したまま**。実装者・利用者が「`/me` = 個人設定」と誤読し、`PUT /companies/me/mfa` を「自分のMFA設定」と取り違える実害がある (実装リポでの質疑で実際に発生)。(b) `/contracts/mine` 等 `me` を保ちつつ語を変える: 「誰の視点か」という本質的な曖昧さ (個人か所属先か) を解消しない。(c) `{contract_id}` を path param にして明示する: **契約・会社は認証コンテキストから一意に解決でき、クライアントが ID を知る必要も渡す必要も無い** (AA-D-3 が `account_id` に要求する path param の理由 — 「越境を防ぐため対象を明示させる」— は、そもそも他契約を指定できない本エンドポイントには当てはまらない)。**ID 不要の単一リソースは単数形パスで表す**方が、`/accounts/{account_id}` (他者操作) との対比でも一貫する |
-| **AA-D-26** | **社内管理者向けの契約管理を本増分に含める** | **`POST` / `GET /admin/contracts` と `GET` / `PUT /admin/contracts/{contract_id}` の 4 本を §2.4 に追加する** (2026-08-25 の Q-10 = A)。**削除は作らない** (§2.7)。作成は `contracts` + 代表者 `accounts` + `companies` + 招待リンクを**1 トランザクション**で作り、代表者へ招待メールを送る。**権限は `Admin` でも可** (SuperAdmin 限定にしない)。**`language_type` は API に出さない** (AA-Q4)。**監査ログの記録対象に含める** (§3.7。AA-D-23 / AA-D-24 のスコープ限定に対する明示の例外) | **本判断は §6.3 の仮定 2 が明記していた後続条件の発火である** — 同仮定は「作成経路は移行スクリプトのみ」と置きつつ「**v3 で新規契約を獲得する運用が必要になると本増分の対象に戻る**」と書いており、2026-08-25 にオーナーが「新規契約を作る手段は必要」と判断した。(a) **移行スクリプト / 手動 SQL のまま運用する (旧採用案)**: 契約獲得のたびに人間が本番 DB へ直接 INSERT することになり、**承認機構 (H-2) の外側に書き込み経路が常設される** — 実装リポの `.claude/rules/04-human-checkpoints.md` §3.3 が「エージェントに prod の DB 接続情報を配らない」を担保の中心に置いているのと噛み合わない。(b) **作成 1 本だけ追加する**: 作った契約を製品内で確認できず、投入の成否を本番 DB を見に行って確かめることになる (**BE-10 = 読む側と書く側を対で設計する**と同型の穴)。v2 も `GET /admin/companies` を持っていた (`hassan-v2-backend/router/router.go:215`)。(c) **v2 のパス `/admin/companies` を踏襲する**: パスの語と path param が食い違い (`DELETE /admin/companies/{contract_id}`)、契約内ユーザー向けの `GET /company` とも紛らわしい。**認証系統の数は 3 のまま変わらない** — 増えるのは既存の `X-Admin-Token` 系統の route だけで、[../auth.md](../auth.md) §6.7 の系統宣言は触らない |
+| **AA-D-26** | **社内管理者向けの契約管理を本増分に含める** | **`POST` / `GET /admin/contracts` と `GET` / `PUT /admin/contracts/{contract_id}` の 4 本を §2.4 に追加する** (2026-08-25 の Q-10 = A)。**削除は作らない** (§2.7)。作成は `contracts` + 代表者 `accounts` + `companies` + 招待リンクを**1 トランザクション**で作り、代表者へ招待メールを送る。**権限は SuperAdmin 限定 (R-4)** — `admin` ロールは 403 (2026-08-25 のオーナー判断で反転。下の却下 (d))。**`language_type` は API に出さない** (AA-Q4)。**監査ログの記録対象に含める** (§3.7。AA-D-23 / AA-D-24 のスコープ限定に対する明示の例外) | **本判断は §6.3 の仮定 2 が明記していた後続条件の発火である** — 同仮定は「作成経路は移行スクリプトのみ」と置きつつ「**v3 で新規契約を獲得する運用が必要になると本増分の対象に戻る**」と書いており、2026-08-25 にオーナーが「新規契約を作る手段は必要」と判断した。(a) **移行スクリプト / 手動 SQL のまま運用する (旧採用案)**: 契約獲得のたびに人間が本番 DB へ直接 INSERT することになり、**承認機構 (H-2) の外側に書き込み経路が常設される** — 実装リポの `.claude/rules/04-human-checkpoints.md` §3.3 が「エージェントに prod の DB 接続情報を配らない」を担保の中心に置いているのと噛み合わない。(b) **作成 1 本だけ追加する**: 作った契約を製品内で確認できず、投入の成否を本番 DB を見に行って確かめることになる (**BE-10 = 読む側と書く側を対で設計する**と同型の穴)。v2 も `GET /admin/companies` を持っていた (`hassan-v2-backend/router/router.go:215`)。(c) **v2 のパス `/admin/companies` を踏襲する**: パスの語と path param が食い違い (`DELETE /admin/companies/{contract_id}`)、契約内ユーザー向けの `GET /company` とも紛らわしい。(d) **`admin` ロールにも許す (2026-08-25 の起草時の採用案。同日中に反転)**: v2 のルーティングは `POST /admin/companies` に `CheckSuperAdminRole` を掛けておらず (`hassan-v2-backend/router/router.go:220`)、**実装上は Admin でも契約を作れた**。しかし **v2 自身のコード内ドキュメントは「Admin: 管理画面における Read 機能を利用可能」と宣言しており** (`hassan-v2-backend/entity/admin_auth_role.go:7-10`)、**v2 の実装がその宣言に反していた**。v3 はこの文言を `entity/admin_account/admin_account.go` へ転記済みで、**Admin に書き込みを許すと実装とコメントが食い違ったまま v3 に持ち込まれる**。**契約の作成は課金に直結し不可逆**であり、宣言どおり Admin を Read に留める価値がここに集中している。**⚠️ 2026-08-26 に本却下理由から 1 文を削除した (オーナー判断)** — 旧版は「**加えて v3 は既に MFA リセット・ロック解除を SuperAdmin 限定にしており ([../auth.md](../auth.md) §6.2)、契約の作成という不可逆かつ課金に直結する操作だけが緩いのは一貫しない**」と書いていたが、**その前提が成立していなかった** (同 §6.2 はロール制限を課しておらず、`auth.md` §10.2 の R-3 ④ は AA-D-22 で取り下げ済み)。オーナーが「MFA リセットなどは Admin ができて良い」と判断し、**ロール制限の範囲は契約管理 4 本だけ**で確定した (同 §6.2 の「社内管理者のロールによる制限の範囲」)。**本却下 (d) の結論は変わらない** — v2 のコード内ドキュメントの宣言が独立した理由として成立するため。検出元は実装リポ hassan-v3 の issue #18 / PR #126。**代償**: v2 の実挙動より権限が狭くなる = **C-16 (v2 でできたことを落とさない) に対する後退**であり、意図的な選択としてここに記録する (運用で Admin ロールの管理者が契約を作れなくなる)。**認証系統の数は 3 のまま変わらない** — 増えるのは既存の `X-Admin-Token` 系統の route だけで、[../auth.md](../auth.md) §6.7 の系統宣言は触らない |
 
+| **AA-D-27** | **代表者への招待リンクの再発行・再送を作る** | **`POST /admin/contracts/{contract_id}/signup-links` を §2.4 の②に追加する** (2026-08-26 のオーナー判断)。**リクエストボディを持たず**、宛先は `contracts.representative_email` から引く。**未使用リンクを失効させてから発行する** (§2.3.2 のメンバー招待の再送と同じ手続き)。**権限は SuperAdmin 限定 (R-4)** — 契約管理の一部として AA-D-26 と揃える。**監査ログの記録対象に含める** (§3.7) | **起票の経緯**: AA-D-26 で作った `POST /admin/contracts` は**コミットしてから招待メールを送る**ため、メール送信に失敗すると 4 行は残ったまま**平文トークンだけが失われる**。**v2 には回復手段があった** — `signup_links.id` (UUID の主キー) をそのまま平文トークンとして使い `GET /accounts/signup-links/:id` が公開だった (`hassan-v2-backend/router/router.go:78`) ため、運用が DB から取り出して手で再送できた。**v3 は `token_hash` しか保存しない** (AA-D-5④) ため復元できず、**回復手段が無い状態が v3 で新しく生まれていた** = **C-16 に対する後退**。実装リポ hassan-v3 の issue #116 の S-7 レビュー (重大1) が検出した。(a) **既存の `POST /accounts/{account_id}/signup-links` を社内管理者にも開く**: 同 route は `TierUser` 系統で**契約内管理者限定**であり、[../auth.md](../auth.md) §6.7 のホワイトリストは**1 route = 1 系統**で宣言する。2 系統を通すと「route を足したがミドルウェアを書き忘れた」を構造的に防ぐ仕組みが崩れる。加えて社内管理者は契約スコープを持たないため、契約内管理者向けの所有者絞り込みがそのままでは効かない。(b) **`POST /admin/contracts` を「既存メールなら再発行する」形にする**: **作成エンドポイントに隠れた分岐**が生まれ、409 が返るはずの操作が黙って成功する。(c) **回復手段を作らず運用で本番 DB を直接触る**: `signup_links.token_hash` を手で書き換える回避策は実際に成立する (`HashSignupToken` は pepper 無しの SHA-256) が、**実装の内部仕様を運用手順書に固定する**ことになり、pepper を足す変更で手順書が黙って壊れる。加えて承認機構 (H-2) の外側に本番 DB への書き込み経路が常設される — AA-D-26 の却下 (a) と同じ理由で採らない。(d) **リクエストボディで宛先メールを受け取る**: **全契約横断の権限を持つ社内管理者が任意のアドレスへ招待リンクを送れる経路**になる。宛先を `contracts.representative_email` に固定すると、この経路が構造的に存在しない |
+| **AA-D-28** | **`PUT /admin/contracts/{contract_id}` が代表者メールを変えたときの `accounts.email` の追随** | **代表者が未サインアップ (`accounts.is_completed = false`) のときだけ、`contracts.representative_email` と `accounts.email` を同一トランザクションで更新する** (2026-08-26 のオーナー判断)。**サインアップ済みなら `accounts.email` を変更しない** — `contracts.representative_email` だけが変わる。**新しいメールが既存アカウントと重複する場合は 409** (`accounts.email` は `unique_accounts_email` で全契約横断の一意) | **起票の経緯**: AA-D-27 で作った招待の再発行は `(contract_id, contracts.representative_email)` で `accounts` を引く。一方 `PUT` は `contracts` だけを更新していたため、**招待が届かない最大の原因 (メールアドレスの打ち間違い) を直した直後に 再発行が 404 になり、AA-D-27 の目的が半分達成されない**状態だった (実装リポ hassan-v3 の issue #130 の S-7 レビュー 中1 が検出)。加えて `contracts.representative_email` (管理画面の表示) と `accounts.email` (認証に使う値) が**食い違ったまま残る**という不整合も生じていた。(a) **サインアップ済みの代表者でも `accounts.email` を変更する**: **`PUT /accounts/me/email` (本人がパスワード確認を添えて変更する。AA-D-17) の意味が消える** — 社内管理者が本人確認なしに他人のログイン ID を書き換えられることになり、**アカウント乗っ取りに近い**。メール変更はリセット経路 (`POST /accounts/reset-password`) の宛先でもあるため、**書き換えられた時点でその人のアカウントを奪える**。(b) **再発行の側で代表者を「契約内の管理者ロールかつ未サインアップの 1 行」として解決する** (#130 だけで閉じる案): `POST /accounts` で契約内管理者を増やせるため、**代表者が複数いる契約で対象が曖昧になる**。契約の代表者は `contracts.representative_email` が定義であり、そこから引けない状態を放置したまま別の解決手段を足すと、**定義が 2 つになる**。(c) **追随させない (現状維持)**: 打ち間違えた契約は DB を直接触るしかなくなり、AA-D-27 が解こうとした問題 (承認機構の外側の書き込み経路) がそのまま残る |
 ### 3.1.1 401 / 400 の分類と `CodedError` の値域 (AA-D-9 / AA-D-17 / AA-D-18)
 
 **本節は FE と BE の共有契約**であり、**FE が「セッションを破棄するか」を決める唯一の入力**である。
@@ -476,8 +490,10 @@ Task-3i への是正要求として出している。本書は `account.auth_rol
 
 - **一覧・取得系 (`GET /accounts` / `GET /accounts/{account_id}`) は①が無い** (全メンバー可) ため、
   常に②だけが効く = 他契約・不存在はどちらも 404
-- **社内管理者系 (§2.4)** は契約スコープを持たない (`⑦ 全契約横断`) ため②が無く、
-  不存在は 404、SuperAdmin 限定操作のロール不足は①の 403 ([../auth.md](../auth.md) §5-3 の是正)
+- **社内管理者系 (§2.4)** は契約スコープを持たない (`⑦ 全契約横断`) ため②が無く、不存在は 404。
+  **①のロール判定があるのは②契約管理 4 本だけ**で、そこでのロール不足が 403 になる
+  ([../auth.md](../auth.md) §5-3 の是正)。**①群 (アカウントの回復・閲覧) は①も無い** —
+  `admin` ロールでも実行できるため (§2.4 冒頭 / [../auth.md](../auth.md) §6.2)、**403 を返す経路が無い**
 
 ### 3.2 サインイン〜MFA のセッション状態遷移
 
@@ -712,6 +728,7 @@ V2-F5) で決まるため、**E2E 専用契約の `companies.mfa_type = 'none'` 
 | `PUT /accounts/me/password` | 実行 | `account_update_password` (`hassan-v2-backend/auth/event_mapper.go:74`)。**2026-08-14 の AA-D-24 で復帰** |
 | `PUT /company/mfa` | 実行 | `contract_update_mfa` (`hassan-v2-backend/auth/event_mapper.go:67`)。**2026-08-14 の AA-D-24 で復帰**。**パスは 2026-08-15 の AA-D-25 で `/companies/me/mfa` から改名** |
 | `POST /admin/contracts` (契約の新規作成) | 実行 (actor = `admin_accounts.id`。`actor_type = 'admin_account'` / `contract_id` = 作成した契約) | **v2 に前例が無い** (`event_mapper.go` は社内管理者経路を通らない) — **AA-D-23 / AA-D-24 のスコープ限定に対する明示の例外として 2026-08-25 に追加した** (AA-D-26)。**契約作成は不可逆かつ課金に直結する操作**であり、実行者が追えないことの代償が「v2 相当に留める」原則より大きい。値域 `contract_create` は [../observability.md](../observability.md) §4.5.1 に登録する |
+| `POST /admin/contracts/{contract_id}/signup-links` (招待の再発行) | 実行 (actor = `admin_accounts.id`。`actor_type = 'admin_account'` / `contract_id` = 対象の契約) | **v2 に前例が無い** — **AA-D-27 で追加した** (2026-08-26)。**招待リンクの再発行は不可逆ではない**が、**誰がいつ契約の入口を作り直したかは追えるべき**である (代表者のメールアドレスに届く URL を新しく発行する操作であり、`POST /admin/contracts` と同じ性質の入口を開く)。値域 `contract_invitation_resend` は [../observability.md](../observability.md) §4.5.1 に登録する |
 
 > **2026-08-10 (AA-D-23): 監査ログを v2 相当に留め、v3 での拡張を行わない** (ユーザー決定)。
 > **⚠ 2026-08-14 の AA-D-24 で当時の削除対象のうち 4 件が復帰した** (上表参照) —
@@ -762,7 +779,7 @@ v2 は招待メール送信失敗時にリンクを保存しないまま 500 を
 | ID | 状態 | 回答 |
 |---|---|---|
 | **A-1** 認証方式 | **回答** | §2 の全エンドポイント (**本数は同書 §2 の見出しが正** — 2026-08-10 に 37 → 33。DR-9) に**要求する認証系統を宣言**した (§2.1〜§2.4 の節構成 = ホワイトリストの元表)。方式の SSOT は [../auth.md](../auth.md) §6.1、系統の機械検査は同 §6.7。**公開は 6 本のみ**で、うち 4 本は v2 と同一の公開範囲、`POST /admin/signin` は同 §6.2 の例外、`POST /accounts/signup-links/lookup` は v2 の `GET …/:id` の置き換え (AA-D-4)。**AC-1.1** |
-| **A-2** ロールと適用範囲 | **回答** | ①**一般ユーザー** (`AuthRoleUser`) = §2.2 / §2.3 ②**契約内管理者** (R-1) = §2.3 の 8 本が 403 ③**社内管理者** (`X-Admin-Token`) = §2.4 の 5 本 ④**SuperAdmin** = `POST /admin/admins/{id}/mfa/reset` の 1 本。**v2 で管理者限定だった操作 (V2-F12) をすべて維持し、新しいロール差を作っていない** ([../auth.md](../auth.md) §9.3 Q-A2) |
+| **A-2** ロールと適用範囲 | **回答** | ①**一般ユーザー** (`AuthRoleUser`) = §2.2 / §2.3 ②**契約内管理者** (R-1) = §2.3 の 8 本が 403 ③**社内管理者** (`X-Admin-Token`) = §2.4 の 10 本 ④**SuperAdmin** (R-4) = §2.4 の②契約管理 5 本 (**2026-08-25 の AA-D-26**。`POST /admin/admins/{id}/mfa/reset` は AA-D-22 で消滅したため、SuperAdmin 限定の対象はこの 4 本に入れ替わった)。**v2 で管理者限定だった操作 (V2-F12) はすべて維持している**が、**契約管理だけは v2 の実挙動 (Admin でも実行可) より狭めた** — v2 自身の宣言 (`hassan-v2-backend/entity/admin_auth_role.go:7-10` の「Admin: Read 機能を利用可能」) に合わせた結果であり、**C-16 に対する意図的な後退**として AA-D-26 の却下 (d) に記録した ([../auth.md](../auth.md) §9.3 Q-A2) |
 | **A-3** テナント境界 | **参照** | スキーマは [../data-model.md](../data-model.md) §4.2 が SSOT。本書が前提にするのは **`signup_links.contract_id NOT NULL`** (P-2) と **`accounts.email` のグローバル一意** (V2-F4) の 2 点。**スキーマへの追加要求は 4 件で、うち 3 件は反映済み** (2026-07-31): 新テーブル 2 件 = `account_deletions` (§5 R-AA-4。**未対応 = DM-Q2 待ちの条件付き**) / **`admin_mfa_configs`** (**R-AA-18 = 実施済み**。§4.1.2 (a) 側 = 所有者列を持たない例外。除外リストも 9 件へ連動済み)、列の追加・変更 2 件 = **`signup_links.token_hash` / `reset_password_requests.hash` → `token_hash`** (R-AA-21 = 実施済み) / **`audit_logs` の `actor_type` に `unauthenticated` を追加 + `actor_id` / `contract_id` の NULL 可 + CHECK** (R-AA-19 = **スキーマは実施済み。残るは `detail.email_hash` の方式**) |
 | **A-4** 絞り込みの層 | **回答** | ①対象は常に path param (AA-D-3) で、**[../auth.md](../auth.md) §6.4 の②コンストラクタ `NewAccountIDInContract` を通してからでないと型が作れない** ②テナント検証は Repository のクエリ条件 (`WHERE id = $1 AND contract_id = $2`) ③**許可リストに載せる認証系クエリを §3.5 で全件確定** (R-3 の必須事項②) ④**全契約横断クエリと契約内クエリはクエリ名を分ける** (`…ForAdmin` / `…InContract`。§3.5 の脚注 1) ⑤**`contract_id` を持たないテーブル (`account_mfa_configs` 等) は「親を契約条件で引いて 404 判定 → その戻り値から作った ID で子を操作」の 2 段**を必須手順とする (§3.5 の脚注 2。**存在確認は所有権の検証にならない**)。**AC-1.2 の補完** |
 | **A-5** ステータスコード | **回答** | §2 の各表の「固有ステータス」列 + §3.1 + **§3.1.1 (401/400 の分類とコード値域)**。判定規則の SSOT は [../auth.md](../auth.md) §6.6。**403 と 404 の評価順序は §3.1.2 で固定**。**同節・[README.md](README.md) §2.5 に対する差分 3 点**: ①**401 に本文を持ち、分類 T / C を `code` の接頭辞で表す** (AA-D-9 / AA-D-18。**認証済み経路の資格情報不一致は 400** = AA-D-17) ②**429 を返す 10 本** (§3.7。AA-D-10) ③**不変条件ガードの 403 (R-3。6 ケース)** (AA-D-12)。差分は §5 **R-AA-2a** (auth.md §6.6。未対応) / **R-AA-2b** (README.md §2.5。実施済み) で SSOT へ是正要求。**AC-1.4** |
