@@ -29,7 +29,7 @@
 | LLM の利用量 | **OpenAI 実装のみが `TokenUsage` を詰める** (`hassan-v2-backend/llm/openai/service.go:178` が唯一の書き込み)。**主系モデルは Gemini** なので主要経路で取得できない。読み出しは 1 箇所、**DB 保存なし**、単価はハードコード | 発散経路のみ (`claude_managed_agents/internal/agent/diverge/result_helpers.go` の `EstimateUSD`) | **継承不可**。全プロバイダ対応で作る |
 | `stop_reason` | **公開型に存在しない** (`hassan-v2-backend/llm/types.go`) | 一部の経路で検出 | **継承不可**。抽象に必須フィールドとして持たせる |
 | メトリクス | 未確認 (CloudWatch の標準メトリクスのみと推測) | なし | 新規設計 |
-| 監査ログ | `activity_logs` / `event_logs` テーブルが**稼働中** ([v2-auth-tenancy.md](../analysis/v2-auth-tenancy.md)) | なし | **継承可** (方式を踏襲) |
+| 監査ログ・利用状況ログ | `activity_logs` / `event_logs` テーブルが**稼働中** ([v2-auth-tenancy.md](../analysis/v2-auth-tenancy.md)) | なし | **継承可** (**2 本とも同名で v3 に作る** — 2026-08-29。§4.5 / §4.5.3) |
 | アラート | 未調査 | なし | 新規設計 |
 
 **要点**: 継承できるのは「zap JSON」「CloudWatch Logs への集約」「監査ログの方式」の 3 つだけで、
@@ -271,9 +271,21 @@ Agent 経路・直接 API 経路の**両方**で、1 回の LLM 呼び出しご�
   初回リリースの時点で必要になる — **§6.1 の ⑦ (利用量・コスト系メトリクスの先送り) の対象ではない**。
   本項が EMF による**現在値のゲージ**であり、利用量明細からの後付け計算が原理的にできないことも理由である
 
-### 4.5 監査ログ (O-6 / AC-2.5)
+### 4.5 監査ログ・利用状況ログ (O-6 / AC-2.5 / **AC-2.6**)
 
-- **v2 の `activity_logs` / `event_logs` の方式を踏襲する** (稼働中の仕組み)
+**本節は 2 本のテーブルを扱う** (**2026-08-29 改訂**。[data-model.md](data-model.md) DM-15 が
+「`audit_logs` 1 本」から **v2 と同じ 2 本構成**へ転じたことに合わせた。実装リポ hassan-v3 issue #144):
+
+| テーブル | 目的 | 「何を記録するか」の SSOT | 読む API |
+|---|---|---|---|
+| **`activity_logs`** (監査記録) | **誰が・何に対して・どの操作を実行したか**の証跡。生成・削除・重要操作・認証系の事象 | 本節 §4.5 (記録対象) / §4.5.1 (`action` の値域) / §4.5.2 (actor が確定しない場合) | `GET /activity-logs` ([API/settings.md](API/settings.md) §3) |
+| **`event_logs`** (利用状況の計測) | **どの機能がどれだけ使われたか**の計測。API を伴わない画面操作 (CSV ダウンロード・モーダルを開く等) を含む | **§4.5.3** | `GET /usage-summary` (同上) |
+
+**どちらに何を書くか (重なる操作の扱いを含む) の SSOT は §4.5.3 の「重複の規則」**。
+
+**以下 §4.5.2 までは `activity_logs` (監査記録) の要件である** (`event_logs` の要件は §4.5.3):
+
+- **v2 の `activity_logs` の方式を踏襲する** (稼働中の仕組み。v3 でも同名)
 - 記録対象: 生成 (アイデア / 企画書 / アセット抽出)・削除・共有設定の変更・**LLM を伴う操作の実行**・
   **アカウントの手動ロック / 解除** ([auth.md](auth.md) §6.9 で新設する API。
   トークン漏洩時の遮断手段であり、**誰が誰に対して実行したか**が追えないと不正利用の調査ができない)・
@@ -309,21 +321,43 @@ Agent 経路・直接 API 経路の**両方**で、1 回の LLM 呼び出しご�
 | **パスワードリセット要求** (2026-08-23 追加 — [API/auth-accounts.md](API/auth-accounts.md) §3.7 の「要求」行に値が無かった = BE-10 の取りこぼし。v2 の `event_logs` に前例: `hassan-v2-backend/auth/event_mapper.go:75` / `entity/event_log.go:116`) | `account_request_reset_password` | [API/auth-accounts.md](API/auth-accounts.md) §3.7 |
 | **契約管理** (2026-08-25 追加 — [API/auth-accounts.md](API/auth-accounts.md) の **AA-D-26**。**v2 に前例が無いが、AA-D-23 / AA-D-24 のスコープ限定に対する明示の例外**として決めた: 契約作成は不可逆かつ課金に直結し、実行者が追えない代償が「v2 相当に留める」原則より大きい) | `contract_create` / `contract_invitation_resend` | [API/auth-accounts.md](API/auth-accounts.md) §3.7 (`POST /admin/contracts`)。**actor は `admin_accounts.id`** で `actor_type = 'admin_account'`、**`contract_id` は作成した契約**
 ([data-model.md](data-model.md) §4.10 の `CHECK` を満たす)。**一覧・詳細・更新は記録しない** (参照は非破壊、更新は v2 にも前例が無くスコープを広げない)。**`contract_invitation_resend` は 2026-08-26 の AA-D-27 で追加** — 代表者への招待リンクを再発行する操作で、`contract_create` と同じ「契約の入口を開く」性質を持つ |
-| **利用状況の集計対象** (契約内の活動。**`GET /usage-summary` のクロス集計の軸はこの行の 6 種のみ** — 認証・メンバー設定系の action は集計軸に含めない) | `theme_created` / `idea_diverged` / `plan_drafted` / `knowledge_chat` / `asset_registered` / `comment_posted` | [API/settings.md](API/settings.md) §3 (`GET /usage-summary` のクロス集計の軸) |
+| ~~**利用状況の集計対象**~~ | ~~`theme_created` / `idea_diverged` / `plan_drafted` / `knowledge_chat` / `asset_registered` / `comment_posted`~~ | **2026-08-29 に §4.5.3 (`event_logs.event_type`) へ移した** — `GET /usage-summary` の集計元が `activity_logs` から `event_logs` に変わったため ([data-model.md](data-model.md) DM-15 / §4.10)。**6 種の値自体は変えていない**。この行の値を `activity_logs.action` として書かない |
 | **生成・削除・共有** | 各ドメインの設計書が本表へ追記する (アイデア / 企画書 / アセット抽出の生成・削除、共有設定の変更) | 本節の「記録対象」 |
 
 **値域の担保方法**: **Go の定数 1 箇所を SSOT とし、CI で本表との一致を照合する**。
-**却下**: `audit_logs.action` に `CHECK` を張る — [data-model.md](data-model.md) DM-15 が
+**却下**: `activity_logs.action` に `CHECK` を張る — [data-model.md](data-model.md) DM-15 が
 「`action` を enum にすると機能追加のたびに `ALTER TYPE` が要る」を理由に `text` を採っており、
 `CHECK` は enum と同じ運用コストを持つ (値の追加がマイグレーションになる)。
 
-#### 4.5.2 actor / contract が確定しない認証イベントの記録 (2026-07-31 追加 — R-AA-7④ / AA-D-21)
+#### 4.5.2 actor / contract が確定しない認証イベントの記録 (**本節が「何を記録し、何を記録しないか」の SSOT**。2026-07-31 追加 — R-AA-7④ / AA-D-21。2026-08-29 に「主体を確定できない失敗」の扱いを追記)
 
 **未登録のメールアドレスへのサインイン失敗**では、`actor_id` も `contract_id` も存在しない。
-このとき **`audit_logs` の両列は NULL** とし、**両方 NULL になれるのは `action` が認証失敗系のときだけ**を
+このとき **`activity_logs` の両列は NULL** とし、**両方 NULL になれるのは `action` が認証失敗系のときだけ**を
 `CHECK` で表明する (スキーマ側の要求は [API/auth-accounts.md](API/auth-accounts.md) R-AA-19)。
 
 - **アカウントが解決できた失敗は両列を埋める** — NULL になるのは未登録メール・存在しない管理者アカウントへの試行のみ
+- **システム側の理由でアカウントの引き当て自体が失敗した場合 (DB 接続断・クエリエラー等) は `activity_logs` に書かない** —
+  **採用案 (2026-08-29 のオーナー判断)**。対象は「メールアドレスからアカウントを引く処理が例外で終わり、
+  **未登録だったのか登録済みだったのかを判定できていない**」状態であり、上の限定列挙 (未登録メール・
+  存在しない管理者アカウント) には**含まれない**。このとき API は 500 を返し、**観測は §4.1 の WARN ログ
+  (`request_id` 付き) と §4.6 の AL-1 (5xx エラー率) が担う**。
+  **経緯**: [API/auth-accounts.md](API/auth-accounts.md) §3.7 の旧文言 (「アカウントが解決できない失敗」) が
+  本項も含むように読め、実装リポ hassan-v3 の `blocked-by-design` issue #127 で照会された
+  (同リポの PR #128 / issue #34 は既に「記録しない」で実装済み)。同 §3.7 の文言は本項に合わせて限定済み。
+  - **却下 (b): これも `signin_failed` として `actor_type = 'unauthenticated'` で記録する**
+    (§3.7 の旧文言をそのまま広く解釈する案)。却下の理由は 4 点:
+    ①**本項の直前の行が「NULL になるのは未登録メール・存在しない管理者アカウントへの試行のみ」と限定列挙**しており、
+    より具体的なこちらを正とする (2 文書が食い違うときは限定側に寄せる)
+    ②[API/auth-accounts.md](API/auth-accounts.md) §3.7 は冒頭で「記録項目・`action` の値域の SSOT は本節 (§4.5)」と
+    **自ら委譲している**ため、広い側の文言に本節を合わせると委譲関係が逆流する
+    ③**部分的な DB 障害の間、正規利用者の試行が互いに異なる `email_hash` を持つ `unauthenticated` の
+    `signin_failed` として、`(action, occurred_at DESC) WHERE actor_type = 'unauthenticated'` の部分インデックス
+    ([data-model.md](data-model.md) §4.10) に並ぶ** — これは [auth.md](auth.md) §6.11-3 が名指しで防ぐと宣言した
+    **パスワードスプレー (多数アカウントに 1 回ずつ) の署名そのもの**であり、**障害が攻撃に見えて検知を狂わせる**
+    ④**500 系の可観測性は監査ログではなくログ / メトリクスが持つ** (§4.1 / §4.3 / §4.6 の分担)。
+    監査ログは「誰が何をしたか」の記録であり、**主体が不明な事象を溜めても O-6 に寄与しない**
+  - **代償**: **DB 障害中に発生したサインイン失敗の件数は `activity_logs` から数えられない**。
+    復元する場合は §4.1 のリクエストログ (`request_id` + ステータス 500 + パス `POST /accounts/signin`) から数える
 - **メールアドレスを平文で保存しない**。**`detail.email_hash` = HMAC-SHA256 (サーバ側 pepper
   `AUDIT_EMAIL_HMAC_KEY`)** に入れる。同一アドレスへの試行を突き合わせられ、かつ辞書攻撃で復元されない。
   **v2 は `activity_logs.account_email` に平文で保存していた** (`hassan-v2-backend/db/schema.sql:482`〜`:489`) —
@@ -333,6 +367,88 @@ Agent 経路・直接 API 経路の**両方**で、1 回の LLM 呼び出しご�
 - **これが無いと v2 でできていた `signin_failed` / `mfa_verify_failed` が v3 で落ち、O-6 が v2 より後退する**。
   加えて [auth.md](auth.md) §6.11-3 が名指しで防ぐと宣言した**パスワードスプレー (多数アカウントに 1 回ずつ) の
   検知が「失敗の分布」でしか行えず**、保持期間の短いログでは月次の突き合わせができない
+
+#### 4.5.3 `event_logs` — 利用状況・画面アクセスの計測 (**本節が SSOT**。2026-08-29 新設 — AC-2.6 / [data-model.md](data-model.md) DM-15)
+
+**新設の理由**: 2026-08-26 のオーナー確認で **v2 の `event_logs` 相当が v3 の要件として必要**と判明し、
+DM-15 の「`audit_logs` 1 本に集約する」が撤回された。**列定義は [data-model.md](data-model.md) §4.10 が SSOT**、
+**記録対象と値域は本節が SSOT**。
+
+**`activity_logs` との線引き**:
+
+| 観点 | `activity_logs` (監査記録) | `event_logs` (利用状況の計測) |
+|---|---|---|
+| 問いに答えるもの | **誰が何をしたか** (事後の追跡・調査) | **どの機能がどれだけ使われたか** (利用状況の分析) |
+| 記録の主体 | actor (`account` / `admin_account` / `unauthenticated`) | **常に認証済みの `account_id`** (未認証の事象は記録しない) |
+| 記録する事象 | 生成・削除・共有設定の変更・認証系・契約管理 (§4.5 / §4.5.1) | **機能の利用** (下の値域表の 6 種)。**v2 は API を伴わない画面操作も記録していたが、v3 の本増分では受け口を作らない** ([API/settings.md](API/settings.md) の ST-Q10) |
+| 消えるか | 消えない (append-only・FK なし) | **スキーマ上は物理削除で CASCADE** ([data-model.md](data-model.md) §3.4.2 の分類②) だが、**本増分は `accounts` を物理削除しない (DM-Q2) ため実際には発生しない** — 実質 `activity_logs` と同様に消えない |
+| 読む API | `GET /activity-logs` | `GET /usage-summary` |
+
+**重複の規則 (重なる操作がある。どちらに書くかを操作ごとに決める)**:
+
+1. **`activity_logs` の記録対象は §4.5 / §4.5.1 のままで、本節の新設によって減らさない** —
+   各ドメインの設計書が既に「この操作は監査する」を確定させている
+   ([API/plans.md](API/plans.md) §10.5 / [API/ideas.md](API/ideas.md) / [API/idea-boards.md](API/idea-boards.md) §5 など)。
+   **`event_logs` の新設を理由にこれらを書き換えない**
+2. **`event_logs` に書くのは下の値域表の 6 種だけ**である (本増分)。
+   **`activity_logs` にしか無い事象** (削除・共有設定の変更・認証系・契約管理) を `event_logs` に複写しない
+3. **6 種のうち、監査対象でもある操作は両方に 1 行ずつ書く** (重複を許す。
+   例: 企画書ドラフトの生成は `activity_logs` の証跡と `event_logs` の `plan_drafted` の両方)。
+   **理由 (2026-08-30 訂正)**: **信頼境界・量・保持期間・値域の運用が違う**
+   (実装リポ issue #144 が挙げた 4 観点。§0 の表参照): `activity_logs` は**サーバのみが書く証跡**
+   (改ざん不可・失敗を WARN + メトリクスで観測・長期保持) だが、`event_logs` は
+   **認証済みブラウザが `event_type` を任意に送れる参考値**(取りこぼし前提・クリック粒度で量が桁違いに多い・
+   短期保持で月次パーティション drop を想定)。**証跡に参考値を混ぜると、監査ログの閲覧・エクスポート・
+   調査のたびにクライアント申告行を除外するフィルタが要り、フィルタ漏れは捏造行を証跡として読む形になる**。
+   逆に証跡側だけに寄せると `event_logs` 側の値域運用 (UI 追従で緩く増減させる) が監査値域の CI 照合
+   (`check-activity-actions.sh`) に巻き込まれる。**旧記述の「消え方が違う (CASCADE で消える)」は誤り**
+   だったため削除した — 本増分は `accounts` を物理削除しないため (DM-Q2)、`event_logs` は
+   `activity_logs` と同様に実質消えない。**片方から他方を導出できない** (書き手の信頼度と保持方針が
+   異なるため、片方を他方の代替にできない) 点が「どちらかを省くとその用途が成立しない」の正しい理由である
+4. **重複する書き込みは 1 つの共通ヘルパに閉じる** (`service` 層に 1 本。
+   「監査する操作のうち集計軸でもあるもの」の対応表をコードの 1 箇所に持つ) —
+   **2 箇所に別々の書き込みを書くと片方の書き漏れが起きる** (BE-10)。
+   書き込み失敗時の扱いは 2 本とも §4.5 と同じ (別トランザクションの best-effort + WARN + メトリクス)
+
+**却下 (a) 重複を許さず「生成は `event_logs` にのみ書く」**: `activity_logs` から生成の証跡が落ち、
+**O-6 が v2 より後退する** (v2 は `activity_logs` に `idea_create_success` 等を持つ —
+`hassan-v2-backend/db/schema.sql:467`〜`:479`)。加えて各ドメインの §10.5 相当の表をすべて書き換えることになる。
+**却下 (b) 重複を許さず「集計は `activity_logs` を UNION して出す」**: 集計元を `event_logs` に移した判断
+([data-model.md](data-model.md) §4.10) を無効化する。
+
+**`event_type` の値域 (`GET /usage-summary` のクロス集計の軸はこの 6 種のみ)**:
+
+| `event_category` | `event_type` | 発生箇所 |
+|---|---|---|
+| `theme` | `theme_created` | テーマ作成 (`POST /themes` — [API/themes.md](API/themes.md) §2) |
+| `idea` | `idea_diverged` | アイデア発散の実行 ([API/ideas.md](API/ideas.md) §1) |
+| `business_plan` | `plan_drafted` | 企画書ドラフトの生成 ([API/plans.md](API/plans.md) §1) |
+| `knowledge` | `knowledge_chat` | ナレッジスレッドへの質問送信 (`POST /knowledge-threads/{thread_id}/messages` — [API/knowledge.md](API/knowledge.md) §2) |
+| `asset` | `asset_registered` | アセット登録 (`POST /assets` — [API/assets.md](API/assets.md) §2) |
+| `idea_board` | `comment_posted` | ボードコメントの投稿 ([API/idea-boards.md](API/idea-boards.md) §2) |
+
+**この 6 種は 2026-08-29 に §4.5.1 の「利用状況の集計対象」行から移設したもので、値は変えていない**
+(`GET /usage-summary` のレスポンス形は [API/settings.md](API/settings.md) §3 が SSOT)。
+
+**値域の担保方法 (`action` と異なる点)**:
+
+- **`event_category` / `event_type` は `text` + `CHECK`** ([data-model.md](data-model.md) §4.10 / DM-4)。
+  **`activity_logs.action` は `CHECK` を張らない** (§4.5.1 の却下) のに対し、**こちらは張る** —
+  **`event_type` は `GET /usage-summary` の集計表の行そのもの**であり、
+  **値域に無い値が書かれると集計表から黙って落ちる** (画面上は「その機能は使われていない」に見える)。
+  DB 側で閉じておけば書き込みが失敗して検知できる
+- **代償 (受け入れる)**: **値の追加がマイグレーションを伴う**。ただし
+  **「新しい値を許す方向」は非破壊**であり ([data-model.md](data-model.md) §6.2 の後方互換表)、
+  dev では自動適用・prod では承認付きで適用できる
+- **Go 定数 1 箇所を SSOT にし、CI で本表との一致を照合する点は `action` と同じ** (§4.5.1 の「値域の担保方法」)。
+  **CHECK と Go 定数の両方を同一 PR で変える** ([data-model.md](data-model.md) §7.1 の「②の列挙値と①の CHECK は同一 PR」)
+
+**記録の書き込み**: **失敗時の挙動は §4.5 の監査ログと同じ** (別トランザクションの best-effort・
+失敗は WARN ログ + メトリクス・`_ =` による無言破棄を禁止)。
+**画面操作 (API を伴わないもの) は FE が専用エンドポイント経由で送る** —
+**エンドポイントの定義は本増分の対象外**であり、**先送り先は [API/settings.md](API/settings.md) の ST-Q10**。
+**それまでに記録できるのは上表 6 種のうち API を伴うもの (= 6 種すべて)** であり、
+**`GET /usage-summary` は本増分で成立する**。
 
 ### 4.6 アラート (O-7)
 
@@ -383,7 +499,7 @@ CloudWatch の標準メトリクス)。したがって ⑦ / ⑧ のどちらの
 | O-3 コスト集計と上限 | **回答** | §4.2 (明細 + メトリクス) と §4.4 (安全弁)。**課金上限による拒否は設けない** (C-12)。可視化 + AL-4 で運用。**実施時期は 3 段に分かれる** (§6.1 の表が SSOT): **安全弁 = 初期実装 (④⑤)** / **明細の永続化 = v3 第 1 リリース前 (⑥)** / **集計メトリクス・コスト算出・AL-4 = v2 併用期間中 (⑦)** |
 | O-4 失敗の可観測性 | **回答** | §4.3 の 5 分類。F-1 は `stop_reason` が前提のため、抽象への要件追加が必須。**実施時期 = 初期実装** (§6.1 の ⑧。⑦ の先送り対象ではない) |
 | O-5 SSE / 長時間処理 | **回答** | §4.3 の F-5 と §4.4 の keep-alive。打ち切りは正常終了として扱い、理由をユーザーとログの双方に出す。**§4.4.1 の SSE 接続数メトリクスは初期実装** (デプロイ判断の入力。§6.1 の ⑧) |
-| O-6 監査ログ | **回答** | §4.5。v2 の `activity_logs` / `event_logs` 方式を踏襲。利用量明細とは別物。**書き込み失敗の WARN ログ + メトリクスは初期実装** (§6.1 の ⑧。判断は [architecture.md](architecture.md) §3.9③) |
+| O-6 監査ログ・利用状況ログ (AC-2.5 / **AC-2.6**) | **回答** | §4.5 (`activity_logs` = 監査記録) / **§4.5.3 (`event_logs` = 利用状況の計測。2026-08-29 新設)**。**v2 の 2 本構成をテーブル名ごと踏襲**し、両者の線引き (重複させない規則) を §4.5.3 に置いた。`GET /usage-summary` の集計元は `event_logs`。利用量明細 (§4.2) とは別物。**書き込み失敗の WARN ログ + メトリクスは初期実装** (§6.1 の ⑧。判断は [architecture.md](architecture.md) §3.9③) |
 | O-7 アラート | **回答** | §4.6 の AL-1〜**AL-7**。しきい値は初期値で、実データで調整する前提。**実施時期は §4.6 の表が示す** — **AL-4 (日次コストの急増) のみ v2 併用期間中 (§6.1 の ⑦)、残る 6 件は初期実装 (⑧)**。アラート基盤ごと第 2 増分にはできない |
 | (関連) A-4 | 参照 | ログに `account_id` / `contract_id` を載せるため、UseCase で確定した所有者スコープを context 経由で受け取る ([architecture.md](architecture.md) §3) |
 

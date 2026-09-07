@@ -49,59 +49,61 @@ PoC 側: `claude_managed_agents/internal/config/dotenv.go` の `WriteEnv` は固
 
 | # | 論点 | 採用案 | 却下案と理由 |
 |---|---|---|---|
-| OP-A | 環境の数と FE/BE の対応 | **local / dev / prod の 3 環境** (ユーザー指定)。FE は **Vercel の 1 プロジェクト**で `Development` / `Preview` / `Production` の 3 スコープを使い、**Preview = dev / Production = prod** に対応させる (§3.2) | (a) `main` を Vercel の Production Branch にする: H-4 (本番昇格を人間の操作にする) が消える — 04 §2.4 の確定に反する。(b) dev 用に別 Vercel プロジェクトを作る: ビルド設定と環境変数が二重管理になり、`production` ブランチ保護 (04 §4.1) との対応も二重化する。Preview スコープで同じ分離が得られる。(c) Vercel の Custom Environments を追加する: 設定要素が増えるだけで、3 環境では Preview / Production の 2 スコープで表現できる |
+| OP-A | 環境の数と FE/BE の対応 | **local / dev / staging / prod の 4 環境** (ユーザー指定。**2026-09-07 に 3 環境から改訂** = [infrastructure.md](infrastructure.md) INF-U)。**staging** = `main` の継続デプロイ先 (旧 dev)。FE は **Vercel の 1 プロジェクト**で `Preview` / `Production` の 2 スコープを使い、**Preview = staging / Production = prod** に対応させる (§3.2)。**dev は PR 単位のプレビュー環境**で FE も BE も ECS で動き Vercel を使わない (§5.1.2) | (a) `main` を Vercel の Production Branch にする: H-4 (本番昇格を人間の操作にする) が消える — 04 §2.4 の確定に反する。(b) dev 用に別 Vercel プロジェクトを作る: ビルド設定と環境変数が二重管理になり、`production` ブランチ保護 (04 §4.1) との対応も二重化する。Preview スコープで同じ分離が得られる。(c) Vercel の Custom Environments を追加する: 設定要素が増えるだけで、3 環境では Preview / Production の 2 スコープで表現できる |
 | OP-B | 設定値の置き場 | **5 分類に固定する**: ①**コード内定数** (環境で変わらない値) ②**非秘密の環境値** — **インフラ由来は ECS タスク定義の `environment`** (ecspresso が管理)、**アプリ由来は `backend/env/<env>.env`** (git 管理・**非秘密のみ**・イメージに同梱。**ユーザー決定 2026-08-02**。§3.3 の②) ③**Secrets Manager** (秘密。起動時に解決) ④**SSM Parameter Store で実行中に読み替える値** (非秘密で**再デプロイなしに変えたい**値) ⑤**SSM Parameter Store に置くが起動時に 1 回だけ解決する値** (**Agent ID / Environment ID**。版履歴を切り戻し手段に使う)。読み出しは `config` パッケージのみ ([architecture.md](architecture.md) §3.9②) | (a) **秘密を含む** `.env` をイメージに焼く (v2 方式): イメージを取得できる範囲すべてに秘密が渡り、dev/prod の分離も失われる — **v3 が env ファイルに許すのは②のアプリ由来 (非秘密) のみ**で、キー集合は CI が `config` の②定義と照合する (§3.3)。(b) すべてを Secrets Manager に入れる: 非秘密値の変更にも秘密の変更手順 (承認・監査) が掛かり、運用が重くなる。(c) すべてを ECS の `environment` に入れる: 秘密がタスク定義とコンソールの表示に残る。(d) **⑤ を作らず Agent ID / Environment ID を ④ (実行中に読み替える) に置く**: `apply_agent` は `release` より前に走るため、**稼働中の旧コードのタスクが最大 60 秒後に新 Agent を掴み「旧コード + 新 tool schema」という組み合わせが必ず発生する** (prod では H-3 承認から H-4 承認までの待ち時間ぶん継続する)。BE-8 (新しい引数が黙って捨てられる) / BE-10 (台帳の前提チェックが常に失敗する) の窓を設計自身が作ることになる。(e) **アプリ由来の非秘密値もタスク定義の `environment` に置く** (2026-08-02 まで採用): 値の変更が ecspresso のタスク定義テンプレート (JSON) の差分になり読みづらく、`.env.local` (OP-D) と形式が揃わない。**非秘密のアプリ由来値を env ファイルに統一するユーザー決定 (2026-08-02) で env ファイル方式へ変更した** (変更手順・反映タイミングは `backend/` を触る PR → デプロイのままで変わらない) |
 | OP-C | シークレットの粒度 | **用途単位で 1 シークレット** (`/hassan-v3/<env>/db/url` `.../auth/jwt-key` `.../anthropic/api-key` …) | (a) 環境ごとに 1 つの JSON シークレットへまとめる: 参照は減るが、**IAM を用途別に絞れず**、1 つのローテーションが全参照者を巻き込む。JWT 鍵 ([auth.md](auth.md) §6.8) と LLM キーは漏洩時の影響が別物なので分ける |
-| OP-D | ローカル開発の値 | **開発者が手で作る `.env.local` (git 管理外) に dev 相当の値を置く**。**prod の値は誰のローカルにも置かない** (04 §3.3 と同じ線) | (a) Secrets Manager から取得するスクリプトを配る: 開発者全員に AWS 認証情報が必要になり、退職時の失効漏れが「秘密の失効漏れ」になる。(b) PoC の `WriteEnv` 方式でプログラムが `.env` を書き換える: BE-3 (キー脱落) が再発し、`DATABASE_URL` の消失が静かなデータ喪失につながる |
+| OP-D | ローカル開発の値 | **開発者が手で作る `.env.local` (git 管理外) に staging 相当の値を置く**。**prod の値は誰のローカルにも置かない** (04 §3.3 と同じ線) | (a) Secrets Manager から取得するスクリプトを配る: 開発者全員に AWS 認証情報が必要になり、退職時の失効漏れが「秘密の失効漏れ」になる。(b) PoC の `WriteEnv` 方式でプログラムが `.env` を書き換える: BE-3 (キー脱落) が再発し、`DATABASE_URL` の消失が静かなデータ喪失につながる |
 | OP-E | Managed Agent ID と **Environment ID** の保管 | **SSM Parameter Store** (`/hassan-v3/<env>/agent/<name>/id` / `/hassan-v3/<env>/anthropic/environment-id` / `/hassan-v3/<env>/agent/<name>/source-hash`)。**バージョン履歴を旧 ID への切り戻し手段として使う** (§5.3)。**反映は次のタスク起動時** (§3.3 の⑤) | (a) Secrets Manager: Agent ID / Environment ID は秘密ではなく、版の扱いが `AWSCURRENT` / `AWSPREVIOUS` の 2 段に限られる。(b) リポジトリにコミットする (PoC の `.env` 相当): 環境ごとに値が違うため衝突し、`main` へのデプロイ用コミットが復活する (C-14 で廃止した運用)。**PoC は `AGENT_ID` と `ENVIRONMENT_ID` を対で `.env` に置いており** (`claude_managed_agents/internal/config/config_test.go:37`)、**Environment ID が未設定なら実行時にエラーを返す必須設定である** (`claude_managed_agents/cmd/devui/domain_discovery.go:453`) — したがって Agent ID だけを管理対象にすると必須設定が引き渡しから落ちる |
-| OP-F | デプロイの起動方法 | **BE = `deploy-backend.yml`** (dev は `main` への push で自動 / prod は `workflow_dispatch` + `main` 限定 + environment 承認)。**FE = Vercel の Git 連携** (`main` → Preview 自動 / `production` → Production)。**infra = 人間が `terraform apply`** | (a) FE も GitHub Actions から Vercel CLI で deploy する: Vercel の Promote / Instant Rollback (§5.3) を捨てることになり、**最短のロールバック手段が失われる**。(b) infra の `apply` を CI に持たせる: `replace` が RDS / ECS の作り直しになる経路を機械に任せることになる (04 §1.1 の注記) |
+| OP-F | デプロイの起動方法 | **BE = `deploy-backend.yml`** (staging は `main` への push で自動 / prod は `workflow_dispatch` + `main` 限定 + environment 承認) + **`deploy-preview.yml`** (dev = PR 単位。`preview` ラベルで自動。§5.1.2)。**FE = staging / prod は Vercel の Git 連携** (`main` → Preview 自動 / `production` → Production。**feature ブランチはビルドしない**) / **dev は `deploy-preview.yml` が ECS に出す**。**infra = 人間が `terraform apply`** | (a) FE も GitHub Actions から Vercel CLI で deploy する: Vercel の Promote / Instant Rollback (§5.3) を捨てることになり、**最短のロールバック手段が失われる**。(b) infra の `apply` を CI に持たせる: `replace` が RDS / ECS の作り直しになる経路を機械に任せることになる (04 §1.1 の注記) |
 | OP-G | ロールバックの第一手段 | **前のバージョンへ戻す操作**を第一手段にする: BE = `ecspresso rollback` / FE = Vercel の前デプロイを Promote / Agent = SSM の前バージョンの ID に戻す / DB = 非破壊は戻さない・破壊的はスナップショット復元 (04 §2.2) | (a) `git revert` + 再デプロイを第一手段にする: ビルド時間ぶん障害が延びる。revert は**戻した後の是正手段**として使う。(b) `deploymentCircuitBreaker` の自動戻しだけに頼る (v2 の実態): ヘルスチェックが通る種類の不具合 (誤ったレスポンス・越境) では発火しない |
 | OP-H | 環境戦略 (ブランチ運用) | **trunk-based + 環境変数フラグ** (questions.md Q-8 の推奨案 A。**暫定既定 — Q-8 は未回答**。§7.1) | (a) release ブランチ運用 (B): cherry-pick 漏れとマージ衝突が恒常化する。(b) 環境ごとにブランチを固定 (C): dev ブランチと `main` の差分が育ち、「dev で検証済み」の意味が薄れる。**回答が A 以外になった場合、§7.1〜§7.3 を差し替える** |
 | OP-I | フラグの実装形態 | **環境変数のみ** (BE = `backend/env/<env>.env` (§3.3 の②) → `config`、FE = Vercel の環境変数)。**判定の正は BE** (フラグ OFF のエンドポイントは 404)。FE は導線を隠すだけ。**フラグを API で配らない** | (a) `GET /features` のような API で配る: API 契約 ([API/README.md](API/README.md) の 6 ドメイン — 本数は同書 §3 が正) に**第 1 リリースまでの一時的な仕組み**を載せることになり、削除時に破壊的変更になる。(b) `feature_flags` テーブル (DB) で持つ: アカウント単位の限定公開が要るときの方式だが、C-11 (全面切替) では要求が無い。**必要になった時点で移行する** (移行の契機: 特定アカウントだけに機能を出す要求が発生したとき) |
-| OP-J | DB マイグレーションの自動適用範囲 | **非破壊 × dev のみ自動**。破壊的変更は environment 承認 (04 §2.2 が判定と承認先の SSOT)。加えて **破壊的変更は「2 段階リリース (拡張 → 縮小)」を必須**とする (§7.4) | (a) 全て手動承認: dev への継続デプロイ (C-15) が人間律速になり、1 日に複数回の検証が回らない。(b) 全て自動適用: dev の検証データ (会話ログ・生成物) が消えると受入確認そのものができない (04 §1.1 の注記と同じ線引き)。(c) アプリ起動時に自動適用 (PoC 方式): ECS の複数タスク起動時に同時適用が競合する |
+| OP-J | DB マイグレーションの自動適用範囲 | **非破壊 × staging のみ自動** (dev = preview は使い捨てスキーマのため破壊的変更も自動。§5.1.2)。破壊的変更は environment 承認 (04 §2.2 が判定と承認先の SSOT)。加えて **破壊的変更は「2 段階リリース (拡張 → 縮小)」を必須**とする (§7.4) | (a) 全て手動承認: dev への継続デプロイ (C-15) が人間律速になり、1 日に複数回の検証が回らない。(b) 全て自動適用: dev の検証データ (会話ログ・生成物) が消えると受入確認そのものができない (04 §1.1 の注記と同じ線引き)。(c) アプリ起動時に自動適用 (PoC 方式): ECS の複数タスク起動時に同時適用が競合する |
 
 ## 3. 環境 (D-1 / AC-3.1)
 
 > 本節が回答する ID: **D-1** / 対応 AC: **AC-3.1**
 
-### 3.1 3 環境の定義
+### 3.1 4 環境の定義 (2026-09-07 に 3 → 4。INF-U)
 
 | 環境 | 用途 | BE の実行場所 | DB | LLM | 誰が変更を入れられるか |
 |---|---|---|---|---|---|
 | **local** | 開発者の手元。UT と手動確認 | ローカルプロセス (docker compose の PostgreSQL) | ローカル | **dev と同じ Anthropic 組織の dev 用キー**。Agent ID は **dev の値を共有** (再発行は CI のみ) | 開発者本人 |
-| **dev** | 継続デプロイと受入確認 (C-15) | AWS ECS (dev クラスタ) | RDS (dev インスタンス) | dev 用キー / dev の Agent ID | `main` へのマージ (承認は H-1 のみ) |
+| **dev** (**PR 単位のプレビュー**) | 開発ブランチの検証。FE も ECS で動く | AWS ECS (dev クラスタ上に **PR ごとの FE / BE サービス**) | RDS (dev インスタンス 1 本を **PR 単位のスキーマ** `br_pr_<N>` で分離) | dev 用キー / **PR ごとに発行する Agent ID** | PR への `preview` ラベル付与 (承認なし。§5.1.2) |
+| **staging** (旧 dev) | 継続デプロイと受入確認 (C-15) | AWS ECS (staging クラスタ) | RDS (staging インスタンス) | staging 用キー / staging の Agent ID | `main` へのマージ (承認は H-1 のみ) |
 | **prod** | 本番 | AWS ECS (prod クラスタ) | RDS (prod インスタンス) | prod 用キー / prod の Agent ID | H-4 の承認を得た手動起動のみ |
 
-- **環境の識別は `APP_ENV` の 1 変数に統一する** (`local` / `dev` / `prod`)。
+- **環境の識別は `APP_ENV` の 1 変数に統一する** (`local` / `dev` / `staging` / `prod`)。
   v2 は `GO_ENV` (どの `.env` を読むか) と `APP_ENV` (アプリ内分岐) が別変数で、
   ログ出力の抑制条件が両者に分かれていた (§1 の 8)。**v3 は `.env` ファイルを読まないため
   「どのファイルを読むか」の変数が不要**になり、1 変数で足りる
-- **`APP_ENV` による挙動分岐は次の 2 つに限定する**: ①ログレベル (prod=info / dev,local=debug。
+- **`APP_ENV` による挙動分岐は次の 2 つに限定する**: ①ログレベル (prod=info / staging,dev,local=debug。
   [observability.md](observability.md) §2 の O-A) ②Swagger UI の公開 (prod では無効)。
   **リクエストログ・LLM 計測・監査ログは環境で分岐させない** (v2 は prod でリクエストログを出していない。
   [observability.md](observability.md) §1)
-- dev と prod は **同一の Terraform モジュールに変数差分のみを与えて作る** (`envs/dev` / `envs/prod`)。
+- dev / staging / prod は **同一の Terraform モジュールに変数差分のみを与えて作る** (`envs/dev` / `envs/staging` / `envs/prod`)。
+  **`envs/dev` は PR 単位のサービスを持たない共有基盤**で、サービスは `deploy-preview.yml` が作る ([infrastructure.md](infrastructure.md) X-11)。
   **差分の付け方と初期値 (タスク数・サイジング・ログ保持・WAF のモード等) は
   [infrastructure.md](infrastructure.md) §5.1 / §5.2 が SSOT** — 本書では再掲しない
 
 ### 3.2 FE (Vercel) と BE (AWS) の環境対応 — 運用ルール
 
 **論理環境と FE / BE の対応表そのものは [infrastructure.md](infrastructure.md) §5.3 が SSOT**
-(local / dev = `main` の Preview / prod = `production` の Production)。
+(local / staging = `main` の Preview / prod = `production` の Production。**dev = preview は Vercel を使わない**)。
 本節は**その対応を運用で崩さないためのルール**と、対応表に無いデプロイ契機を定める:
 
 | Vercel のスコープ | 対応する論理環境 | デプロイ契機 | 登録してよい値 |
 |---|---|---|---|
 | `Development` | local | 開発者の操作 (`next dev`) | 開発者の `.env.local` (API ベース URL は local または dev) |
-| **`Preview`** | **dev** | `main` および feature ブランチへの push (自動) | **dev の API ベース URL のみ** |
+| **`Preview`** | **staging** | `main` への push (自動)。**feature ブランチはビルドしない** (Ignored Build Step。§5.1.1 の MR-2) | **staging の API ベース URL のみ** |
 | **`Production`** | **prod** | `main` → `production` の PR マージ + Promote (H-4) | prod の API ベース URL |
 
-- **FE の環境は 2 系統 (Preview / Production) しか無い**ため、`Preview` を dev に固定する。
+- **FE の環境は 2 系統 (Preview / Production) しか無い**ため、`Preview` を staging に固定する。
   この対応関係が崩れる唯一の経路は「Preview の環境変数に prod の API ベース URL を入れる」ことなので、
   **prod 向けの値を `Preview` スコープに登録しない**ことを運用ルールにする
-- **feature ブランチの Preview も dev の BE を指す** — dev の BE は不特定の Preview から呼ばれる前提で扱う
-  (dev に本番データを置かない理由の 1 つ。§10.4 の仮定)。
-  Preview の URL が変動する場合の CORS 許可の扱いは [infrastructure.md](infrastructure.md) §5.3 の確認事項
+- **feature ブランチの Vercel Preview は使わない** (2026-09-07。INF-U) — ブランチ単位の検証は **dev (PR 単位のプレビュー環境。§5.1.2)** が受け持ち、
+  FE も ECS で動く。Vercel の Ignored Build Step で `main` / `production` 以外をビルドしない (§5.1.1 の MR-2)。
+  これにより「変動する Preview URL を CORS で許可するか」の問題は消える ([infrastructure.md](infrastructure.md) §5.3)
 - **秘密情報を `NEXT_PUBLIC_*` に置かない** (ブラウザバンドルに載る。
   [templates/app-monorepo/frontend/CLAUDE.md.tmpl](../../templates/app-monorepo/frontend/CLAUDE.md.tmpl) の Vercel 節)。
   FE が必要とする秘密 (存在する場合) は Server Actions / Route Handler 側の環境変数に置く
@@ -154,7 +156,7 @@ PoC 側: `claude_managed_agents/internal/config/dotenv.go` の `WriteEnv` は固
 | **ECS のアプリ** | Secrets Manager → タスク定義の `secrets` で環境変数として注入 (値はタスク起動時に解決) | タスク実行ロール (`ecsTaskExecutionRole` 相当) に**当該シークレットの ARN のみ**を許可 |
 | **ECS のアプリ (④ の可変値 / ⑤ の起動時解決値)** | SSM Parameter Store を SDK で読む (④ は実行中に再取得 / ⑤ は起動時に 1 回) | タスクロールに `/hassan-v3/<env>/*` の読み取りを許可 |
 | **CI (`deploy-backend.yml`)** | **OIDC で AWS ロールを引き受け、値は AWS 側から取る**。GitHub 側に持つのは下記の限定列挙のみ (**environment に紐づく** environment secret / variable として登録。**environment の一覧と本数は 04 §4.2 が正** — ここに件数を転記しない = DR-9) | OIDC。長期アクセスキーを置かない (v2 は長期キー運用) |
-| **CI (`e2e.yml`)** | **専用 environment `dev-e2e` の OIDC ロール**で Secrets Manager から E2E 用アカウントの資格情報を取る。**権限は read のみ** | OIDC。**`dev` と分ける** — モノレポでは `sub` クレームが environment で決まるため、共有すると E2E が dev のデプロイ用ロールを引き受けられる ([infrastructure.md](infrastructure.md) §4.5。2026-08-05 追加) |
+| **CI (`e2e.yml`)** | **専用 environment `staging-e2e` (旧 `dev-e2e`。INF-U) の OIDC ロール**で Secrets Manager から E2E 用アカウントの資格情報を取る。**権限は read のみ** | OIDC。**`staging` と分ける** — モノレポでは `sub` クレームが environment で決まるため、共有すると E2E が staging のデプロイ用ロールを引き受けられる ([infrastructure.md](infrastructure.md) §4.5。2026-08-05 追加) |
 | **運用者 (障害対応)** | **AWS 権限を持つのは、GitHub の `prod*` environment の承認者に設定された者に限る**。ロールバックも AWS コンソール / CLI ではなく **CI の `rollback-backend.yml` (workflow_dispatch)** から起動する (§5.3) | OIDC (CI 経由)。**個人に長期の AWS 認証情報を配らない** |
 | **開発者 (local)** | 手で作る `.env.local` (git 管理外) | AWS 認証情報を配らない (OP-D) |
 
@@ -258,7 +260,8 @@ build (イメージ) → plan_migration → apply_migration (H-2) → plan_agent
 
 | 環境 | 起動 | 承認 | 備考 |
 |---|---|---|---|
-| dev | `main` への push (自動) | 非破壊マイグレーションと Agent 再発行は自動 / **破壊的マイグレーションのみ承認** (`dev-db-destructive`) | C-15 の継続デプロイを人間で律速させない |
+| dev (PR 単位プレビュー) | PR の `preview` ラベル (`deploy-preview.yml`。§5.1.2) | なし (マイグレーション・Agent 発行とも自動。`dev-preview`) | 使い捨て環境。INF-U |
+| staging (旧 dev) | `main` への push (自動) | 非破壊マイグレーションと Agent 再発行は自動 / **破壊的マイグレーションのみ承認** (`staging-db-destructive`) | C-15 の継続デプロイを人間で律速させない |
 | prod | `workflow_dispatch` (手動) | `prod-db` / `prod-agent` / `prod` の 3 段 | **`main` 以外の ref からの prod 起動は最初のジョブで失敗する** (04 §2.4) |
 
 **各ジョブの実行場所と DB への到達経路 (この形以外で実装しない)**:
@@ -295,7 +298,7 @@ ecspresso の定義は **tfstate から クラスタ名 / subnet ID / SG ID / �
 - **要確認**: `verify` が 4 種のうちどれをどこまで検出するかは未検証。
   立ち上げ時に dev で故障注入して確かめる ([architecture.md](architecture.md) §3.11.4)
 
-**FE (app モノレポの `frontend/`)**: `main` への push で Preview (dev 相当)。本番は `main` → `production` の PR を
+**FE (app モノレポの `frontend/`)**: `main` への push で Preview (= staging)。feature ブランチは Vercel でビルドしない (dev = preview は §5.1.2)。本番は `main` → `production` の PR を
 マージし、**人間が Promote する** (H-4)。ビルドとデプロイは Vercel が行う (GitHub Actions からは起動しない。OP-F)。
 **Vercel プロジェクトの Root Directory は `frontend`** で、**`frontend/` `api/` に差分が無い push ではビルドしない**
 (§5.1.1 の MR-2)。
@@ -346,7 +349,7 @@ infra の出力 (RDS エンドポイント / ECS クラスタ名 / Secrets の A
 ビルド起動は Vercel が持つ):
 
 - **Root Directory** = `frontend`
-- **Ignored Build Step** = `frontend/` と `api/` の差分の有無で判定するコマンド (差分なし → ビルドしない)
+- **Ignored Build Step** = **①ブランチが `main` / `production` 以外ならビルドしない** (INF-U。feature ブランチの検証は dev = preview が受け持つ) **かつ ②`frontend/` と `api/` の差分の有無で判定する** (差分なし → ビルドしない)
 - **この 2 つは雛形で自動化できない人手設定**なので、立ち上げチェックリスト
   ([04-human-checkpoints.md](../../templates/shared/.claude/rules/04-human-checkpoints.md) §4) に入れる
 
@@ -374,6 +377,46 @@ MR-3 が空振りする** (2026-08-04 の design-reviewer 指摘 重大 1)。
   (`api/` は `.gitattributes` で `linguist-generated` を付け、レビュー差分から畳む)
 - **この検査が MR-1 の path filter で skip される条件を作らない** — `contract` ジョブは
   backend / frontend / api のどれが変わっても走らせる (片側だけの変更でも契約はずれ得る)
+
+### 5.1.2 dev = PR 単位のプレビュー環境 (`deploy-preview.yml`。INF-U)
+
+> 環境の定義と静的 / 動的の分担は [infrastructure.md](infrastructure.md) INF-U / X-11 / §6.1.1 が SSOT。本節は**ワークフローの振る舞い**を定める。
+
+**契機 (ラベル駆動)**:
+
+| 操作 | GitHub イベント | 動作 |
+|---|---|---|
+| PR に `preview` ラベルを付ける | `pull_request: labeled` | 環境を構築し、FE / BE の URL を PR にコメントする |
+| ラベル付き PR に push | `pull_request: synchronize` | 再デプロイ。`concurrency` (PR 番号でグループ化・`cancel-in-progress: true`) で最新 push だけ残す。**DB スキーマは維持しマイグレーション差分のみ適用** |
+| ラベルを外す / PR を close・merge | `pull_request: unlabeled` (`label.name == preview`) / `closed` | 環境を破棄 (ECS サービス・タスク定義・TG・リスナールール・`DROP SCHEMA ... CASCADE`・Agent・SSM パラメータ・ECR タグ) |
+| ラベルなし PR に push / draft PR | — | 何もしない (`ci.yml` のみ) |
+| 同じコードで再実行 | `workflow_dispatch` (PR 番号入力) / Re-run jobs | 再デプロイ (破棄はしない) |
+
+- 判定は **`contains(github.event.pull_request.labels.*.name, 'preview')`** で「現在ラベルが付いているか」を見る
+  (`labeled` は他ラベルでも発火する。`github.event.label.name` だけで判定すると誤動作する)
+- path filter で **`frontend/` のみの差分なら BE を、`backend/` のみなら FE を再デプロイしない** (`ci.yml` の `changes` と同じ条件)
+- **このワークフローのジョブをブランチ保護の必須チェックに入れない** — `if` で skip されたジョブは status を返さず PR が pending で止まる (MR-1 と同じ罠)
+- **`environment: dev-preview`** (承認者なし) を通り、OIDC ロールは `deploy-preview` ([infrastructure.md](infrastructure.md) §4.5)
+- **日次の掃除ジョブ** (`schedule`) が「close 済み PR に対応するサービス / スキーマ / Agent」を削除する (破棄ジョブの失敗・手動削除漏れの受け皿)
+- **同時数の上限 10** (暫定値。[infrastructure.md](infrastructure.md) §5.2)。超えたら構築ジョブを失敗させ、PR に「上限到達。不要な PR のラベルを外す」とコメントする
+
+**PR ごとに決まる値と注入経路** (§3.3 の分類②は env ファイルで静的だが、preview は PR ごとに値が変わるため **ecspresso のタスク定義テンプレートで `deploy-preview.yml` が上書き注入する**):
+
+| 値 | FE / BE | 注入先 |
+|---|---|---|
+| `APP_ENV=dev` / `NEXT_PUBLIC_APP_ENV=dev` | 両方 | タスク定義 `environment` |
+| `DB_SCHEMA=br_pr_<N>` (BE は接続時に `search_path=br_pr_<N>,public` を設定) | BE | タスク定義 `environment`。**接続文字列 (Secrets Manager) は全 PR で共有** |
+| CORS 許可オリジン `https://pr-<N>.dev.<domain>` | BE | タスク定義 `environment` (env ファイルの値を上書き) |
+| `NEXT_PUBLIC_API_BASE_URL=https://pr-<N>-api.dev.<domain>` | FE | タスク定義 `environment` ([frontend.md](frontend.md) §12.2) |
+| Agent ID / Environment ID | BE | SSM `/hassan-v3/dev/pr-<N>/agent/...` (構築時に発行。§5.2 の `apply_agent` と同じ手順を承認なしで実行) |
+
+**DB スキーマ方式の前提** (BE 側の要件。実装リポへの申し送り):
+①マイグレーション SQL にスキーマ名をハードコードしない (`search_path` 任せ)。マイグレーション管理テーブルもスキーマ内に作る
+②拡張 (`pgcrypto` 等) は `public` に 1 回だけ入れ、`search_path` の末尾に `public` を置く
+③スキーマ名は PostgreSQL 識別子として安全な形 (`br_pr_<N>`。PR 番号のみを使いブランチ名を含めない — 長さ・文字種の正規化を不要にする)
+④`DB_SCHEMA` 未設定時は `public` (staging / prod は従来どおり)
+
+**却下案**: ①PR コメント `/deploy` で起動 (`issue_comment`) — default ブランチの workflow 定義で動くためブランチ側の workflow 変更を試せず、コメント権限を持つ全員が起動できる。②ラベルの付け直しを再デプロイの手段にする — `unlabeled` で破棄されスキーマも消えるため「更新」にならない。再デプロイは push か `workflow_dispatch`。
 
 ### 5.2 Managed Agent の発行・更新をどこで行うか (AC-3.3 / D-6)
 
@@ -522,22 +565,24 @@ delete は**参照するセッションが無い場合のみ**。→ §5.3 で�
 
 ### 6.1 段階と完了条件
 
+> **2026-09-07 (INF-U)**: 本節の継続デプロイ先は **staging** (旧 dev)。dev = PR 単位プレビューは §5.1.2 で、RL の段には含まれない。
+
 **段階 ID は `RL-0`〜`RL-5`** とする。実装リポの作業ループのステップ ID (`S-1`〜`S-10`。
 [01-construction-loop.md](../../templates/shared/.claude/rules/01-construction-loop.md) §1.1) と
 **番号空間を衝突させない**ため、`S-` を使わない。
 
 | 段階 ID | 内容 | 完了条件 (**すべて満たすまで次へ進まない**) | 承認 |
 |---|---|---|---|
-| **RL-0** | **dev 基盤の先行構築** (infra リポ) | ①`terraform plan` の差分ゼロ ②出力値 (RDS エンドポイント / ECS クラスタ名 / Secrets ARN) が取得できる ③backend の空実装が dev へデプロイでき、ヘルスチェックが通る ④04 §4 の立ち上げチェックリスト (ブランチ保護 / environment / ラベル / **`gate` 必須チェック / Vercel の Root Directory・Ignored Build Step / CODEOWNERS**) が 2 リポで完了 | 人間の `apply` |
-| **RL-1** | **dev への継続デプロイと受入確認** (開発期間の全体) | ①第 1 リリース対象の全 AC が dev で確認済み ②**LLM 呼び出し明細が dev で記録されている** ([architecture.md](architecture.md) §3.8.3 の「第 1 リリース前」要件) ③-a **AL-1〜AL-7 の全件が dev で「アラーム状態へ遷移する」ことを試験済み** (CloudWatch アラームの状態遷移で確認。**dev は AL-6 以外を通知しない** (§7.5) ため、通知の到達ではなく**アラーム自体の発火**を確認する) ③-b **dev の通知経路 1 本 (AL-6 → dev の SNS トピック → Slack) の到達を試験済み** ④`rollback-backend.yml` を dev で 1 回実行して戻ることを確認済み (§5.3) | H-1 のみ |
-| **RL-2** | **prod 基盤の構築** ([infrastructure.md](infrastructure.md) §6.2 が手順の SSOT) | ①`envs/prod` と `envs/dev` の差分が**変数のみ**であることを `plan` で確認 ②§4.5 の棚卸し表の全行に prod の値が投入済み (**Environment ID を含む**) + **dev に開発者専用 Agent (`dev-<ユーザー名>-` 接頭辞) が残っていないことを確認** (§4.4) ③`prod-db` / `prod-agent` / `prod` の承認者が設定済み ④**prod の Agent を発行済み** (`apply_agent` を prod で 1 回通す) ⑤RDS のバックアップ保持と削除保護が prod の値 ([infrastructure.md](infrastructure.md) §5.2) で有効 ⑥**prod の通知経路の到達試験**: `alerts-critical` と `alerts-warning` の各トピックへテスト通知を送り、**critical は Slack とメールの両方に、warning は Slack に届くことを確認**する (§7.5。**prod の 2 トピックとメール購読は dev に存在しないため、本番で初めて使われることを避ける**) ⑦**prod の初期スキーマを投入済み** (2026-07-30 追加。`apply_migration` を **`release` を伴わずに 1 回単独で起動**し、`prod-db` の承認を通す。手順の SSOT は [data-model.md](data-model.md) §6.3)。**RL-3 の §6.3 ②データ移送はテーブルが存在する前提**なので、初期投入をここで終える — §7.4 の「リリースより前に適用」は**差分適用の規則**であり、初期投入はその特例である | 人間の `apply` + H-3 + **H-2** |
+| **RL-0** | **staging 基盤の先行構築** (infra リポ) | ①`terraform plan` の差分ゼロ ②出力値 (RDS エンドポイント / ECS クラスタ名 / Secrets ARN) が取得できる ③backend の空実装が staging へデプロイでき、ヘルスチェックが通る ④04 §4 の立ち上げチェックリスト (ブランチ保護 / environment / ラベル / **`gate` 必須チェック / Vercel の Root Directory・Ignored Build Step / CODEOWNERS**) が 2 リポで完了 | 人間の `apply` |
+| **RL-1** | **staging への継続デプロイと受入確認** (開発期間の全体) | ①第 1 リリース対象の全 AC が staging で確認済み ②**LLM 呼び出し明細が staging で記録されている** ([architecture.md](architecture.md) §3.8.3 の「第 1 リリース前」要件) ③-a **AL-1〜AL-7 の全件が staging で「アラーム状態へ遷移する」ことを試験済み** (CloudWatch アラームの状態遷移で確認。**staging は AL-6 以外を通知しない** (§7.5) ため、通知の到達ではなく**アラーム自体の発火**を確認する) ③-b **staging の通知経路 1 本 (AL-6 → staging の SNS トピック → Slack) の到達を試験済み** ④`rollback-backend.yml` を staging で 1 回実行して戻ることを確認済み (§5.3) | H-1 のみ |
+| **RL-2** | **prod 基盤の構築** ([infrastructure.md](infrastructure.md) §6.2 が手順の SSOT) | ①`envs/prod` と `envs/staging` の差分が**変数のみ**であることを `plan` で確認 ②§4.5 の棚卸し表の全行に prod の値が投入済み (**Environment ID を含む**) + **staging に開発者専用 Agent (`staging-<ユーザー名>-` 接頭辞) が残っていないことを確認** (§4.4) ③`prod-db` / `prod-agent` / `prod` の承認者が設定済み ④**prod の Agent を発行済み** (`apply_agent` を prod で 1 回通す) ⑤RDS のバックアップ保持と削除保護が prod の値 ([infrastructure.md](infrastructure.md) §5.2) で有効 ⑥**prod の通知経路の到達試験**: `alerts-critical` と `alerts-warning` の各トピックへテスト通知を送り、**critical は Slack とメールの両方に、warning は Slack に届くことを確認**する (§7.5。**prod の 2 トピックとメール購読は staging に存在しないため、本番で初めて使われることを避ける**) ⑦**prod の初期スキーマを投入済み** (2026-07-30 追加。`apply_migration` を **`release` を伴わずに 1 回単独で起動**し、`prod-db` の承認を通す。手順の SSOT は [data-model.md](data-model.md) §6.3)。**RL-3 の §6.3 ②データ移送はテーブルが存在する前提**なので、初期投入をここで終える — §7.4 の「リリースより前に適用」は**差分適用の規則**であり、初期投入はその特例である | 人間の `apply` + H-3 + **H-2** |
 | **RL-3** | **本番リリース (v3 の公開)** | §6.3 の手順を完了し、①スモーク (認証 → 会話 1 ターン → 生成物の保存 → 再取得) が prod で成功 ②5xx 率と LLM 失敗率が AL-1 / AL-2 のしきい値未満で **24 時間経過** ③LLM 明細が prod に記録されている | H-2 / H-3 / H-4 |
 | **RL-4** | **v2 併用期間 (機能単位の移送)** | ドメイン単位に: ①v3 に同等機能がある ②(該当時) データ移送が完了し写像できなかった件数が 0 ③v2 側の当該機能への**新規アクセスが 0 件**であることをアクセスログで確認 ④[architecture.md](architecture.md) §3.5.2 の対象パス表に移植ドメインを追記済み ⑤**gateway を通らない LLM 呼び出しが残っていない** (O-2 の移植受入条件) | ドメインごとに H-4 |
 | **RL-5** | **v2 の廃止** | ①v2 の全機能が v3 に存在する ②v2 の DB スナップショットを取得し**保管期限を決めて記録**した ③v2 の外部連携 (CMS の webhook 受信先・メールのリンク先) が v3 に移設済み ④アカウント基盤の一本化が完了 (**未確定**。§6.5) ⑤v2 の ECS サービスを `desiredCount: 0` にして **14 日間**維持し (この間は起動し直せる)、その後 [infrastructure.md](infrastructure.md) §9.1 の削除順序 (Route53 → ECS → ALB → RDS (最終スナップショット取得後) → S3) で破棄する | 人間 (RL-5 は不可逆) |
 
-**RL-0 と RL-1 の並行**: RL-0 (インフラ) は RL-1 (dev での検証) の前提だが、
+**RL-0 と RL-1 の並行**: RL-0 (インフラ) は RL-1 (staging での検証) の前提だが、
 **アプリの開発作業自体は RL-0 と並行して進む** (local 環境で開発できる)。
-C-15 が「インフラ先行」と言っているのは **dev への継続デプロイが RL-0 の完了に依存する**という意味である。
+C-15 が「インフラ先行」と言っているのは **staging への継続デプロイが RL-0 の完了に依存する**という意味である。
 
 ### 6.2 データ移行の位置づけ (**方式は未確定**)
 
@@ -672,7 +717,7 @@ RL-3 の公開前に、**v2 との差分のうちユーザーに見えるもの*
 | ブランチ | 役割 | 保護 |
 |---|---|---|
 | `feature/*` (`<type>/<issue番号>-<slug>`) | 作業ブランチ。壊れてよい | なし (エージェントが push 可) |
-| **`main`** | **常時リリース可能**。dev へ継続デプロイ | 直接 push 禁止 / 必須レビュー 1 / 必須ステータスチェック (04 §4.1) |
+| **`main`** | **常時リリース可能**。staging へ継続デプロイ (INF-U 以前は dev) | 直接 push 禁止 / 必須レビュー 1 / 必須ステータスチェック (04 §4.1) |
 | **`production`** (**用途は frontend のみ。実体は app モノレポのブランチ**) | Vercel の Production Branch | `main` からの PR のみ / 必須レビュー 1 (04 §4.1 の最後の項目) |
 
 - **`production` は app モノレポのブランチなので、必然的に `backend/` サブツリーを含む**
@@ -692,7 +737,7 @@ RL-3 の公開前に、**v2 との差分のうちユーザーに見えるもの*
 | 項目 | 確定値 |
 |---|---|
 | **実装** | 環境変数のみ。BE = `backend/env/<env>.env` (§3.3 の②) を `config` が読む。FE = Vercel の環境変数 |
-| **値の置き場 (確定)** | **`backend/env/<env>.env`** に書く (**2026-08-02 変更** — 従来は `stacks/<env>/` のタスク定義テンプレート。§3.3 の②のユーザー決定に伴う移動)。**infra リポの `envs/<env>` の変数にしない** — 理由: フラグの切替を**通常の PR + dev への継続デプロイ**で回したい (infra の変数にすると infra PR + 人間の `apply` が必要になり、リードタイムが別物になる)。**却下案**: ①infra の変数にする — 上記のリードタイムと所有者の二重化。②SSM (§3.3 の④) に置いて再デプロイなしに切り替える — 「未完成機能を prod で無効にする」用途では**コードとフラグが同時に切り替わる**必要があり、④ の判定基準 (§3.3) を満たさない。③`stacks/<env>/` のタスク定義テンプレートに書く (2026-08-02 まで採用) — アプリ由来の非秘密値を env ファイルへ統一する決定 (§3.3 の②) に伴い移動。リードタイムは同じ (app の PR → デプロイ) |
+| **値の置き場 (確定)** | **`backend/env/<env>.env`** に書く (**2026-08-02 変更** — 従来は `stacks/<env>/` のタスク定義テンプレート。§3.3 の②のユーザー決定に伴う移動)。**infra リポの `envs/<env>` の変数にしない** — 理由: フラグの切替を**通常の PR + staging への継続デプロイ**で回したい (infra の変数にすると infra PR + 人間の `apply` が必要になり、リードタイムが別物になる)。**却下案**: ①infra の変数にする — 上記のリードタイムと所有者の二重化。②SSM (§3.3 の④) に置いて再デプロイなしに切り替える — 「未完成機能を prod で無効にする」用途では**コードとフラグが同時に切り替わる**必要があり、④ の判定基準 (§3.3) を満たさない。③`stacks/<env>/` のタスク定義テンプレートに書く (2026-08-02 まで採用) — アプリ由来の非秘密値を env ファイルへ統一する決定 (§3.3 の②) に伴い移動。リードタイムは同じ (app の PR → デプロイ) |
 | **命名** | `FEATURE_<機能名>` (真偽値。既定は **false** = 未定義なら無効) |
 | **判定の正** | **BE**。フラグ OFF のエンドポイントは **404** を返す (経路が存在しないのと同じ扱い。403 は「権限が無い」の意味なので使わない。[auth.md](auth.md) §6.6 の判定規則と整合) |
 | **FE の役割** | **導線を隠すだけ**。FE のフラグが古くても、BE が 404 を返すため機能は露出しない |
@@ -703,7 +748,7 @@ RL-3 の公開前に、**v2 との差分のうちユーザーに見えるもの*
 **フラグは第 1 リリースまでの一時的な仕組み**である。C-11 (全面切替) では段階開放のフラグは要らず、
 必要なのは **「dev で検証中の未完成機能を prod で無効にする」用途だけ**である。
 
-### 7.3 dev の未リリース変更を prod に出さない仕組み
+### 7.3 staging の未リリース変更を prod に出さない仕組み (旧「dev の…」。INF-U)
 
 **3 段で担保する** (どれか 1 つでは漏れる):
 
@@ -712,9 +757,9 @@ RL-3 の公開前に、**v2 との差分のうちユーザーに見えるもの*
 | 1 | **prod デプロイは `workflow_dispatch` の手動起動のみ** + `main` 以外の ref を最初のジョブで失敗させる (04 §2.4) | `main` へのマージが自動で prod に流れる経路 | **機械** |
 | 2 | **`environment: prod` の承認** (承認前にジョブが待機) + Deployment branches を `main` のみに制限 | 承認なしのリリース | **機械** |
 | 3 | **未完成機能は `FEATURE_*` が prod で false** (§7.2) | 「`main` に入っているが出したくない機能」がリリースに含まれてしまう経路 | **機械** (既定 false) |
-| 4 | **H-4 の承認材料に「その commit が dev で検証済みであること」を含める** (04 §1.1 の確認観点②) | dev を経ていないコミットの本番投入 | **人間** |
+| 4 | **H-4 の承認材料に「その commit が staging で検証済みであること」を含める** (04 §1.1 の確認観点②) | staging を経ていないコミットの本番投入 | **人間** |
 
-**4 だけが人間の確認事項**である。機械化しない理由: 「dev で検証済み」は
+**4 だけが人間の確認事項**である。機械化しない理由: 「staging で検証済み」は
 **デプロイ済みであること (機械で分かる) と受入確認が済んでいること (issue / PR の状態)** の 2 つを
 突き合わせる判断であり、後者が機械判定できない。**代わりに 1〜3 で「承認を経ずに出る経路」を全て塞ぐ**。
 
@@ -726,7 +771,7 @@ RL-3 の公開前に、**v2 との差分のうちユーザーに見えるもの*
 
 | # | 変更の種類 | 04 §2.2 の判定 | 適用 | 手順 | 戻し方 |
 |---|---|---|---|---|---|
-| 1 | テーブル追加 / インデックス追加 (CONCURRENTLY) | 非破壊 | dev 自動 / prod 承認 | 単発 | 戻さない (未使用のまま残る) |
+| 1 | テーブル追加 / インデックス追加 (CONCURRENTLY) | 非破壊 | staging 自動 / prod 承認 (**dev = preview は全種自動**。§5.1.2) | 単発 | 戻さない (未使用のまま残る) |
 | 2 | **NULL 許容**の列追加 / 既定値付きの列追加 | 非破壊 | 同上 | 単発 | 戻さない |
 | 3 | **既定値の無い `NOT NULL` 列の追加** | 破壊的 (3) | 承認 | **2 段階**: ①NULL 許容で追加 + バックフィル (非破壊) → ②`NOT NULL` 化 (破壊的) | ①は戻さない / ②は制約を外す |
 | 4 | **列の削除** | 破壊的 (1) | 承認 | **2 段階**: ①コードから参照を消してリリース (アプリ変更のみ) → ②`DROP COLUMN` | ②はスナップショット復元のみ |
@@ -742,7 +787,7 @@ RL-3 の公開前に、**v2 との差分のうちユーザーに見えるもの*
    これを満たさない変更は、必ず上表の 2 段階 / 3 段階に分解する。
    **適用は ECS RunTask で VPC 内から行う** (§5.1 の実行場所表 / [infrastructure.md](infrastructure.md) INF-H)
 2. **破壊的変更の承認条件に RDS スナップショットの取得を含める** (承認コメントにスナップショット ID を書く。04 §2.2)
-3. **prod は「非破壊でも承認必須」** (04 §2.2 の表)。dev の非破壊のみが自動適用
+3. **prod は「非破壊でも承認必須」** (04 §2.2 の表)。staging の非破壊のみが自動適用。**dev (preview) は使い捨てスキーマなので破壊的変更も自動** (INF-U)
 4. **1 回のデプロイに 2 段階の両方を含めない**。①と②は別 PR・別デプロイにする
    (同一デプロイに入れると、①の完了を確認せずに②が走る)
 
@@ -806,7 +851,7 @@ golang-migrate (PoC が使用。up/down のバージョン管理) か。
 
 | ID | 状態 | 回答 / 先送り先 |
 |---|---|---|
-| **D-1 環境** | **回答** | §3。local / dev / prod の 3 環境。**FE (Vercel の Preview / Production) と BE (AWS の dev / prod) の対応表は §3.2**。設定値の持ち方は §3.3 の 5 分類 (コード内定数 / ECS `environment` / Secrets Manager / SSM で実行中に読み替える値 / SSM で起動時に 1 回解決する値) |
+| **D-1 環境** | **回答** | §3。local / dev / staging / prod の 4 環境 (2026-09-07。INF-U)。**FE (Vercel の Preview / Production = staging / prod。dev は ECS) と BE (AWS の dev / staging / prod) の対応表は §3.2**。設定値の持ち方は §3.3 の 5 分類 (コード内定数 / ECS `environment` / Secrets Manager / SSM で実行中に読み替える値 / SSM で起動時に 1 回解決する値) |
 | **D-3 デプロイ手順** | **回答** | §5。BE = `deploy-backend.yml` の 6 ジョブ (dev 自動 / prod 手動 + 承認)。**`apply_migration` は ECS RunTask で VPC 内から実行する** (§5.1 の実行場所表)、FE = Vercel、infra = 人間の `apply`。**ロールバックは §5.3** (`rollback-backend.yml` から `ecspresso rollback` / Vercel の Promote / Agent ID の前バージョン + タスク置換 / DB は原則戻さない)。**戻す順序は適用順序の逆**。API 変更時の順序は §5.4 |
 | **D-5 シークレット** | **回答** | §4。Secrets Manager (秘密) と SSM Parameter Store (非秘密) を分ける。**用途単位で 1 シークレット**。**CI が GitHub environment secret / variable に持ってよい値は §4.1 の限定列挙のみ** (DB 接続情報 / API キー / Agent ID・Environment ID は置かず、OIDC ロール経由で AWS から取得する)。登録・変更・ローテーション・ローカル開発の手順は §4.2〜§4.4。**PoC の `WriteEnv` (BE-3) と v2 の `.env` 焼き込みは不採用** (§4.1) |
 | **D-7 段階リリース** | **回答** | §6 (段階と完了条件 RL-0〜RL-5) + §7.3 (未リリース変更を prod に出さない 4 段の仕組み)。**フラグは環境変数のみ・判定の正は BE** (§7.2) |
@@ -920,6 +965,7 @@ golang-migrate (PoC が使用。up/down のバージョン管理) か。
 | OP-F1 | [observability.md](observability.md) §4.3 または §4.4 | **「アクティブな SSE 接続数」メトリクスを計測項目として追加する** (名前 `sse.active_connections` / 単位 = 接続数のゲージ / 出力元 = アプリからの EMF / 出力間隔 30 秒)。**計測項目の SSOT は同書**であり、本書 §6.3 の暫定定義は追記までのつなぎである。追記されない場合、§6.3 の「起動前に SSE セッション数を確認する」手順が実行不能になり「利用の少ない時間帯に行う」に退行する | §6.3 |
 | OP-F2 | [observability.md](observability.md) §4.6 | **「重大度の分類・環境差・トピックの本数は `operations.md` §7.5 が SSOT」の相互参照を 1 行加える** (同節にはしきい値と通知先しか無く、本書がそれを前提にしていることが同書側から辿れない)。しきい値の改訂で分類が変わる場合は本書 §7.5 も同時に直す | §7.5 |
 | OP-F3 | [templates/shared/.claude/rules/04-human-checkpoints.md](../../templates/shared/.claude/rules/04-human-checkpoints.md) §2.6 の H-3 行「二重化」列 | 「prod の Anthropic API キーを CI の environment secret に限定して置く」を **「prod の Anthropic API キーは Secrets Manager に置き、CI は OIDC ロールで取得する (GitHub 側に置かない)」** へ差し替える (§4.1 の限定列挙と矛盾している。§4.2 の表は是正済み) | §4.1 / §9 |
+| **OP-F5** | `templates/app-monorepo/.github/workflows/` (`deploy-backend.yml` / `e2e.yml` / **新規 `deploy-preview.yml`**) + `templates/infra-repo/` + 実装リポ 2 本の `.claude/rules/04-human-checkpoints.md` / infra リポ `modules/iam` | **INF-U (2026-09-07) の追随 — 未了**: ①`deploy-backend.yml` / `e2e.yml` の `environment: dev` / `dev-db-destructive` / `dev-e2e` を `staging` 系に改名 ②`deploy-preview.yml` を §5.1.2 の仕様で新設 ③infra リポの OIDC ロール (`deploy-dev` 等) を [infrastructure.md](infrastructure.md) §4.5 の新名称に合わせ `deploy-preview` を追加 ④実装リポの rule 04 同期コピーを本リポの `templates/shared` 版に揃える | §3 / §5.1.2 / [infrastructure.md](infrastructure.md) INF-U |
 | OP-F4 | `templates/app-monorepo/.github/workflows/` | **`rollback-backend.yml` の雛形を追加する** (§5.3 の「`rollback-backend.yml` に要求する形」)。現状は雛形が無く、OP-G の第一手段を起動する経路が引き渡し物に含まれていない | §5.3 / §9 |
 
 > **OP-F1〜F4 は 2026-07-30 に解消済み** (メインセッションが対応):
@@ -939,6 +985,7 @@ golang-migrate (PoC が使用。up/down のバージョン管理) か。
 | [observability.md](observability.md) §4.6 | アラート通知先の実体 | **形は回答・宛先は未確定** (§7.5 / OP-R3) |
 | [observability.md](observability.md) §4.4 | 安全弁のしきい値を「再デプロイなしで変更できる形」にする | **回答** (§3.3 の④。SSM Parameter Store + TTL 60 秒) |
 | [architecture.md](architecture.md) §8 | ツールループ中のトランザクション粒度 (ターン全体で 1 トランザクションの分割可否) | **先送り (条件付き)**: 既定 (ターン全体で 1 トランザクション) を維持する。**再検討の契機を確定**: ①RDS の接続数が上限の 70% に達する ②長時間トランザクションによる vacuum の遅延がメトリクスで観測される。どちらも実測が要るため RL-1 (dev 継続デプロイ) 以降に判断する |
+| [API/auth-accounts.md](API/auth-accounts.md) **R-AA-37** / [auth.md](auth.md) §10.2 **R-7①** | **社内管理者のブートストラップ (最初の 1 人) の手順** — 移行スクリプトが `admin_accounts` 行と `register_admin_password_requests` 行を作り**平文の登録トークンを標準出力に 1 度だけ出す**。運用者が `POST /admin/password-registrations` でパスワードを設定する (期限 7 日) | **未対応 (2026-08-29 受信)**。**RL-2 (§6.1) の完了条件に 1 項目として足す**予定 — **`POST /admin/admins` は SuperAdmin の `X-Admin-Token` を要求するため、最初の SuperAdmin が存在しないと誰も管理画面に入れない** (RL-3 の当日に発覚する形になる)。**トークンをジョブログ・実行ログに残さない**取り扱いと、**SuperAdmin を 2 名以上にする手順** (R-7②) も同じ節で書く |
 | [API/README.md](API/README.md) API-Q7 | 非同期ジョブの heartbeat しきい値と定期実行の仕組み | **本書の対象外**。値の置き場のみ確定 (§3.3 の④ = SSM)。しきい値と実行方式は**アセット / ナレッジの非同期処理を含む増分**で API 設計側が確定する |
 
 ### 10.4 仮定 (違えば §2 の判断が変わる)
@@ -950,7 +997,7 @@ golang-migrate (PoC が使用。up/down のバージョン管理) か。
   - **Environment を共有せざるを得ない場合**: **dev の tool 定義変更が prod の Agent 実行環境に
     影響し得る経路が残る** (承認を経ずに prod の挙動が変わる)。影響範囲と対応は §5.2 の Environment 節 /
     未確定として OP-R8 に登録済み
-- **仮定 2**: Vercel の環境変数スコープ (Development / Preview / Production) で FE の 3 環境を表現する。
+- **仮定 2**: Vercel の環境変数スコープ (Development / Preview / Production) で FE の local / staging / prod を表現する (dev = preview は Vercel を使わない。INF-U)。
   feature ブランチの Preview も dev の BE を指すため、**dev の BE は不特定の Preview から呼ばれる**
   前提で運用する (dev に本番データを置かない理由の 1 つ)
 - **依存 (仮定ではなく確認済み)**: §6.1 の RL-2 完了条件 ⑤ と §5.3 の破壊的変更のロールバックは

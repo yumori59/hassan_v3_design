@@ -18,7 +18,7 @@
 ## 開発環境
 
 ~~TODO: DevとProd~~
-→ 確定 (2026-07-29): local / dev / prod の 3 環境。**dev を先行構築し開発と並行して継続デプロイ、
+→ 確定 (2026-07-29): local / dev / prod の 3 環境 (**2026-09-07 に local / dev / staging / prod の 4 環境へ改訂**。dev = PR 単位プレビュー、staging = 旧 dev。`infrastructure.md` INF-U)。**dev を先行構築し開発と並行して継続デプロイ、
 本番は開発完了後に 1 回で全面切替** (C-15)。IaC は **Terraform = 基盤 / ecspresso = ECS リリース** (Q-7=B)
 
 ~~TODO: 開発環境に入っている修正を切り分けて本番リリースできるようにしたい~~

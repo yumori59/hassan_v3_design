@@ -72,8 +72,8 @@
 | PUT | `/settings/notifications` | 通知設定更新 | 個人 | B: 上と同じ項目 — R: 同じ | 200 / **400** (列挙外の値) | 1 |
 | GET | `/settings/workspace` | v3 側ワークスペース設定取得 | 契約 | R: `{default_asset_visibility: "private"\|"contract"}` (**`timezone` は ST-Q1 の結論が「使う」の場合のみ追加**) | 200 | 1 |
 | PUT | `/settings/workspace` | 同 更新 | 契約 | B: 上と同じ項目 — R: 同じ | 200 / **403** (契約内管理者以外) / **400** (列挙外の値) | 1 |
-| GET | `/usage-summary` | 契約の利用量集計 (**月 × メンバー × 活動種別のクロス集計** — ST-Q9=a) | 契約 | Q: `from_month` / `to_month` (`YYYY-MM`) — R: `{months:[...], members:[{account_id, name}], counts:{<action>: {<month>: {<account_id>: n}}}}`。**活動種別の値域は [../observability.md](../observability.md) §4.5.1 の**「利用状況の集計対象」行の 6 種のみ** (同表の認証・メンバー設定系の action はクロス集計の軸に含めない。D-ST-6 と同じ委譲)。集計元は `audit_logs` ([../data-model.md](../data-model.md) §4.10) | 200 / **403** (契約内管理者以外) / **400** (月形式・期間) | 1 |
-| GET | `/activity-logs` | 契約の活動ログ一覧 | 契約 | Q: `from` / `to` / `account_id` (**自契約のメンバーのみ**) / `limit` / `offset` — R: `{items:[{occurred_at, actor:{account_id, name}, action, target}], total_count}`。**読むテーブルは `audit_logs`** ([../data-model.md](../data-model.md) §4.10 / DM-15) — **エンドポイント名との不一致は意図的** (パス名は利用者向けの「活動ログ」、テーブルは監査記録の統合先)。`activity_logs` テーブルを v3 に作らない・`audit_logs` を改名しない | 200 / **403** (契約内管理者以外) / **400** (契約外の `account_id`) | 1 |
+| GET | `/usage-summary` | 契約の利用量集計 (**月 × メンバー × 活動種別のクロス集計** — ST-Q9=a) | 契約 | Q: `from_month` / `to_month` (`YYYY-MM`) — R: `{months:[...], members:[{account_id, name}], counts:{<event_type>: {<month>: {<account_id>: n}}}}`。**活動種別の値域は [../observability.md](../observability.md) §4.5.3 の `event_type` の 6 種のみ** (`activity_logs.action` の値 — 認証・メンバー設定系 — はクロス集計の軸に含めない。D-ST-6 と同じ委譲)。**集計元は `event_logs`** ([../data-model.md](../data-model.md) §4.10。**2026-08-29 に `activity_logs` から変更** — 却下案と理由は同節「`event_logs` の判断の適用」) | 200 / **403** (契約内管理者以外) / **400** (月形式・期間) | 1 |
+| GET | `/activity-logs` | 契約の活動ログ一覧 | 契約 | Q: `from` / `to` / `account_id` (**自契約のメンバーのみ**) / `limit` / `offset` — R: `{items:[{occurred_at, actor:{account_id, name}, action, target}], total_count}`。**読むテーブルは `activity_logs`** ([../data-model.md](../data-model.md) §4.10 / DM-15) — **2026-08-29 の改名 (`audit_logs` → `activity_logs`) でパス名とテーブル名が一致した** (旧記述の「エンドポイント名との不一致は意図的」は解消済み)。**`event_logs` は読まない** — 本 API は監査記録の参照であり、利用状況の計測は `GET /usage-summary` が担う (線引きは [../observability.md](../observability.md) §4.5.3) | 200 / **403** (契約内管理者以外) / **400** (契約外の `account_id`) | 1 |
 | GET | `/settings/eval-criteria` | 契約の評価基準取得 (**2026-08-24 前倒し — PV-D5**) | 契約 | R: `{axes:[{id, name, weight, subs:[{id, name, points, note}], anchors:[{score, label, sam_min?, cagr_min?, profit_min?, detail?}]}], verdicts:[{rank, label, min_composite?, min_axis?, weak_axis_below?, max_weak_axes?, feasibility_below?}], criteria_version}` (**2026-08-24 に実装 (#112) で確定** — 旧暫定の verdicts 自由文 `cond` は撤回: D-ST-8 ⑤の「閾値は 0.0〜10.0 尺度」の検証が自由文では成立しないため、**ランクごとに固定の閾値フィールドを持つ構造化形**にした。ランク別の必須/禁止フィールドは [ideas.md](ideas.md) §6.3.3 の条件表と 1:1。サブ基準にも固定 `id` を持つ — 評価出力のキーとして C-6 が参照するため契約ごとに変えられない)。**行なしは 200 + 既定基準** (`entity/idea` の Go 定数。[ideas.md](ideas.md) §6.3) | 200 | 1 |
 | PUT | `/settings/eval-criteria` | 同 更新 | 契約 | B: 上と同じ項目 (`criteria_version` は送らない — サーバが更新) — R: 同じ。**upsert** (行なしは作成)。バリデーションは §4 D-ST-8 | 200 / **403** (契約内管理者以外) / **400** (軸 3 本固定・重み合計 100・値域違反) | 1 |
 
@@ -152,7 +152,7 @@ if !authAccount.AuthRoleID.IsAdmin() { 403 }     // 契約内ロールの判定
 | **D-ST-1'** | **D-ST-1 を反転した理由** (2026-07-30) | **認証系 API を v3 で実装する** (`signin` / `signup` / パスワードリセット / MFA / メンバー管理 / 会社情報 + **手動ロック API**) | **元の採用案 (v2 再利用) を維持すると、[../auth.md](../auth.md) が確定させたセキュリティ対策のすべてに実装先が無くなる** — 署名鍵の新規発行 (同 §6.8。v2 の鍵は git 追跡下で露出)・**トークン漏洩時の失効手段である手動ロック API** (同 §6.9)・リセットトークンの `crypto/rand` 化 (同 §6.10)・応答マスクとレート制限 (同 §6.11)。**v2 側は改修しない方針** (同 §9.3 Q-A3) と組み合わせると、v2 再利用は「対策を実装しない」と同義になる。**残る代償**: 元の却下理由 (a) が指摘していた「同一の `accounts` を 2 つのサービスが書く」問題は消えておらず、**併用期間中のアカウント基盤の二重化**として `docs/design/data-model.md` / 移行設計 (AC-3.5) が扱う ([../auth.md](../auth.md) §10.2 R-1) |
 | D-ST-2 | **通知設定の置き場** | **v3 が持つ** (`/settings/notifications`) | (a) v2 の `accounts` に列を足す: v2 のスキーマ変更が必要で、通知対象イベント (アイデア発散の完了) は v3 の機能。**v3 の機能の設定を v2 が持つと、v3 だけで完結する変更ができなくなる** |
 | D-ST-3 | **アセット可視性の既定値** | **v3 が持つ** (`/settings/workspace` の `default_*_visibility`。**テーマ / アセット / アイデアの 3 カテゴリ** = v2 の `sharing_settings` の 3 カテゴリと 1:1)。**増分 1** で有効化 (**2026-07-31 に C-16 で前倒し**)し、適用先 ([assets.md](assets.md) の `visibility`) と同じ増分に揃える (§3.2) | (a) v2 の `sharing_settings` を使う (`POST /sharing-settings` — `hassan-v2-backend/router/router.go:189`): **v3 のアセットは v3 の DB にある**ため、v2 の設定を v3 が読むには DB 共有か API 呼び出しが必要になる (D-ST-1 の却下理由と同じ)。加えて**v2 には GET が無く現在値を読めない**ため、そのままでは設定画面に表示できない。**ただし v2 の既存設定値 (契約ごとの共有 ON/OFF) は移行対象**であり、切替時に v3 の既定値へ写す必要がある (ST-Q5) |
-| D-ST-4 | **利用量サマリの提供元** | **v3 が新設** (`GET /usage-summary`) | (a) v2 の `GET /event_logs/analytics` (`hassan-v2-backend/router/router.go:236`) を再利用: **集計対象 (生成アイデア数・アクティブテーマ数・アセット登録数) が v3 の DB にある**ため、v2 では算出できない。(b) v2 の `event_logs` に v3 からイベントを書き込む: 書き込みのために DB 共有か API 追加が必要で D-ST-1 に反する |
+| D-ST-4 | **利用量サマリの提供元** | **v3 が新設** (`GET /usage-summary`)。**集計元は v3 の `event_logs`** (**2026-08-29 に `activity_logs` から変更** — [../data-model.md](../data-model.md) §4.10 が判断の SSOT。v2 が `event_logs` を集計元にしていたのと同じ対応関係になる) | (a) v2 の `GET /event_logs/analytics` (`hassan-v2-backend/router/router.go:236`) を再利用: **集計対象 (生成アイデア数・アクティブテーマ数・アセット登録数) が v3 の DB にある**ため、v2 では算出できない。(b) v2 の `event_logs` に v3 からイベントを書き込む: 書き込みのために DB 共有か API 追加が必要で D-ST-1 に反する |
 | D-ST-5 | **プラン・課金の扱い** | **本増分の対象外** (先送り) | (a) 使用量表示だけ作る: C-12 (上限なし) により**ユーザーが見て行動を変える必要がない**情報になり、O-3 の可視化は運用者向けで足りる。(b) プロトタイプのプラン表示をそのまま実装: 「Business プラン月額」「AI 生成回数」は静的モックで、課金基盤 (請求・プラン変更) の設計が存在しない。**先送り先**: 課金要件が確定した増分 |
 | D-ST-6 | **活動ログの記録項目** | **API の形 (`occurred_at` / `actor` / `action` / `target`) を本ファイルで決め、記録する `action` の値域は [../observability.md](../observability.md) §4.5 に委ねる** | (a) 値域まで本ファイルで決める: 監査対象イベントは全ドメイン横断で決まる (O-6) ため、API 設計ファイルに閉じると各ドメインの追加のたびに本ファイルを直すことになる。(b) v2 の `activity_log_type` enum をそのまま使う: v3 の機能 (会話型アイデア創出・ナレッジ) のイベントが値域に無い |
 | D-ST-7 | **FE から見た 2 系統の API** | ~~FE は v2 API (認証・アカウント) と v3 API (機能) の 2 つのベース URL を持つ~~ → **D-ST-1' により反転。認証・アカウントも v3 が提供するため、v3 の API だけで完結する**。**ただし併用期間中は未移植の v2 機能があるため 2 系統が残る** — 変換層 (エラー形式・命名) を API 境界の 1 箇所に閉じる方針と `orval` の生成先分離は**そのまま有効** | (b) 変換層を作らず両形式をコンポーネントまで持ち込む: FE-2 (snake_case 漏れ) と同じ構造の問題になる。**併用期間中の追加論点**: v2 と v3 でトークンが別になるため (`../auth.md` §9.3 Q-A1)、**FE は両系統のトークンを保持する** ([../auth.md](../auth.md) §10.2 R-2) |
@@ -224,13 +224,13 @@ if !authAccount.AuthRoleID.IsAdmin() { 403 }     // 契約内ロールの判定
 |---|---|---|
 | A-1 | [README.md](README.md) §2.1。v3 新設の 6 本すべて認証必須。**§5 の移植対象のうち signin / signup / reset-password / signup-links 取得は本質的に未認証**であり、[../auth.md](../auth.md) §6.7 の**公開エンドポイントのホワイトリスト + CI 検査**で管理する (D-ST-1' により v3 が持つことになったため、v2 での公開範囲 — 同 §1.6 — をそのまま引き継ぐ) | AC-1.1 |
 | A-2 | **回答**: 本ディレクトリのエンドポイントは `AuthRoleUser` のみ。契約内管理者限定は §3.1 の 4 本 (2026-08-24 に 3 → 4 — PV-D5。[../auth.md](../auth.md) §9.3 Q-A2 への回答を含む)。**ただし §5 の移植対象には社内管理者認証 (`X-Admin-Token`) を要するものが含まれる** — ロック解除 / MFA 登録・検証・リセット ([../auth.md](../auth.md) §6.2 の例外。**社内管理者は MFA 必須**)。**本ディレクトリ外**であり、認証系統の分離は同 §6.7 の **3 系統**ホワイトリストが担う | — |
-| A-3 | v3 が新設する `account_notification_settings` / `workspace_settings` / `audit_logs` は、それぞれ `account_id` / `contract_id` を持つ (**2026-08-25 訂正**: 旧記述の「`activity_logs` (v3 側)」は誤り — v3 の監査テーブルは `audit_logs` 1 本 ([../data-model.md](../data-model.md) DM-15) で、`activity_logs` という v3 テーブルは存在しない。なお `audit_logs.contract_id` は認証失敗系のみ NULL 可 — 同 §4.10) | data-model で確定 |
+| A-3 | v3 が新設する `account_notification_settings` / `workspace_settings` / `activity_logs` / **`event_logs`** は、それぞれ `account_id` / `contract_id` を持つ (スキーマの SSOT は [../data-model.md](../data-model.md) §4.1.1 / §4.10)。**2026-08-29 更新**: v3 の活動ログは **`activity_logs` (監査記録) + `event_logs` (利用状況の計測) の 2 本**である (DM-15 の改訂。旧記述の「v3 の監査テーブルは `audit_logs` 1 本で `activity_logs` という v3 テーブルは存在しない」は失効した — `audit_logs` は `activity_logs` へ改名された)。`activity_logs.contract_id` は認証失敗系のみ NULL 可・**`event_logs.contract_id` / `account_id` は NOT NULL** (同 §4.10) | data-model で確定 |
 | A-4 | 通知設定は `account_id`、ワークスペース設定・サマリ・活動ログは `contract_id` を Repository のクエリ条件に入れる。`GET /activity-logs` の `account_id` パラメータは**自契約メンバーであることをサーバが検証**する ([README.md](README.md) D-API-8) | — |
 | A-5 | 本表の「固有ステータス」列 + [README.md](README.md) §2.5。**本ファイルの 403 は §3.1 の 4 本** (R-1。2026-08-24 に 3 → 4 — PV-D5)。ディレクトリ全体では 12 本 ([idea-boards.md](idea-boards.md) の 8 本を含む) | **AC-1.4** |
 | A-6 | v3 新設分に LLM 経路は無い。**`GET /companies/genai` (会社情報の AI 生成) は §5 の移植対象に含まれるため v3 の管轄になった** — 移植時は [../architecture.md](../architecture.md) §3 の `gateway` 経由を必須とし (O-2 の全経路計測)、Dify 依存の判定は [../llm-migration.md](../llm-migration.md) が担う | §5 の注 |
 | A-7 | ワークスペース設定の `default_*_visibility` が共有の既定値を持つ (D-ST-3)。**書く側と読む側をどちらも増分 1 に置く** (**2026-07-31 に C-16 で改訂**。旧記述は「どちらも増分 2・増分 1 では共有が発生しない」だったが、**v2 で共有していた契約が切替後に共有を変更できなくなる**ため成立しない。[../auth.md](../auth.md) §6.12) | [README.md](README.md) §5 API-Q3 |
 | O-3 | **部分回答**: ユーザー向けのコスト表示は作らない (D-ST-5)。`GET /usage-summary` は**件数のみ**でコストを含まない。運用者向けの可視化は [../observability.md](../observability.md) §4.2 / §6.1 へ | C-12 と整合 |
-| O-6 | **回答**: `GET /activity-logs` を新設し、監査記録の**参照経路**を作る (v2 は `activity_logs` テーブルがあるのに参照 API が無い)。**記録項目の定義は [../observability.md](../observability.md) §4.5** (D-ST-6) | — |
+| O-6 | **回答**: `GET /activity-logs` を新設し、監査記録 (`activity_logs`) の**参照経路**を作る (v2 は `activity_logs` テーブルがあるのに参照 API が無い)。**`GET /usage-summary` は利用状況の計測 (`event_logs`) を集計する** (2026-08-29 に集計元を変更 — [../data-model.md](../data-model.md) §4.10)。**記録項目の定義は [../observability.md](../observability.md) §4.5 (監査) / §4.5.3 (計測)** (D-ST-6)。**2 本の線引き (何をどちらに書くか) は同 §4.5.3 が SSOT** | **AC-2.6** |
 | D-5 | **JWT 署名鍵は共有しない。v3 で新規発行し Secrets Manager に置く** (§4.1 と一致。[../auth.md](../auth.md) §9.3 Q-A1 / §6.8 が SSOT)。加えて **§5 の移植によりメール送信・S3 の資格情報が v3 側に必要になる** — 洗い出しは [../infrastructure.md](../infrastructure.md) | [../auth.md](../auth.md) §6.8 |
 
 ---
@@ -271,4 +271,22 @@ if !authAccount.AuthRoleID.IsAdmin() { 403 }     // 契約内ロールの判定
   (b) 4 指標を維持し、クロス集計は `/activity-logs` に集約クエリ (`group_by`) を足して担わせる / (c) 4 指標を維持し FE がログから集計。
   [Answer]: **(a) クロス集計形に変更** (2026-07-30 ユーザー回答)。§3 の `GET /usage-summary` に反映済み。
   旧 4 指標 (`active_rate` 含む) は廃止 — [../data-model.md](../data-model.md) §4.10 / DM-Q5 も同時に解消。
-  活動種別の値域は [../observability.md](../observability.md) §4.5 の `action` 定義と揃える
+  活動種別の値域は [../observability.md](../observability.md) **§4.5.3 の `event_type`** と揃える
+  (**2026-08-29 更新**: 集計元が `event_logs` に移ったため、旧記述の「§4.5 の `action` 定義」から差し替えた)
+
+- **ST-Q10: API を伴わない画面操作をどう記録するか** (**2026-08-29 新設**)。
+  事実: v2 の `event_logs` は **API リクエストを伴わないボタン操作**も記録している
+  (`event_type_enum` の「APIリクエストしないボタン操作」群 = `idea_download_csv` /
+  `business_plan_open_chat` / `asset_download_csv` 等 — `hassan-v2-backend/db/schema.sql:385`〜`:415`)。
+  v3 は `POST /event_logs` 相当の**受け口を持っていない** ([../../analysis/v2-feature-inventory.md](../../analysis/v2-feature-inventory.md) の `POST /event_logs` 行)。
+  **本増分では受け口を作らない** — `GET /usage-summary` のクロス集計軸 6 種
+  ([../observability.md](../observability.md) §4.5.3) は**すべて API を伴う操作**なので、
+  受け口が無くても集計は成立する。
+  **仮定**: 画面操作の計測は「利用状況分析を v2 と同じ粒度まで戻す」段階で必要になる。
+  **先送り先**: 設定ドメインの次の増分 (受け口を作る場合の候補は `POST /events`。
+  **v2 のパス名 `POST /event_logs` をそのまま使わない** — v3 の第 1 階層はリソース名であり、
+  テーブル名を露出させないため)。
+  **申し送り (実装リポ issue #144 の「やること 2」への回答)**: v2 の `POST /event_logs` は認証済み
+  クライアントが `event_type` を任意に送れる経路でありながら**レート制限が無かった**。**受け口を作る
+  増分では [../auth.md](../auth.md) §6.11-3 の対象②** (認証済み経路。`account_id` キー) **に含めること**を
+  先送り先の要件として明記する。**本増分は受け口自体を作らないため、レート制限も対象外**

@@ -203,7 +203,7 @@
 | `board` | アイデアボードの 18 本 | 同上 |
 | `news` · `settings` | お知らせ 5 本 / 設定 6 本 | 同上 |
 | `account` | 認証・アカウント基盤の 37 本 | 同上。`db/queries/account/` は v2 移植分として設計 `data-model.md` §3.6 に記載がある |
-| `ops` | `llm_call_records` / `audit_logs` / レート制限 | 同上。ドメインではなく運用系のため、どの区分に置くかが未決 |
+| `ops` | `llm_call_records` / `activity_logs` / `event_logs` / レート制限 | 同上。ドメインではなく運用系のため、どの区分に置くかが未決 |
 
 ### OpenAPI 定義の出力先 (2026-08-03 に確定)
 
