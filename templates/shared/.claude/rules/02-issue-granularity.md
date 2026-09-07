@@ -366,7 +366,7 @@ OR は `S-1` で 5 欄の存在を自分で確認する。1 つでも欠けて�
 |---|---|---|---|
 | `task-backend.yml` (app) | Controller / UseCase / Service / entity / Repository / gateway / DB スキーマ (マイグレーション) / Managed Agent (prompt・tool schema) / 生成物 (sqlc・wire) / **契約 (`api/openapi.yaml`)** | `01` §1.3 の backend 行 + 契約行 | 該当なし / 着手前の計画承認 / DB マイグレーション適用 / Managed Agent 再発行 / 本番デプロイ |
 | `task-frontend.yml` (app) | 画面 (app / pages) / コンポーネント / 純粋ロジック (lib) / API クライアント (生成型) / デザイントークン / E2E | `01` §1.3 の frontend 行 + 契約行 | 該当なし / 着手前の計画承認 / 本番デプロイ (Vercel production) |
-| `task.yml` (infra リポ) | `modules/` (network・ecs・rds・iam・observability) / `envs/dev` / `envs/prod` / IAM ポリシー / Secrets・SSM / リモート state・backend 設定 | `01` §1.3 の infra 行 | 該当なし / 着手前の計画承認 / `terraform apply` (dev) / `terraform apply` (prod) |
+| `task.yml` (infra リポ) | `modules/` (network・ecs・rds・iam・observability) / `envs/dev` (PR 単位プレビューの共有基盤) / `envs/staging` (`main` の継続デプロイ先 = 旧 dev。INF-U) / `envs/prod` / IAM ポリシー / Secrets・SSM / リモート state・backend 設定 | `01` §1.3 の infra 行 | 該当なし / 着手前の計画承認 / `terraform apply` (dev / staging) / `terraform apply` (prod) |
 
 infra の「影響する層」は backend の 6 パッケージ層 (4 層 + `entity/` / `gateway/`) に対応する概念が無いため、
 **`modules/` と `envs/` の区分 + 破壊的差分を生みやすい対象 (IAM / Secrets / state)** に読み替える。
