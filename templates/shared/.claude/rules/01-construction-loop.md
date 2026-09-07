@@ -350,7 +350,7 @@ OR は SA の差し戻し報告を**自分で判断して埋めない**。§4.2 
 S-10 の後に走るリリース系は**人間承認点**であり、承認の機構は rule `04-human-checkpoints.md` が定める。
 本ルールが定めるのはループとの接続だけ:
 
-- `main` へのマージで **dev への継続デプロイ**が走る (backend は `deploy-backend.yml` / frontend は Vercel の Preview)
+- `main` へのマージで **staging への継続デプロイ**が走る (backend は `deploy-backend.yml` / frontend は Vercel の Preview)。**PR 単位の dev (preview) 環境は `preview` ラベルで起動する** (設計リポ `docs/design/operations.md` §5.1.2)
 - **DB マイグレーションの適用 (D-4)** と **Managed Agent の再発行 (D-6)** を含む issue は、
   S-2 でその該当を宣言し、S-9 の PR 本文に「適用が必要な変更」として明記する。
   適用は人間の承認を経て行われ、**エージェントは実行しない**

@@ -468,7 +468,7 @@ OpenAI へ流れていた。
 
 **実施時期と記録**:
 
-- **実施**: dev への継続デプロイ期間 (RL-1。[operations.md](operations.md) §6.1) 内
+- **実施**: staging (旧 dev。`infrastructure.md` INF-U) への継続デプロイ期間 (RL-1。[operations.md](operations.md) §6.1) 内
 - **プロファイル既定値の確定**: **RL-3 (本番リリース) の前**。未実測の feature を prod に出さない
   (**C-7 / N-2 も第 1 リリースに含まれる**ため対象。埋め込みプロバイダの選定が RL-3 前に決まっていることが前提 — §9.1 の LM-Q6)
 - **記録先**: `docs/analysis/llm-model-benchmark.md` (未作成。§9 の LM-R5)。

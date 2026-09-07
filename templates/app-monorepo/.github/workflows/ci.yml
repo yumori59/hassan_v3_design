@@ -451,11 +451,13 @@ jobs:
 
       - name: 検査 3 NEXT_PUBLIC_ の許可リスト (A-1)
         # ブラウザバンドルに載る環境変数を許可リストで固定する。
-        # v2 は API のベース URL を NEXT_PUBLIC_ で公開していた (V-8) — v3 はサーバ専用に変える。
+        # 段階1 (frontend.md §2.0) はブラウザが BE を直接叩くため、API のベース URL の公開が要る
+        # (v2 の V-8 と同じ形)。段階2 でサーバ専用の API_BASE_URL に移すとき 1 件へ戻す。
         run: |
           set -uo pipefail
           # 許可する NEXT_PUBLIC_ 変数名 (スペース区切り)。増やすときは PR レビューの対象にする
-          ALLOWED="NEXT_PUBLIC_APP_ENV"
+          # SSOT: frontend.md §12.2 の表で「ブラウザに露出」と分類した変数 (段階1 = 2 件)
+          ALLOWED="NEXT_PUBLIC_APP_ENV NEXT_PUBLIC_API_BASE_URL"
           bad=0
           for name in $(grep -rhoE 'NEXT_PUBLIC_[A-Z0-9_]+' src 2>/dev/null | sort -u); do
             case " $ALLOWED " in

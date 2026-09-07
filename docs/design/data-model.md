@@ -103,7 +103,7 @@
 | アイデアボード | `idea_boards` (filter jsonb) / `idea_board_phases` | 無し | `idea_boards` ほか 4 テーブル (§4.8) |
 | お知らせの既読 | `read_news_accounts` | 無し | `read_news_accounts` (v2 命名を踏襲。§4.9) |
 | 共有設定 | `sharing_settings` (契約 × カテゴリ) | 無し | **持たない** — per-resource の `visibility` 列に置き換える (§4.3 / DM-9) |
-| 活動ログ | `activity_logs` (enum) / `event_logs` | 無し | **`audit_logs` 1 本** (§4.10 / DM-15) |
+| 活動ログ | `activity_logs` (enum) / `event_logs` | 無し | **`activity_logs` + `event_logs` の 2 本** (**v2 と同名・同じ役割分担**。§4.10 / DM-15) |
 | LLM 利用量 | 無し (usage を載せられない) | 発散経路のみメモリ上 | **`llm_call_records`** (§4.10) |
 
 ---
@@ -128,12 +128,30 @@
 | **DM-12** | **会話履歴の所有** | **`conversation_messages` を v3 で新設し、ユーザー発話と agent 発話を保存する** | (a) **PoC 踏襲 (DB に持たない。G-12)**: ①Managed Agent session が archived になると履歴が失われる (PoC はこの経路を自動リトライで扱っている — [../analysis/poc-conversation-flow.md](../analysis/poc-conversation-flow.md) §4.5) ②[design_memo.md](design_memo.md) が FE 仕様に入れると決めた「会話履歴 GET で復元 + 再接続」(O-5) が成立しない ③監査 (O-6) と障害調査で「何を送って何が返ったか」が外部サービス側にしか無い。**外部サービスの状態を SSOT にできない** |
 | **DM-13** | **台帳の同時更新** | **ターン開始時に `SELECT ... FOR UPDATE NOWAIT` で会話セッション行を取り、取得できなければ 409** (`ConversationTurnInProgress`)。ターン全体で 1 トランザクション ([architecture.md](architecture.md) §3.10) の中で保持する | (a) **後勝ちを許容** (PoC 方式。同一セッションへの並行リクエストで台帳が上書きされ得る — [../analysis/poc-conversation-flow.md](../analysis/poc-conversation-flow.md) の推測欄): ツール結果が黙って消え、前提チェックが不整合になる。(b) `FOR UPDATE` (NOWAIT なし): 安全弁の実行時間上限が 5 分 ([observability.md](observability.md) §4.4) なので、2 本目のリクエストが最大 5 分待たされる。(c) `ledger_rev` の楽観ロック: 衝突時にターンを最初からやり直すことになり、既に課金された LLM 呼び出しが無駄になる |
 | **DM-14** | **派生物の無効化 (BE-4)** | **①生成元の版を FK で持つ (`source_*_version_id`) ②`source_hash` を持ち read 時に照合する ③無効化しても行は消さず `stale` として返す** | (a) **`source_hash` だけを持つ** (PoC 方式。G-10): 「変わったこと」は分かるが「**どの版から生成したか**」が分からない。BE-1 (ブラッシュアップで旧版を参照して数値が食い違う) はこの情報が無いことで起きる。(b) **トリガーで派生物を削除**: ユーザーの生成物 (評価・企画書) が元データの微修正で黙って消える。(c) **`updated_at` の比較で判定**: memo 更新など内容に無関係な更新でも進むため誤検知する。(d) **元データを immutable にする**: ブラッシュアップが仕様上必要 |
-| **DM-15** | **監査記録のテーブル** | **`audit_logs` 1 本**。`actor_type` (`account` / `admin_account`) + `actor_id` + `action text` + `target_type` / `target_id` + `request_id` + `detail jsonb` | (a) **v2 の 2 本構成 (`activity_logs` + `event_logs`) を踏襲**: `event_logs` は画面アクセスの計測であり、v3 で必要とされる要件が確認されていない (`GET /usage-summary` の集計は §4.10 の注記のとおり `audit_logs` から出せる)。(b) **`action` を enum にする** (v2 の `activity_log_type`。F-14): 機能追加のたびに `ALTER TYPE` が必要で DM-4 と同じ問題。(c) **`account_id` 単独で actor を表す**: 社内管理者 (`admin_accounts.id`) の操作を記録できない ([observability.md](observability.md) §4.5 / [auth.md](auth.md) §10.2 R-5') |
+| **DM-15** | **活動ログのテーブル構成** (**2026-08-29 改訂。旧論点は「監査記録のテーブル」で採用案は `audit_logs` 1 本だった** — 改訂の経緯は下の注) | **v2 と同じ 2 本構成**。①**`activity_logs`** = **監査記録** (誰が・何に対して・どの操作を実行したか)。`actor_type` (`account` / `admin_account` / `unauthenticated`) + `actor_id` + `action text` + `target_type` / `target_id` + `request_id` + `detail jsonb` ②**`event_logs`** = **利用状況・画面アクセスの計測** (`GET /usage-summary` の集計元)。`account_id` + `contract_id` + `event_category text` + `event_type text` + `detail jsonb` + `occurred_at`。**列定義は §4.10 が SSOT、記録対象と値域は [observability.md](observability.md) §4.5 (監査) / §4.5.3 (計測) が SSOT** | (a) ~~**v2 の 2 本構成を踏襲せず `audit_logs` 1 本に集約する** (**2026-08-29 に撤回 — 下の注**)~~: 旧却下理由は「`event_logs` は画面アクセスの計測であり、v3 で必要とされる要件が確認されていない (`GET /usage-summary` の集計は監査記録から出せる)」だった。**撤回の理由**: 2026-08-26 のオーナー確認で **v2 の `event_logs` 相当 (利用状況の計測) が v3 の要件として必要**と判明した (AC-2.6)。(b) **`action` を enum にする** (v2 の `activity_log_type`。F-14): 機能追加のたびに `ALTER TYPE` が必要で DM-4 と同じ問題。**`event_logs` の `event_category` / `event_type` も同じ理由で `text` + `CHECK` にする** (v2 は `event_category_enum` / `event_type_enum` — `hassan-v2-backend/db/schema.sql:359`〜`:370` (category) / `:372`〜`:465` (type)。**v2 からの意図的な逸脱**)。(c) **`account_id` 単独で actor を表す**: 社内管理者 (`admin_accounts.id`) の操作を記録できない ([observability.md](observability.md) §4.5 / [auth.md](auth.md) §10.2 R-5')。**(b)(c) は `activity_logs` 側の決定であり、2026-08-29 の改訂でも変えていない** |
 | **DM-16** | **非同期ジョブの表現** | **ドメインごとに持つ** (`asset_extractions` は独立テーブル / ナレッジは `knowledge_files` の列)。**共通なのは列名と値域の規約**: `status` / `progress` / `failure_code` / `failure_message` / `heartbeat_at` / `idempotency_key` ([API/README.md](API/README.md) §1.3 が状態機械の SSOT) | (a) **単一の `jobs` テーブル + polymorphic な対象参照**: 対象への FK が張れず、所有者列の 1 段化 (DM-2) と両立しない。A-4 の検査もすり抜ける (どのドメインのデータを触るジョブかがスキーマから読めない) |
 | **DM-17** | **ジョブの heartbeat** | **専用列 `heartbeat_at TIMESTAMPTZ`** を持つ | (a) **`updated_at` を heartbeat として使う** ([API/README.md](API/README.md) §1.3 の J-3 の記述): 結果の書き込み以外 (メタの更新・再試行フラグ) でも `updated_at` が動くため、**停滞していないジョブを停滞と誤判定する / 逆に停滞を見逃す**。→ J-3 の記述の是正要求を §8 の R-DM-2 に出す |
 | **DM-18** | **sqlc の出力構成** | **ドメインごとに出力パッケージを分ける** (`db/queries/<domain>/*.sql` → `db/rdb/<domain>`)。[architecture.md](architecture.md) §4 が本書へ委ねた項目への回答 | (a) **v2 と同じ 1 パッケージ** (F-10): [architecture.md](architecture.md) の L-3 は「sqlc 生成パッケージを import できるのは `repository/**` だけ」を強制するが、**1 パッケージだと `repository/theme` から `rdb.GetAssetByID(...)` に到達できる**。D-A'''' が `repository/` をドメイン別に分割した目的 (import 制約で他ドメインへの到達を塞ぐ) が半分失われる。(b) **DB のスキーマ (namespace) を分ける**: 単一 DB 内での schema 分割は FK と移行を複雑にする。**代償**: sqlc は schema 全体からモデル型を生成するため、出力パッケージごとに同じモデル型が重複して生成される (この挙動は実装リポで sqlc 1.29 に対して確認する — §8 の DM-Q8)。重複型は `repository/` の内側に閉じるので上位層には出ない ([architecture.md](architecture.md) §3.6 の規則 2) |
 | **DM-19** | **キーワード検索の実装** | **`ILIKE '%kw%'` + `pg_trgm` の GIN インデックス** | (a) **`to_tsvector` の全文検索**: 日本語は標準の parser で語分割できない。(b) **インデックスなしの `LIKE`** (v2 の `themes.name LIKE` — `hassan-v2-backend/db/queries/theme.sql:13`): 件数が増えると全件走査になる。**明示する限界**: `pg_trgm` は 3 文字未満のキーワードでインデックスが効かない (その場合は所有者条件で絞った上での走査になる)。`pg_bigm` は 2 文字でも効くが RDS での可用性が未確認 (§8 の DM-Q1) |
 | **DM-20** | **LLM 明細のパーティション** | **第 1 リリースは単一テーブル** (`created_at` のインデックスのみ)。**行数が 1 億行または保持期間の運用が必要になった時点で月次のレンジパーティションへ移す** (契機を明記する) | (a) **最初から宣言的パーティション**: パーティションの自動作成 (`pg_partman` 等) が新しいインフラ要素になり、[infrastructure.md](infrastructure.md) の管理要素に追加が必要。第 1 リリースの行数見積りが無い状態で運用対象を増やさない |
+
+> **DM-15 の改訂の経緯 (2026-08-29。本増分で最も大きい判断の反転)**
+>
+> | 時点 | 状態 |
+> |---|---|
+> | 起草時 | **`audit_logs` 1 本**に集約し、v2 の 2 本構成 (`activity_logs` + `event_logs`) を却下 (a) とした。`GET /usage-summary` の集計も `audit_logs` から出す設計だった |
+> | 2026-08-26 | **オーナー確認により、v2 の `event_logs` 相当 (利用状況・画面アクセスの計測) が v3 でも要件として必要**と判明した。却下 (a) の前提 (「要件が確認されていない」) が失効した |
+> | 2026-08-29 | **2 本構成を採用**し、テーブル名を **v2 と対応する名前へ揃えた** (`audit_logs` → **`activity_logs`**)。実装リポ hassan-v3 は PR #128 で改名済み・本書の追随要求は同リポ issue #144 |
+>
+> **改名を選んだ理由**: 監査記録の実体は v2 の `activity_logs` (セキュリティイベント中心 —
+> [../analysis/v2-auth-tenancy.md](../analysis/v2-auth-tenancy.md) の「活動ログ」行) と同じ役割であり、
+> **2 本構成に戻った時点で「v3 だけ名前が違う」状態が移行の写像 (§6.4) と実装リポの読み替えコストになる**。
+> **却下**: `audit_logs` の名前を維持して `event_logs` だけを足す — v2 ↔ v3 の対応表が
+> 「`activity_logs` → `audit_logs`」「`event_logs` → `event_logs`」という**非対称な写像**になり、
+> 移行 SQL とレビューで毎回読み替えが要る。
+> **副次的な解消**: [API/settings.md](API/settings.md) の `GET /activity-logs` は
+> 「パス名は活動ログ・読むテーブルは `audit_logs`」という**意図的な不一致**を抱えていたが、
+> 改名によりパス名とテーブル名が一致した。
 
 ---
 
@@ -149,7 +167,7 @@ flowchart TB
     A["accounts / companies"]
     R["各ドメインの集約ルート<br/>themes / assets / conversation_sessions / ideas / plans /<br/>knowledge_threads / knowledge_files / idea_boards"]
     L["子テーブル (spec / tag / node / message / item / comment / version)"]
-    O["運用テーブル<br/>llm_call_records / audit_logs"]
+    O["運用テーブル<br/>llm_call_records / activity_logs / event_logs"]
 
     C -->|"contract_id (CASCADE)"| A
     C -->|"contract_id (CASCADE)"| R
@@ -192,7 +210,7 @@ flowchart TB
 |---|---|---|
 | ① | スキーマ定義中の全テーブルが `contract_id` を持つこと。**除外リストは §4.1.2 の (a) 表 6 件 + 同 (b) 表のうち `contract_id` を持たない 2 件 (`account_mfa_configs` / `reset_password_requests`) = 8 件に限る** (2026-07-31 の DM-A4=B で `signup_links` が除外から外れ、同日 `admin_mfa_configs` が (a) に加わった)。**`contract_id` を持つ `accounts` / `companies` / `signup_links` は除外しない** (除外すると将来 `contract_id` が落ちても検出できない)。**この件数は `make check-table-counts` が §4.1.2 の 2 表から実測して照合する** | 新規テーブルの所有者列の付け忘れ |
 | ②-1 | ⚠️ **本増分では対象外** (2026-08-10 の DM-Q2 = 削除せず無効化のみ)。**移管 UseCase を作らないため、この検査は「所有者移管 UseCase が存在しないこと」に読み替える** — 旧定義 (「**§3.4.2 の分類① (移管対象。31 件)** の集合 == 移管 UseCase が `UPDATE` するテーブルの集合」) のままだと **31 ≠ 0 で必ず失敗する**。**移管を再開する増分で旧定義に戻す** | 非正規化した `account_id` の更新漏れ (孤立) |
-| ②-2 | `account_id` を持つテーブルの集合 == **分類① ∪ 分類② ∪ 分類③ (34 件)** で、**分類②③に属するのは §3.4.2 の有限列挙のテーブルだけ**であること | 「移管しない」を新規テーブルで無言に選ぶこと (②-1 の集合一致が骨抜きになる) |
+| ②-2 | `account_id` を持つテーブルの集合 == **分類① ∪ 分類② ∪ 分類③ (35 件)** で、**分類②③に属するのは §3.4.2 の有限列挙のテーブルだけ**であること | 「移管しない」を新規テーブルで無言に選ぶこと (②-1 の集合一致が骨抜きになる) |
 | ③ | 読み取り系クエリ (`Get*` / `List*` / `Count*` / `Search*`) が所有者条件を持つこと | [auth.md](auth.md) §6.4 の既存検査 (本書は対象テーブルを与えるだけ) |
 
 > **②を 2 本に分けた理由**: 「`account_id` を持つ ⇔ 移管する」を 1 本の集合一致にすると、
@@ -211,7 +229,7 @@ flowchart TB
 | 2 | ⚠️ **本増分では所有者移管を行わない** (DM-Q2 = 無効化のみ)。**移管 UseCase を作らない**ため §3.3 の検査②-1 は「移管 UseCase が存在しないこと」を見る。**移管を再開する増分では**「専用の UseCase 1 本だけが行う。対象は §3.4.2 の分類①に限る」に戻し、検査②-1 を集合一致へ復活させる |
 | 3 | メンバー削除の既定の挙動は **「削除せず無効化のみ」** とする (**2026-08-10 のユーザー回答 = DM-Q2 ①**)。`accounts` の行を**物理削除せず**、**所有物の移管も行わない** — 分類①②③のいずれにも触れない。**v2 は CASCADE で所有物ごと消えていた** (DM-6 の却下 b) ため挙動が変わるが、**契約の資産が失われないという v3 の目的は満たす**。**代償**: `accounts` に無効化を表す列が要る = **§4.2 の「v2 に無い列を足さない」への明示的な例外** (下の DM-A5)。**旧採用案 (却下)**: 「分類①を契約内管理者へ移管 → 分類②を削除 → 分類③は残す → 物理削除」 — 移管対象が最大 29 テーブルに及び、非同期ジョブ・状態テーブル (`account_deletions`)・冪等キー・heartbeat 回収を要する。無効化のみならこれらがすべて不要になる ([API/auth-accounts.md](API/auth-accounts.md) AA-D-13 の改訂) |
 
-#### 3.4.2 `account_id` を持つ 34 テーブルの 3 分類 (メンバー削除時の扱い)
+#### 3.4.2 `account_id` を持つ 35 テーブルの 3 分類 (メンバー削除時の扱い)
 
 > ⚠️ **本増分での位置づけ (2026-08-10)**: DM-Q2 が「削除せず無効化のみ」に確定したため、**本分類はメンバー削除時の処理分岐としては使われない**。**分類①の 31 件は `make check-table-counts` の検算対象として残す** — 移管を再開する増分で検査②-1 の期待値になるため、集合の定義自体は維持する。**「31 件」を「本増分で移管する対象」と読まないこと**。
 
@@ -233,14 +251,17 @@ flowchart TB
 | ナレッジ | `knowledge_threads` / `knowledge_messages` / `knowledge_message_citations` / `knowledge_files` / `knowledge_thread_files` (5 件) | スレッド数 × メッセージ数 |
 | ナレッジ (チャンク) | `knowledge_file_chunks` | **ファイル数 × チャンク数 (伸びる)** |
 
-**分類② 個人設定として削除する (2 件)** — 移管しない。**他人の既読状態・通知設定を管理者へ移すのは誤り**。
+**分類② アカウント削除時に削除する (個人設定・利用状況の計測。3 件)** — 移管しない。**他人の既読状態・通知設定を管理者へ移すのは誤り**。
+(**2026-08-29 に見出しを「個人設定として削除する (2 件)」から改めた** — `event_logs` は個人設定ではないが
+「メンバー削除時に削除する」という扱いは同じであり、分類の軸は**扱い**であって性質ではないため)
 
 | テーブル | メンバー削除時 | `account_id` の FK | 例外である旨 |
 |---|---|---|---|
 | `read_news_accounts` | **行を削除する** | **`ON DELETE CASCADE`** (§4.9) | **§3.3-2 / DM-6 の `NO ACTION` 規約に対する明示的な例外**。CASCADE で消えるのが正しい挙動であり、移管 UseCase は本テーブルを触らない |
 | `account_notification_settings` | **行を削除する** | **`ON DELETE CASCADE`** (§4.9) | 同上 |
+| `event_logs` | **行を削除する** (**2026-08-29 追加**) | **`ON DELETE CASCADE`** (§4.10。**v2 と同じ** — `hassan-v2-backend/db/schema.sql:592`〜`:595`) | 同上。**append-only だが分類③ではない** — 分類③ (`llm_call_records`) は**請求根拠**なので過去の集計値が変わってはならないのに対し、`event_logs` は**利用状況の計測**であり、**退会したメンバーの列が `GET /usage-summary` のクロス集計から消えるのが期待される挙動**である。**却下**: 分類③に入れて FK を張らない (`llm_call_records` と同じ形) — v2 の挙動 (CASCADE) からの逸脱になり、`GET /usage-summary` の集計元を v2 と対応させる判断 (§4.10) と揃わない。**代償**: メンバーを物理削除すると、そのメンバーの過去の利用状況が集計から消える (**本増分では `accounts` を物理削除しない** = §3.4.1-3 の DM-Q2 回答のため、実際には発生しない) |
 
-> **`NO ACTION` を選ばない理由**: この 2 テーブルに `NO ACTION` を張ると、**移管 UseCase が削除しない限り
+> **`NO ACTION` を選ばない理由**: この 3 テーブルに `NO ACTION` を張ると、**移管 UseCase が削除しない限り
 > `accounts` の物理削除が必ず失敗する**。削除が正しい挙動なので、DB 側で消す方が「移管 UseCase の
 > 削除処理の書き忘れ」を構造的に潰せる。**却下**: 移管 UseCase 側で `DELETE` してから `accounts` を消す
 > (削除順序をアプリが守る前提になり、順序を間違えると本番のメンバー削除が失敗する)。
@@ -257,7 +278,7 @@ flowchart TB
 > **却下 (b) `CASCADE`**: メンバー削除でコスト明細が消え、**契約単位の過去の集計値が変わる**
 > (append-only の前提 = [observability.md](observability.md) §4.2 の「取り損なった分は後から復元できない」と矛盾)。
 > **却下 (c) `SET NULL` (列を NULL 可にする)**: 「誰が使ったか」が失われ、O-2 / O-3 のアカウント単位集計が
-> 過去分について不能になる。**先例**: `audit_logs.actor_id` も FK を張らない (§4.10。actor が
+> 過去分について不能になる。**先例**: `activity_logs.actor_id` も FK を張らない (§4.10。actor が
 > `accounts` / `admin_accounts` の 2 種にまたがるため)。**`contract_id` の FK (CASCADE) は維持する** —
 > 契約解約はテナント全削除であり、部分的な不整合を生まない。
 
@@ -294,7 +315,7 @@ db/
     knowledge/*.sql          → db/rdb/knowledge
     board/*.sql              → db/rdb/board
     account/*.sql            → db/rdb/account    ← v2 移植分 (3 層規約。architecture.md §3.5.2)
-    ops/*.sql                → db/rdb/ops        (llm_call_records / audit_logs / rate limit)
+    ops/*.sql                → db/rdb/ops        (llm_call_records / activity_logs / event_logs / rate limit)
 ```
 
 - **`repository/<domain>` が import してよい生成パッケージは `db/rdb/<domain>` のみ**とし、depguard の allow list に書く
@@ -313,7 +334,7 @@ db/
 
 ### 4.1 テーブル一覧
 
-#### 4.1.1 機能テーブル (43 件。**所有者列は全件必須**)
+#### 4.1.1 機能テーブル (44 件。**所有者列は全件必須**)
 
 「境界」= 個人 (`account_id` + `contract_id` を持つ) / 契約 (`contract_id` のみ)。
 「増分」= 1 (第 1 リリース) / 2 ([API/README.md](API/README.md) D-API-8' の増分 2) / 併用 (v2 併用期間中の移送で使う)。
@@ -361,10 +382,11 @@ db/
 | 39 | `account_notification_settings` | 個人 | `contract_id` + `account_id` | 1 | §4.9 |
 | 40 | `workspace_settings` | 契約 | `contract_id` | 1 | §4.9 |
 | 41 | `llm_call_records` | 個人 | `contract_id` + `account_id` | 1 | §4.10 |
-| 42 | `audit_logs` | 契約 | `contract_id` | 1 | §4.10 |
+| 42 | `activity_logs` | 契約 | `contract_id` | 1 | §4.10 |
 | 43 | `eval_criteria_settings` | 契約 | `contract_id` | 1 | §4.9 |
+| 44 | `event_logs` | 個人 | `contract_id` + `account_id` | 1 | §4.10 |
 
-> 行番号 1〜43 のうち欠番は無い (**43 行**)。§3.3 の検査①はこの表を入力にする。
+> 行番号 1〜44 のうち欠番は無い (**44 行**)。§3.3 の検査①はこの表を入力にする。
 
 #### 4.1.2 機能テーブル以外の 11 テーブル (2 種類の例外を分けて列挙する)
 
@@ -386,7 +408,7 @@ db/
 | `contracts` | テナント境界の頂点。所有者にあたる上位が存在しない |
 | `auth_roles` | ロール定義のマスタ。テナントに属さない |
 | `admin_accounts` / `admin_auth_roles` | 社内管理者のアカウントとロール定義。全契約を横断する運用主体であり契約に属さない |
-| `register_admin_password_requests` | 社内管理者のパスワード登録要求。未認証経路から token で引く |
+| `register_admin_password_requests` | 社内管理者のパスワード登録要求。未認証経路から `token_hash` で引く ([API/auth-accounts.md](API/auth-accounts.md) の AA-D-30。**社内管理者は契約に属さない**) |
 | **`auth_rate_limit_counters`** | **未認証エンドポイントのカウンタ**であり、契約・アカウントが確定する前に書く ([auth.md](auth.md) §6.11-3) |
 
 **(b) 所有者列を実際に持つ 5 件 = 検査①の例外ではない** (検査①を**通る**。
@@ -422,7 +444,7 @@ db/
 |---|---|---|
 | `enum` → `text` + `CHECK` | `language_type` / `mfa_type` | DM-4 |
 | **`signup_links` に `contract_id NOT NULL` + FK を追加** | 契約単位の招待を表現する (**DM-A4=B。2026-07-31 確定** — §8.1)。**v2 の既存未使用リンクには対応値が無い**ため、移行では**引き継がず失効させて再発行**を既定候補とする (最終確定は DM-A2 の移行設計) | §4.1.2 (b) |
-| **秘密の保存形を改める** | `signup_links` は `id` を秘密に使わず **`token_hash` を新設**、`reset_password_requests.hash` → **`token_hash` に改名し平文を保存しない** | 本節末「招待・リセットの秘密の格納」。[auth.md](auth.md) §6.10-1 の `crypto/rand` 要件を**判定可能**にするため |
+| **秘密の保存形を改める** | `signup_links` は `id` を秘密に使わず **`token_hash` を新設**、`reset_password_requests.hash` → **`token_hash` に改名し平文を保存しない**。**`register_admin_password_requests.token varchar(255)` → `token_hash text NOT NULL UNIQUE` も同じ扱い** (**2026-08-29 追加 = [API/auth-accounts.md](API/auth-accounts.md) の AA-D-30②**。同書 §5 の R-AA-5 の解決側) | 本節末「招待・リセットの秘密の格納」。[auth.md](auth.md) §6.10-1 の `crypto/rand` 要件を**判定可能**にするため |
 | 上記以外の列の追加なし | v2 に無い列を足さない | 移行の写像を単純に保つ。必要が生じたら移行後に追加する |
 | **例外 1 件 (DM-A5。2026-08-10)** | **`accounts.deactivated_at timestamptz NULL` を追加する** | DM-Q2 = 「削除せず無効化のみ」の帰結。**却下案**: (a) 既存の `last_locked_at` を流用する — ロック (回復可能な一時停止) と無効化 (恒久) は §6.9 の回復経路の扱いが違い、解除 API が無効化まで解いてしまう。(b) 別テーブル `account_deactivations` を作る — 1 アカウント 1 行の状態を別テーブルに置くと一覧の絞り込みが毎回 JOIN になる。**帰結は下の DM-A5 補足で全件決める** |
 
@@ -451,12 +473,12 @@ db/
 > | # | 論点 | 決定 |
 > |---|---|---|
 > | 1 | **サインインの可否** | **拒否する**。`POST /accounts/signin` は `deactivated_at IS NOT NULL` を**ロックと同じ分類 C の 401** で返す (`AU-C-00002` とは別コードを割り当てる — 是正要求は [API/auth-accounts.md](API/auth-accounts.md) §5)。**存在確認・ロック確認と同じ層 (UseCase) で判定する** |
-> | 2 | **既存トークンの失効** | **失効しない** (JWT はステートレスで最大 7 日有効)。**即時遮断は本増分に無い** — 手動ロックが AA-Q13 で実装スコープ外のため ([auth.md](auth.md) §6.9 の AA-Q13 受信欄)。**無効化したメンバーが最大 7 日アクセスし続けることを受け入れる**。運用の代替は署名鍵ローテーション ([auth.md](auth.md) §10.2 R-8) |
+> | 2 | **既存トークンの失効** | **失効する (次のリクエストが 401)**。**認証ミドルウェアが `deactivated_at IS NOT NULL` を判定し、401 + `AU-T-00006` (分類 T = FE はセッションを破棄する。[API/auth-accounts.md](API/auth-accounts.md) §3.1.1) を返す** — 実装は `GetAccountByIDForAuth` (同書 §3.5) の選択列に `deactivated_at` を加え、判定を [auth.md](auth.md) §1.3 の判定 6・7 と同じ層 (ミドルウェア) に置く ([auth.md](auth.md) §6.1 の変更点 5 / §6.13.2 の判定 g)。**無効化は次のリクエストから反映される** — JWT の残り有効期間に依存しない。**却下案 (2026-08-10〜2026-08-29 の旧決定)**: 「**失効しない** (JWT はステートレスで最大 7 日 — 後に 1 日 = [auth.md](auth.md) §6.9-3 — 有効)。即時遮断は本増分に無い」。**撤回理由**: 実装リポ hassan-v3 の issue #107 で「**無効化済みメンバーが招待リンクを受諾すると `POST /accounts/signup` が新しいトークンを発行する**」経路が見つかり、**本補足 1 (サインイン拒否) だけでは「無効化 = アクセスを止める」が成立しない**ことが判明した。トークン**発行**経路を 1 本ずつ塞ぐ形は発行経路が増えるたびに同じ穴が開くため、**検証をトークンの使用側 (ミドルウェア) に置く**決定へ変えた (受諾側の拒否も併せて行う = [API/auth-accounts.md](API/auth-accounts.md) の **AA-D-32**)。**性能への影響**: ミドルウェアは元々毎リクエスト `accounts` を 1 行引いている ([auth.md](auth.md) §1.3 の判定 6 を踏襲) ため、**増えるのは既存クエリの選択列 1 つだけ**で、クエリ本数・往復数は変わらない |
 > | 3 | **一覧・取得の既定** | **`GET /accounts` は既定で無効化済みを除外**し、`include_deactivated=true` で含める。**`GET /accounts/{account_id}` は無効化済みでも 200 で返す** (監査・再有効化の判断に要る)。**本書がこの決定の SSOT** — [API/auth-accounts.md](API/auth-accounts.md) §5 の R-AA-27 は「本節で決める」ではなく**本決定の受信**に変える (循環委譲だった) |
-> | 4 | **所有物の参照** | 個人スコープの 34 テーブルは `WHERE account_id = <認証ユーザー>` で引くため、**無効化するとその行は契約内の誰からも読めなくなる**。§3.4.1 の 3 が書いた「契約の資産が失われない」は**行が消えないという意味であって、読めるという意味ではない**。**本増分では読み出し経路を作らない** — 必要になった時点で「契約内管理者が無効化済みメンバーの所有物を移管する」経路 (旧 AA-D-13 の移管 UseCase) を復活させる |
+> | 4 | **所有物の参照** | 個人スコープのテーブル (§3.4.2 の 3 分類が定義元。**件数を転記しない** = DR-9) は `WHERE account_id = <認証ユーザー>` で引くため、**無効化するとその行は契約内の誰からも読めなくなる**。§3.4.1 の 3 が書いた「契約の資産が失われない」は**行が消えないという意味であって、読めるという意味ではない**。**本増分では読み出し経路を作らない** — 必要になった時点で「契約内管理者が無効化済みメンバーの所有物を移管する」経路 (旧 AA-D-13 の移管 UseCase) を復活させる |
 > | 5 | **メールアドレスの再利用** | **できない**。`accounts.email` は**グローバル一意** (`hassan-v2-backend/db/schema.sql:49` = `CREATE UNIQUE INDEX unique_accounts_email ON accounts (email)`) で、行が消えないため**アドレスが永久に占有される**。v2 は物理削除で解放されていた。**同一人物の再招待・別契約での利用が 409 になる** — 運用上の制約として明記し、解消が必要になったら「無効化時に `email` を `<元の値>+deactivated-<uuid>` へ書き換える」案を検討する (本増分では採らない。監査で元アドレスを追えなくなるため) |
 > | 6 | **契約の人数上限** | **無効化済みは数えない**。`POST /accounts` の 409 (人数上限) の判定は `deactivated_at IS NULL` を条件に含める |
-> | 7 | **再有効化** | **API を作らない**。必要になった場合は運用 SQL で `deactivated_at = NULL` に戻す。**作らない理由**: 再有効化は 5 (メールアドレスの占有) と組み合わせて初めて意味を持ち、単独で足すと「無効化 → 再有効化 → 権限が元のまま」の経路が監査ログ無しで成立する (AA-D-23 で監査を v2 相当に絞ったため) |
+> | 7 | **再有効化** | **API を作らない**。必要になった場合は運用 SQL で `deactivated_at = NULL` に戻す。**作らない理由**: 再有効化は 5 (メールアドレスの占有) と組み合わせて初めて意味を持ち、単独で足すと「無効化 → 再有効化 → 権限が元のまま」の経路が監査ログ無しで成立する (AA-D-23 で監査を v2 相当に絞ったため)。**2026-08-29 の追記 (判断自体は変えない)**: 本項の代償「無効化を戻す手段が運用 SQL しかない」を**踏まなくて済む確率が上がった** — [API/auth-accounts.md](API/auth-accounts.md) **AA-D-31** が「最後の契約内管理者を削除できない」ガードを `SELECT … FOR UPDATE` で並行実行下でも守ると決めたため、**回復が最も必要になる事故 (契約内の有効な管理者が 0 人になる) が起きなくなる**。**運用 SQL による回復が要る残りのケース**は「無効化した本人を戻したい」という運用判断であり、こちらは急を要さない |
 
 **招待・リセットの秘密の格納** (v2 は「リンク ID (UUID) 自体が秘密」/ `reset_password_requests.hash` に
 平文を保存する形だった。**v3 は両方とも改める** — [auth.md](auth.md) §6.10-1 が
@@ -465,12 +487,12 @@ db/
 
 | 項目 | 内容 | 理由 |
 |---|---|---|
-| 列 | `signup_links.token_hash text NOT NULL UNIQUE` / `reset_password_requests.token_hash text NOT NULL UNIQUE` (v2 の `hash` を改名) | 列名で保存形が読める。`id` を秘密に使わない |
+| 列 | `signup_links.token_hash text NOT NULL UNIQUE` / `reset_password_requests.token_hash text NOT NULL UNIQUE` (v2 の `hash` を改名) / **`register_admin_password_requests.token_hash text NOT NULL UNIQUE`** (**v2 の `token varchar(255) NOT NULL UNIQUE` = `hassan-v2-backend/db/schema.sql:504` を改名し型も `text` に揃える**。2026-08-29) | 列名で保存形が読める。`id` を秘密に使わない。**3 テーブルで同名にすることで sqlc の生成名とクエリ名が経路ごとに揺れない** |
 | 生成 | **アプリ側で `crypto/rand` 32 バイト → base64url**。URL に載せる値はこれ | [auth.md](auth.md) §6.10-1 の適用先を具体化。CI 検査が届く場所に生成を置く |
 | 保存形 | **SHA-256 ハッシュのみを保存し、平文を保存しない**。照合はハッシュ一致 | AA-D-4 と同じ論法 (秘密を保存する場所を増やさない)。**DB スナップショット閲覧権限がアカウント乗っ取り能力になることを防ぐ** — §6.5 の 1 回コピーとバックアップ経路を含めても成立させる |
 | **却下: 平文保存 (v2 方式)** | — | v2 は `hash` 列に平文を入れており、DB 読み取り権限が乗っ取り能力になる。§6.10 の意図と矛盾する |
 | **却下: `id` (UUID) を秘密として使う (v2 方式)** | — | 生成が DB 側 (`uuid-ossp`) になり **§6.10-3 の CI 検査で「`crypto/rand` を使っているか」が判定不能**になる |
-| 移行への影響 | **v2 の既存未使用リンク・未使用リセット要求は引き継がず失効させ、再発行する** (平文が無いためハッシュに写せない)。§6 の移行手順に含める | 写像が増えないため §4.2 冒頭の「変える点を最小にする」方針と両立する |
+| 移行への影響 | **v2 の既存未使用リンク・未使用リセット要求・未使用のパスワード登録要求は引き継がず失効させ、再発行する** (平文が無いためハッシュに写せない。**社内管理者の登録要求も同じ** — 再発行は `POST /admin/admins/{admin_account_id}/password-registrations` = AA-D-30④)。§6 の移行手順に含める | 写像が増えないため §4.2 冒頭の「変える点を最小にする」方針と両立する |
 
 ### 4.3 テーマ
 
@@ -748,14 +770,22 @@ db/
 
 ### 4.10 運用・計測
 
-**項目要件の SSOT は [observability.md](observability.md) §4.2 (LLM 明細) / §4.5 (監査)**。本書はテーブルとして具体化する。
-**所有者列は §4.3 の共通前置きのとおり持つ。ただし本節の 2 テーブルは append-only のため
-`account_id` / `actor_id` / 相関キーに FK を張らない** (理由は §3.4.2 の分類③と下記)。
+**項目要件の SSOT は [observability.md](observability.md) §4.2 (LLM 明細) / §4.5 (監査) / §4.5.3 (利用状況の計測)**。
+本書はテーブルとして具体化する。
+**所有者列は §4.3 の共通前置きのとおり全 3 テーブルが持つ。FK の扱いは 2 通りに分かれる**:
+
+| テーブル | `account_id` / `actor_id` / 相関キーの FK | 根拠 |
+|---|---|---|
+| `llm_call_records` / `activity_logs` | **張らない** (論理参照) | append-only で過去の集計値を変えないため (§3.4.2 の分類③ + 下記) |
+| **`event_logs`** | **`account_id` に FK (`ON DELETE CASCADE`) を張る** | v2 と同じ扱い。**分類②** (アカウント削除時に削除する) に属する |
+
+**`contract_id` の FK (CASCADE) は 3 テーブルとも持つ** (契約解約はテナント全削除であり、部分的な不整合を生まない)。
 
 | テーブル | 用途 | 主キー | 主要カラム | インデックス |
 |---|---|---|---|---|
 | `llm_call_records` | LLM / 外部検索の明細 (**append-only**) | `id` | `request_id` / `session_id bigint` (NULL 可) / **`theme_id bigint` (NULL 可)** / `feature text` / `route_kind` (`managed_agent`\|`direct_api`\|`external_search`\|**`image_generation`**) / `provider` / `model` / `input_tokens` / `output_tokens` / `cache_read_input_tokens` / `cache_creation_input_tokens` (**4 つとも **`route_kind IN ('external_search','image_generation')` のときのみ NULL 可**。2026-08-02 に 2 値化) / `duration_ms` / `stop_reason` (同じ 2 値の条件で NULL 可) / `tool_calls` / `estimated_cost numeric(14,6)` / `price_table_version` / `outcome` / `created_at` | `(contract_id, created_at DESC)` / `(account_id, created_at DESC)` / **`(theme_id, created_at DESC) WHERE theme_id IS NOT NULL`** / `(feature, model, created_at)` / `(request_id)` |
-| `audit_logs` | 監査記録 (**append-only**) | `id` | `actor_type` (`account`\|`admin_account`\|**`unauthenticated`**) / **`actor_id uuid` (NULL 可 — 下記の条件付き)** / `action text` / `target_type text` / `target_id text` / `request_id` / `detail jsonb` / `occurred_at`。**`contract_id` も同条件で NULL 可** | `(contract_id, occurred_at DESC)` / `(actor_type, actor_id, occurred_at DESC)` / `(target_type, target_id)` / **`(action, occurred_at DESC) WHERE actor_type = 'unauthenticated'`** |
+| `activity_logs` | 監査記録 (**append-only**) | `id` | `actor_type` (`account`\|`admin_account`\|**`unauthenticated`**) / **`actor_id uuid` (NULL 可 — 下記の条件付き)** / `action text` / `target_type text` / `target_id text` / `request_id` / `detail jsonb` / `occurred_at`。**`contract_id` も同条件で NULL 可** | `(contract_id, occurred_at DESC)` / `(actor_type, actor_id, occurred_at DESC)` / `(target_type, target_id)` / **`(action, occurred_at DESC) WHERE actor_type = 'unauthenticated'`** |
+| **`event_logs`** (**2026-08-29 新設**。DM-15) | 利用状況・画面アクセスの計測 (**append-only** — アプリからの `UPDATE` / `DELETE` を行わない。行が消えるのは `accounts` / `contracts` の削除に伴う FK の CASCADE のみ) | `id` | **`contract_id uuid NOT NULL`** (FK CASCADE。**v3 で追加** — 下記) / **`account_id uuid NOT NULL`** (FK **CASCADE**。v2 踏襲・§3.4.2 の分類②) / `event_category text NOT NULL` / `event_type text NOT NULL` (**どちらも `CHECK` で値域を表明する。値域の SSOT は [observability.md](observability.md) §4.5.3**) / **`detail jsonb NOT NULL DEFAULT '{}'::jsonb`** (**v3 で追加** — 下記) / `occurred_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP` | **`(contract_id, occurred_at DESC)`** / **`(contract_id, event_type, occurred_at DESC)`** (`GET /usage-summary` のクロス集計) / `(account_id, occurred_at DESC)` (v2 の `idx_event_logs_account_created` 相当 — `hassan-v2-backend/db/schema.sql:597`) |
 
 **判断の適用**:
 
@@ -763,9 +793,12 @@ db/
   (§3.4.2 の分類③)。したがって**所有者移管 UseCase はこのテーブルを `UPDATE` しない** —
   §3.3 の検査②-1 (移管対象の集合一致) の対象外であり、§7.2 の検査 5 (`UPDATE` / `DELETE` の禁止) の側に属する
   (**本増分では検査②-1 自体が「移管 UseCase が存在しないこと」に読み替わっている** — 上の §3.3)。
-  **A-4 の読み取り絞り込みでは「実行者による絞り込み」として使う**: `GET /usage-summary` の
+  **A-4 の読み取り絞り込みでは「実行者による絞り込み」として使う**: コスト集計 API の
   アカウント別内訳は「そのアカウントが発生させたコスト」であり、**所有権の判定には使わない**
-  (所有権の判定に使う所有者列は `contract_id` である)
+  (所有権の判定に使う所有者列は `contract_id` である)。**`GET /usage-summary` はこのテーブルを読まない**
+  (**2026-08-29 に集計元を `event_logs` へ変更**。[API/settings.md](API/settings.md) §3・**O-3 が回答するのは
+  件数のみでコストを含まない**)。`llm_call_records` を読むコスト集計 API は別に増分するもの
+  ([observability.md](observability.md) O-3) であり、本行は将来そのための注記として残す
 - **`account_id` に FK を張らない** (却下案 3 つは §3.4.2 の分類③の注)。**`contract_id` の FK (CASCADE) は維持する**
 - **`theme_id bigint NULL` を持つ** (**O-3 の「アカウント / テーマ単位のコスト集計」への回答**)。
   **`session_id` 経由で辿る形にしない** — `session_id` 自体が NULL 可 (会話を経由しない LLM 呼び出しがある) で、
@@ -781,7 +814,7 @@ db/
   **却下 `ON DELETE SET NULL`**: 集計総額は保たれるが、**削除済みテーマの過去コストが
   「テーマ不明」に落ちて遡及分析 (DM-Q9) ができなくなる**。
   **参照切れは読み手 (集計 API) が「削除済みテーマ」として扱う** (行は残す)
-- **先例**: `audit_logs.actor_id` も FK を張らない (actor が `accounts` / `admin_accounts` の 2 種に
+- **先例**: `activity_logs.actor_id` も FK を張らない (actor が `accounts` / `admin_accounts` の 2 種に
   またがり単一の FK にできないため)。**append-only の 2 テーブルで扱いが揃う**
 - **計測フィールド (トークン 4 カウンタ / `stop_reason` / `duration_ms` / `tool_calls` /
   `estimated_cost`) のうち NULL を許すのは **`route_kind IN ('external_search','image_generation')`** の
@@ -794,7 +827,7 @@ db/
   **相関キー (`session_id` / `theme_id`) は計測フィールドではないため、この CHECK の対象外**である
   (呼び出しが会話・テーマに紐づかない経路が正当に存在する)
 - **UPDATE / DELETE を行わない** (append-only)。`updated_at` を持たせない (更新経路が無いことを構造で示す)
-- **`audit_logs.contract_id` は「対象リソースの契約」を入れる**。社内管理者による全契約横断の操作
+- **`activity_logs.contract_id` は「対象リソースの契約」を入れる**。社内管理者による全契約横断の操作
   (ロック解除) でも対象アカウントの契約が入る。
   **ただし「主体も対象契約も確定しない認証イベント」だけは NULL を許す** (**2026-07-31 追加**。
   旧記述は「NOT NULL を維持できる」だったが、[API/auth-accounts.md](API/auth-accounts.md) の 1 巡目レビューが
@@ -813,18 +846,45 @@ db/
     (同一アドレスへの反復と分散試行を区別できる最小の形。**鍵付き HMAC — 鍵は `AUDIT_EMAIL_HMAC_KEY`。
     鍵なし SHA-256 は既知アドレスの照合で逆引きできるため使わない**)。**値域と記録項目の SSOT は
     [observability.md](observability.md) §4.5** ([API/auth-accounts.md](API/auth-accounts.md) AA-D-21 と同一方式)
-  - **却下 (b) 認証失敗は `audit_logs` に書かず構造化ログ + メトリクスだけで観測する**:
+  - **却下 (b) 認証失敗は `activity_logs` に書かず構造化ログ + メトリクスだけで観測する**:
     v2 の `signin_failed` / MFA 検証失敗が**監査記録から落ちる**。[auth.md](auth.md) §9.3 Q-A2 の
     「v2 でできていたことを満たす」に対する明示の後退になる
-  - **却下 (c) 認証イベント専用の append-only テーブルを新設する**: 監査記録が 2 本になり、
-    DM-15 が却下した v2 の 2 本構成 (`activity_logs` + `event_logs`) に戻る
+  - **却下 (c) 認証イベント専用の append-only テーブルを新設する**: **認証イベントだけを 3 本目の
+    テーブルに分ける**案。**2026-08-29 の DM-15 改訂後も却下のまま** — 改訂で増えたのは
+    `event_logs` (利用状況の計測) であって認証イベントの置き場ではなく、
+    **認証イベントは「誰が何をしたか」の監査記録**なので `activity_logs` に属する。
+    分けると `GET /activity-logs` の参照が 2 本の UNION になる
   - **代償 (受け入れる)**: `(contract_id, occurred_at DESC)` インデックスの選択性が下がる。
     認証イベントは `actor_type = 'unauthenticated'` の部分インデックスで引く (上表)
-- **`GET /usage-summary` の集計元は `audit_logs`** とする (月 × メンバー × 活動種別のクロス集計 —
-  2026-07-30 の ST-Q9 回答で確定。[API/settings.md](API/settings.md) §3)。
-  **却下**: v2 の `event_logs` 相当 (画面アクセスの記録) を新設する — DM-15 の却下 (a)。
-  旧設計の `active_rate` は ST-Q9 で廃止された (§8 の DM-Q5 は解消)
-- **保持期間とパーティション化の契機は DM-20**
+
+**`event_logs` の判断の適用 (2026-08-29)**:
+
+- **`GET /usage-summary` の集計元は `event_logs`** とする (月 × メンバー × 活動種別のクロス集計 —
+  形は 2026-07-30 の ST-Q9 回答で確定。[API/settings.md](API/settings.md) §3)。
+  **v2 の対応関係と一致する** (v2 は `GET /event_logs/analytics` が `event_logs` を集計していた —
+  `hassan-v2-backend/router/router.go:236`)。
+  **却下: 集計元を `activity_logs` のままにする** (2026-08-29 まで本書が採っていた案) —
+  ①**v2 との対応が崩れる** (v2 で `event_logs` に書いていた事象を v3 では監査記録に書くことになり、
+  移行の写像と実装リポの読み替えが必要になる) ②**監査記録の値域 ([observability.md](observability.md) §4.5.1) に
+  「利用状況の集計軸」という別目的の値が混ざり続ける** — 監査は「実行された事実の台帳」、
+  計測は「画面操作を含む利用状況」で保持期間・記録の粒度が違う。
+  **移動コストはゼロである** — 書く側 (発散・企画書生成などの各ドメイン) が未実装のため、
+  書き込み先の変更で失われる既存データが無い (実装リポ hassan-v3 issue #144 の申し送り)
+- **v2 の `event_logs` からの逸脱は 4 点**で、いずれも v3 の既存規約に合わせるための変更である:
+
+  | # | 逸脱 | 理由 |
+  |---|---|---|
+  | 1 | **`contract_id NOT NULL` + FK を追加** (v2 に無い) | DM-2 (全機能テーブルが `contract_id` を持つ)。**`GET /usage-summary` は契約単位の集計**なので、無いと `accounts` を JOIN する形 (v2 の F-3) に戻る |
+  | 2 | **`detail jsonb` を追加** (v2 に無い) | v2 は種別しか持たず「**どのテーマ・どのアイデアの操作か**」を後から辿れない。`activity_logs.detail` と同じ形にして、集計軸の追加をマイグレーションなしで行えるようにする。構造の SSOT は `entity/` の Go 型 (§3.2 の JSONB 規約) |
+  | 3 | **`event_category_enum` / `event_type_enum` → `text` + `CHECK`** | DM-4 (v3 は enum を使わない)。DM-15 の却下 (b) と同じ理由 |
+  | 4 | **`created_at` → `occurred_at`** | 同じ表の `activity_logs` と列名を揃える。**`updated_at` は持たない** (append-only であることを構造で示す — `llm_call_records` / `activity_logs` と同じ) |
+
+- **記録対象と、`activity_logs` と重なる操作の扱いは [observability.md](observability.md) §4.5.3 が SSOT**。
+  **6 種のうち監査対象でもある操作は両方に 1 行ずつ書く** (2 本は寿命と消え方が違うため片方から他方を導出できない)。
+  **重複する書き込みは `service` 層の共通ヘルパ 1 本に閉じる** (BE-10)
+- **旧設計の `active_rate` は ST-Q9 で廃止された** (§8 の DM-Q5 は解消)
+- **保持期間とパーティション化の契機は DM-20** (`event_logs` は画面操作を含むため
+  `activity_logs` より速く伸びる。**行数の観測対象に含める**)
 
 ### 4.11 版管理・採番・台帳・派生物
 
@@ -959,13 +1019,13 @@ conversation_sessions.ledger.deep_dive_results ──> plan_tab_versions (ground
 
 | ID | 状態 | 対応 AC | 回答 |
 |---|---|---|---|
-| **A-3** テナント境界 | **回答** | **AC-1.2** | §3.3 / §4.1。**機能テーブル 43 件すべてが `contract_id NOT NULL` + FK を持ち、個人スコープの 34 件は `account_id` も持つ** (DM-2。契約スコープは 9 件。**2026-07-31 に `idea_tags` を追加** — [API/idea-boards.md](API/idea-boards.md) §8.2 / IB-Q14-1。**2026-08-24 に `eval_criteria_settings` を追加** — PV-D5 / AC-PV-8.2)。所有者への到達は 1 段 (§3.1)。例外は §4.1.2 の**有限の列挙**のみで、**2 種類 (所有者列を持たない / 所有者列を持つが認証系のクエリ経路を持つ) を分けて列挙**する (**件数は §4.1.2 の 2 表と `make check-table-counts` の出力が正**。本行に転記しない = DR-9)。**[auth.md](auth.md) §6.3 の列挙との差分は 2026-07-31 に解消した** — `auth_rate_limit_counters` / `account_mfa_configs` / `signup_links` / `admin_mfa_configs` の 4 件すべてが同節の例外表に反映され、**規約本体 (同 §6.3-1) への DM-2 の強化も反映済み** (R-DM-4 ①〜④はすべて実施済み。同節の状態列と auth.md §10.3 の受信欄を参照)。`company_id` は作らない |
+| **A-3** テナント境界 | **回答** | **AC-1.2** | §3.3 / §4.1。**機能テーブル 44 件すべてが `contract_id NOT NULL` + FK を持ち、個人スコープの 35 件は `account_id` も持つ** (DM-2。契約スコープは 9 件。**2026-07-31 に `idea_tags` を追加** — [API/idea-boards.md](API/idea-boards.md) §8.2 / IB-Q14-1。**2026-08-24 に `eval_criteria_settings` を追加** — PV-D5 / AC-PV-8.2。**2026-08-29 に `event_logs` を追加** — DM-15 の改訂 / **AC-2.6**)。所有者への到達は 1 段 (§3.1)。例外は §4.1.2 の**有限の列挙**のみで、**2 種類 (所有者列を持たない / 所有者列を持つが認証系のクエリ経路を持つ) を分けて列挙**する (**件数は §4.1.2 の 2 表と `make check-table-counts` の出力が正**。本行に転記しない = DR-9)。**[auth.md](auth.md) §6.3 の列挙との差分は 2026-07-31 に解消した** — `auth_rate_limit_counters` / `account_mfa_configs` / `signup_links` / `admin_mfa_configs` の 4 件すべてが同節の例外表に反映され、**規約本体 (同 §6.3-1) への DM-2 の強化も反映済み** (R-DM-4 ①〜④はすべて実施済み。同節の状態列と auth.md §10.3 の受信欄を参照)。`company_id` は作らない |
 | **A-4** 絞り込みの層 | **回答 (スキーマ側)** | **AC-1.2** | 層の規約は [auth.md](auth.md) §6.4 が SSOT。**本書が担保するのは「所有者条件を書ける形になっていること」**: ①所有者列が全テーブルにある ②一覧・検索用インデックスが所有者列を先頭に持つ (§3.5) ③ドメイン別 sqlc 出力で他ドメインのクエリへ到達できない (§3.6 / DM-18) ④引用・メンバー等の関連を FK にして「存在確認だけで通る」経路を消した (§4.7 / §4.8) |
 | **A-5** ステータスコード | **参照** | AC-1.4 | 判定規則は [auth.md](auth.md) §6.6。本書は 409 / 404 の**根拠となる制約**を定義する (部分 UNIQUE・FK・楽観ロック列) |
 | **A-6** LLM への越境 | **参照 + 部分回答** | AC-1.3 | 強制点は [architecture.md](architecture.md) §3.8.2。**本書の寄与は 2 点**: ①引用を子テーブル + FK にして LLM 出力の ID が保存され得ない形にした (§4.7) ②ベクトル検索の所有者フィルタを必須引数として設計に明記した (§4.7) |
 | **A-7** 共有・公開 | **回答 (スキーマ側)** | — | `visibility` 列と書き込みをどちらも増分 1 (DM-9。**2026-07-31 に C-16 で改訂**。判断の SSOT は [auth.md](auth.md) §6.12)。既存 `sharing_settings` の値は移行時の初期値に使う (§6.4)。**書き分け: 「どのテーブルが `visibility` 列を持つか」と「値域 (`private` / `contract`)」は本書 (DM-9 / §3.2 の列挙値規約。値の SSOT は `entity/`) / 「書き込み API を開ける時期と画面での意味」は [API/themes.md](API/themes.md) §3.2 / [API/assets.md](API/assets.md) §3.2** |
 | **O-2** LLM 計測 | **回答 (テーブル)** | AC-2.1 | §4.10 の `llm_call_records`。項目は [observability.md](observability.md) §4.2 の要件を満たし、**NULL 許容を `route_kind IN ('external_search','image_generation')` に限る CHECK** で計測漏れと区別する (2026-08-02 に 2 値化) |
-| **O-6** 監査ログ | **回答 (テーブル)** | AC-2.5 | §4.10 の `audit_logs`。**actor は種別 + ID** ([observability.md](observability.md) §4.5 / [auth.md](auth.md) §10.2 R-5' への対応)。`action` は `text` (DM-15) |
+| **O-6** 監査ログ | **回答 (テーブル)** | AC-2.5 / **AC-2.6** | §4.10 の **`activity_logs` (監査記録) + `event_logs` (利用状況の計測)** の 2 本 (DM-15。2026-08-29 改訂)。**actor は種別 + ID** ([observability.md](observability.md) §4.5 / [auth.md](auth.md) §10.2 R-5' への対応)。`action` / `event_category` / `event_type` はいずれも `text` + `CHECK` (DM-15 の却下 (b))。**`GET /usage-summary` の集計元は `event_logs`** |
 | **O-4** 失敗の可観測性 | **部分回答** | AC-2.3 | ジョブの `failure_code` / `failure_message` を列として持つ (§4.4 / §4.7)。値域は [observability.md](observability.md) §4.3。採番・保存の失敗を握り潰さない規約は §4.11.1 の 2 |
 | **O-5** SSE / 長時間処理 | **部分回答** | — | 進捗を DB から配信するための `asset_extraction_events` (§4.4) と、**会話履歴を DB に持つ決定** (DM-12) が [API/README.md](API/README.md) §1.3 の J-6 / J-7 の前提を満たす。`heartbeat_at` は DM-17 |
 | **D-4** マイグレーション | **回答** | **AC-3.4** | §6.1〜§6.3。**適用タイミング・後方互換・ロールバックは確定** ([operations.md](operations.md) §7.4 を参照)。**ツール選定も psqldef で確定** (2026-07-31 ユーザー回答 — §6.1 の `[Answer]`) |
@@ -1052,7 +1112,7 @@ conversation_sessions.ledger.deep_dive_results ──> plan_tab_versions (ground
                             knowledge_message_citations / knowledge_thread_files / knowledge_file_chunks
 ⑥ ボード                  : idea_board_phases → idea_boards → idea_board_members / items / comments
 ⑦ お知らせ・設定・運用     : read_news_accounts / account_notification_settings / workspace_settings /
-                            eval_criteria_settings / llm_call_records / audit_logs
+                            eval_criteria_settings / llm_call_records / activity_logs / event_logs
 ```
 
 **prod への初期投入は「いつ・どのジョブが・誰の承認で」行うか (D-4 / AC-3.4 の 1 回目)**:
@@ -1124,6 +1184,7 @@ v3 は v2 に無い一意制約を 3 つ新設している。**制約違反は�
 | `themes` の部分 UNIQUE `(account_id, name)` (§4.3) | **一意制約は存在しない** (`hassan-v2-backend/db/schema.sql:94`〜`:102` に UNIQUE が無く、`grep` でも 0 件)。**同一アカウント・同名テーマが存在し得る** | `SELECT account_id, name, count(*) FROM themes GROUP BY 1,2 HAVING count(*) > 1;` | **DM-A2 の回答後にこの表を埋める** (本表全体が同じ扱い)。候補は (a) 古い方に連番サフィックスを付けて改名する (b) `updated_at` が新しい方だけを移す。**(b) はデータを捨てるため項目 7 の告知対象になる** |
 | `plans` の部分 UNIQUE `(idea_id) WHERE deleted_at IS NULL` (§4.6) | **v2 の `business_plans` は `idea_id` に索引のみで UNIQUE が無い** (`hassan-v2-backend/db/schema.sql:204` = `CREATE INDEX idx_business_plans_idea_id`)。**1 アイデアに複数の企画書が存在し得る**。**実運用で複数行が実在するかは未調査** ([API/plans.md](API/plans.md) §13 の PL-R1) | `SELECT idea_id, count(*) FROM business_plans GROUP BY 1 HAVING count(*) > 1;` | **決定済み (2026-08-02。[API/plans.md](API/plans.md) §11 の D-PL-1 = 制約を維持する)**: `idea_id` ごとに `updated_at DESC` (同値なら `id DESC`) の **1 行を `plans` へ写し、残りは `plan_tab_versions` の版として古い順に取り込む** (**データを捨てない**ため項目 7 の告知対象にならない)。**複数行のあった `idea_id` を移行レポートに出力する** — 「最新以外が版になった」ことは利用者から見て並びが変わるため、件数を運用側が把握できる状態にする |
 | `knowledge_threads` の部分 UNIQUE `(account_id, idea_id)` (§4.7) | **v2 にナレッジ機能が無い** (§1.4 の対応表: 「v2 = 無し」)。**移送対象が存在しないため衝突しない** | — (対象なし) | — |
+| `event_logs` の `contract_id NOT NULL` (§4.10。**v2 に対応列が無い**列を足す例。2026-08-29 追加 — 実装リポ issue #144 の決定 3 への回答) | **v2 の `event_logs` は `account_id` のみを持ち `contract_id` を持たない** (`hassan-v2-backend/db/schema.sql:586`〜`:597`)。**移行は `accounts.contract_id` への join で埋める**。**衝突しない**: v2 の `accounts` は物理削除方式で `event_logs.account_id` に `ON DELETE CASCADE` の FK が張られている (`同:592`〜`:595`) ため、**移行時点で存在する v2 `event_logs` 行は必ず存在する v2 `accounts` 行を持つ** (退会済み = v2 側で物理削除済みのアカウントの行は、event_logs 側も同時に CASCADE で消えているため孤立行が発生し得ない)。**`activity_logs` (旧 `audit_logs`) 側の `actor_id` は FK を張らない設計** (§7.2 検査 6) のため本件と同型の懸念はそもそも生じない | `SELECT el.id FROM event_logs el LEFT JOIN accounts a ON a.id = el.account_id WHERE a.id IS NULL;` (0 件になることの確認。0 件以外なら v2 側の外部キー制約が壊れているため移行を止める) | **決定不要 (衝突なし)**。`INSERT INTO event_logs (..., contract_id, ...) SELECT ..., a.contract_id, ... FROM event_logs el JOIN accounts a ON a.id = el.account_id` の形で埋める |
 
 **この 3 件以外の新規 UNIQUE** (`ideas(theme_id, seq_no)` / `idea_versions(idea_id, ver_no)` /
 `plan_tab_versions(plan_id, tab_id, ver_no)` / **`plan_chat_messages(plan_id, seq)`** /
@@ -1210,10 +1271,10 @@ auth.md §6.3 / §6.4 への転記は同文書の担当セッションが行う 
 |---|---|---|
 | 1 | 全テーブルが `contract_id` を持つこと。**除外リストは §4.1.2 (a) の 6 件 + `account_mfa_configs` / `reset_password_requests` = 8 件に限る** (`accounts` / `companies` / `signup_links` は除外しない — DM-A4=B) | §3.3 の① / §4.1.2 |
 | 2-1 | ⚠️ **本増分では「所有者移管 UseCase が存在しないこと」** (DM-Q2 = 無効化のみ)。移管を再開する増分で「§3.4.2 の分類① (31 件) の集合 == 移管 UseCase が UPDATE する集合」へ戻す | §3.3 の②-1 / §3.4.2 |
-| 2-2 | `account_id` を持つテーブル (34 件) が**分類①②③のいずれかに分類されており、②③に属するのは §3.4.2 の有限列挙のテーブルだけ**であること | §3.3 の②-2 / §3.4.2 |
+| 2-2 | `account_id` を持つテーブル (35 件) が**分類①②③のいずれかに分類されており、②③に属するのは §3.4.2 の有限列挙のテーブルだけ**であること | §3.3 の②-2 / §3.4.2 |
 | 3 | 台帳フィールドに書き手が存在すること | §4.11.2 の 4 |
 | 4 | `repository/<domain>` が import する sqlc パッケージが `db/rdb/<domain>` のみであること (depguard の allow list) | §3.6 |
-| 5 | append-only テーブル (`llm_call_records` / `audit_logs`) に対する `UPDATE` / `DELETE` クエリが存在しないこと | §4.10 |
+| 5 | append-only テーブル (`llm_call_records` / `activity_logs` / **`event_logs`**) に対する `UPDATE` / `DELETE` クエリが存在しないこと。**`event_logs` の行が消えるのは FK の CASCADE のみ**であり、これはクエリではないので本検査と両立する | §4.10 |
 
 > **検査 2-1 と検査 5 は両立する** (レビュー指摘への対応)。`llm_call_records` は §3.4.2 の**分類③**に
 > 属するため検査 2-1 の対象集合に入らず、検査 5 が `UPDATE` を禁止する側に入る。
@@ -1223,15 +1284,19 @@ auth.md §6.3 / §6.4 への転記は同文書の担当セッションが行う 
 > (弱められるのは通常 2 側であり、§3.4 が塞ぐと言っている「非正規化 `account_id` の更新漏れ」の
 > 唯一の機械的防御が消える)。
 >
-> **検査 6 (追加)**: **append-only 2 テーブルの実在する列だけを対象に、FK が張られていないことを検査する**
+> **検査 6 (追加)**: **`llm_call_records` / `activity_logs` の実在する列だけを対象に、FK が張られていないことを検査する**
 > (§3.4.2 の分類③ / §4.10)。善意で FK を足すと、メンバー削除・テーマ削除が明細の存在で失敗するか、明細が消える。
 >
 > | テーブル | 検査対象の列 | 対象外 (列が存在しない) |
 > |---|---|---|
 > | `llm_call_records` | `account_id` / `session_id` / `theme_id` | `actor_id` |
-> | `audit_logs` | `actor_id` | `account_id` / `session_id` / `theme_id` |
+> | `activity_logs` | `actor_id` | `account_id` / `session_id` / `theme_id` |
 >
 > **`contract_id` の FK (CASCADE) は両テーブルで維持する** — 検査対象に含めない (§4.10 の注)。
+> **`event_logs` は本検査の対象に入れない** (2026-08-29) — append-only だが **`account_id` に FK (CASCADE) を
+> 張るのが採用形**であり (§3.4.2 の分類② / §4.10)、対象に入れると**設計どおりに実装したスキーマで必ず落ちる**。
+> **本検査の対象テーブルは上表の 2 件で確定**とし、append-only テーブルを増やしたときは
+> 「分類③なら追加する / 分類②なら追加しない」を §3.4.2 の分類で決める。
 
 ### 7.3 参照すべき既存実装
 
@@ -1262,6 +1327,7 @@ auth.md §6.3 / §6.4 への転記は同文書の担当セッションが行う 
 | [API/ideas.md](API/ideas.md) §8.1 | **R-IDA-12** (= R-PV-3。AC-PV-3.5) | `ideas` の軸カラムを 3 軸に改め、サブ基準スコア 2 列・`grade`・`idea_evaluations.criteria_version` を確定する | **実施済み (2026-08-23)** — §4.6 の表と「評価の 3 軸化に伴う列の改訂」(決定 1〜8)。v2 の評価列を引き継がない帰結は §6.4 の 2a にも反映。**テーブル件数は不変** (`make check-table-counts` で確認) |
 | [API/conversation.md](API/conversation.md) §8.1 | **R-CVA-14** (= AC-PV-4.6 / AC-PV-5.2) | ①台帳の `approach` を `divergence` (`mode` / `lens` / `lens_input`) に置き換え `constraints` を独立行にする ②`researched_domains` の重複除外キーと合併規則を注記する ③`seed_idea` の保存理由を UI 部品に依存しない書き方へ改める | **実施済み (2026-08-23)** — §4.11.2 の表の 3 行 + 「`divergence` を 1 つのオブジェクトとして持つ」+ スキーマ変更の決定 3 (`ledger_schema_version` を上げない理由)。**新規テーブルなし** |
 | [requirements-proto-v4.md](../../aidlc-docs/inception/productionization/requirements-proto-v4.md) §5 | **R-PV-12** (= AC-PV-8.2) | `eval_criteria_settings` (契約単位の評価基準。PV-D5 の前倒し) を追加する | **実施済み (2026-08-24)** — §4.1.1 の 43 件目 / §4.9 の表と判断 / §6 のグループ⑦。**テーブル件数 42 → 43** (`make check-table-counts` の実測に追随。履歴テーブルは増分 2 のため追加しない) |
+| 実装リポ hassan-v3 issue **#144** (`blocked-by-design`) | **R-IMP-1** (= **AC-2.6**) | issue が求める決定 3 点: **決定 1** ①`audit_logs` → **`activity_logs`** へ改名する (実装リポは PR #128 で改名済み) ②**`event_logs` を新設する** (DM-15 の却下 (a) の撤回) ③`observability.md` §4.5 に境界を書く ④`API/settings.md` の D-ST-4 / ST-Q9。**決定 2** `GET /usage-summary` の集計元を `event_logs` へ移す (案 (a))。**決定 3** v2 の既存 `event_logs` データを引き継ぐ場合の `contract_id` (v2 に無い列) の埋め方 | **実施済み (2026-08-29)** — **決定 1**: ①全文改名 ②§4.1.1 の 44 件目 / §4.10 の表と「`event_logs` の判断の適用」/ §3.4.2 の分類② ③[observability.md](observability.md) §4.5.3 ④[API/settings.md](API/settings.md) §3・D-ST-4・ST-Q9。**決定 2**: §4.10 + [API/settings.md](API/settings.md) §3。**決定 3**: §6.4 項目 8 の表に `event_logs.contract_id NOT NULL` の行を追加 — v2 `accounts` は物理削除 + `event_logs` への `ON DELETE CASCADE` のため**移行時点で孤立行は発生せず、`accounts.contract_id` への join で衝突なく埋まる**。**加えて issue の「やること 2 (書き込み受け口 + レート制限)」は [API/settings.md](API/settings.md) ST-Q10 が「受け口は本増分で作らない」と先送りしており、その先送り先にレート制限の要件 ([auth.md](auth.md) §6.11-3 対象②) を明記した**。**テーブル件数 43 → 44・個人スコープ 34 → 35・分類② 2 → 3** (`make check-table-counts` の実測に追随) |
 
 ## 8. 残課題 / 要確認
 
@@ -1281,7 +1347,7 @@ auth.md §6.3 / §6.4 への転記は同文書の担当セッションが行う 
 | **DM-Q2** | メンバー削除時の所有物 | **回答済み (2026-08-10)**: **削除せず無効化のみ**。①§3.4.1 の 3 を改訂済み ②契約の付け替え経路を持たない前提は維持 (§3.4.1 の 1) ③**移管対象 29 テーブルの行数の実測は不要になった** — 移管を行わないため。`Task-2f` からこの目的の項目を外してよい | **回答済み** |
 | **DM-Q3** | 第 1 リリースに含めるドメイン | Q-3 `[Answer 3]` は「PoC 由来の新機能セット (テーマ・アセット・会話型)」だが、[API/](API/README.md) の 6 ドメインは増分 1 とされている ([architecture.md](architecture.md) §8 も同じ食い違いを仮定として記録)。**§4.1.1 の「増分」列と §6.3 の投入順序がこれに依存する** | ユーザー判断 |
 | **DM-Q4** | 新着通知メールの記録 | `news_email_logs` 相当を v3 が持つか ([API/news.md](API/news.md) NW-Q5)。**要件が確認されるまで列を作らない** | 要件確認 |
-| **DM-Q5** | ~~`active_rate` の定義~~ → **解消 (2026-07-30)** | ST-Q9 の回答で `GET /usage-summary` はクロス集計形 (月 × メンバー × 活動種別) に変わり、`active_rate` は廃止された ([API/settings.md](API/settings.md) §3 / §7.1)。集計元が `audit_logs` である点は §4.10 のとおり | — |
+| **DM-Q5** | ~~`active_rate` の定義~~ → **解消 (2026-07-30)** | ST-Q9 の回答で `GET /usage-summary` はクロス集計形 (月 × メンバー × 活動種別) に変わり、`active_rate` は廃止された ([API/settings.md](API/settings.md) §3 / §7.1)。**集計元は 2026-08-29 に `event_logs` へ変更した** (DM-15 の改訂。§4.10 の「`event_logs` の判断の適用」が SSOT) | — |
 | **DM-Q6** | 埋め込みの次元とインデックス | `knowledge_file_chunks.embedding vector(N)` の N とインデックス種別 (HNSW / IVFFlat)。**埋め込みプロバイダ自体が未確定** ([llm-migration.md](llm-migration.md) の LM-Q6)。RAG を第 1 リリースから外す場合、§4.7 の 6 テーブルのうち `knowledge_file_chunks` と `knowledge_message_citations` の扱いが変わる | [llm-migration.md](llm-migration.md) LM-Q6 |
 | **DM-Q7** | スペック・特許の入出力 | `asset_specs` / `asset_patents` は PoC に前例があり列を用意したが、**API に入出力が定義されていない** ([API/assets.md](API/assets.md) AS-Q6 / AS-Q7)。**API 側が確定するまで書き込み経路が無い = BE-10 の形**になるため、**第 1 リリースで実装するかを決める必要がある** | [API/assets.md](API/assets.md) |
 | **DM-Q8** | sqlc の生成挙動 | ドメイン別出力 (DM-18) で**モデル型がパッケージごとに重複生成される**という前提を、実装リポで sqlc 1.29 に対して確認する | 実装リポ (backend) |

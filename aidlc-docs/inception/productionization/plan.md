@@ -30,8 +30,9 @@
 | AC-2.2 | `docs/design/observability.md` §4.2 / §4.4 (安全弁) / §4.6 (AL-4 コスト急増) | **記述あり** (レビュー未実施) |
 | AC-2.3 | `docs/design/observability.md` §4.3 の失敗 5 分類 (F-1〜F-5。BE-6 / BE-8 由来を含む) | **記述あり** (レビュー未実施) |
 | AC-2.4 | `docs/design/observability.md` §4.1 の必須フィールド表 | **記述あり** (レビュー未実施) |
-| AC-2.5 | `docs/design/observability.md` §4.5 (v2 の `activity_logs` / `event_logs` 方式を踏襲) | **記述あり** (レビュー未実施) |
-| AC-3.1 | `docs/design/operations.md` に環境・シークレット管理 | **記述あり** (§3 の 3 環境 + §4 の Secrets Manager / SSM 分離。v2 は Secrets Manager 未使用のため新規設計) |
+| AC-2.5 | `docs/design/observability.md` §4.5 (v2 の `activity_logs` 方式を踏襲) + `docs/design/data-model.md` §4.10 の `activity_logs` | **記述あり** (レビュー未実施) |
+| AC-2.6 | `docs/design/observability.md` §4.5.3 (`event_logs` の記録対象・値域・`activity_logs` との線引き) + `docs/design/data-model.md` DM-15 / §4.10 (`event_logs` の列定義・`GET /usage-summary` の集計元) + `docs/design/API/settings.md` §3 (`GET /usage-summary`) | **記述あり** (2026-08-29 追加。実装リポ hassan-v3 issue #144 のオーナー判断を反映) |
+| AC-3.1 | `docs/design/operations.md` に環境・シークレット管理 | **記述あり** (§3 の 4 環境 (2026-09-07 に 3 → 4。INF-U) + §4 の Secrets Manager / SSM 分離。v2 は Secrets Manager 未使用のため新規設計) |
 | AC-3.2 | `templates/app-monorepo/.github/workflows/ci.yml` ほか 2 リポ分 + `docs/design/operations.md` の CI ゲート表 | **雛形済み** (確定はレビュー後) |
 | AC-3.3 | `docs/design/operations.md` に Agent 発行を含むデプロイ手順 | **記述あり** (§5 の 6 ジョブ + §5.2 の Agent / Environment ライフサイクル + §5.3 のロールバック) |
 | AC-3.4 | `docs/design/data-model.md` にマイグレーション方式・ロールバック | **記述あり** (§6 / §7.4。ツールは **psqldef で確定** = D-4。2026-07-31) |
@@ -120,7 +121,7 @@ Q-3=A (会話型フローのみ) を前提とした場合:
 ### Phase 3: 設計確定 (Task-2 の検証済み報告に依存)
 
 - [x] **Task-3a** (起草完了 2026-07-30・**レビュー未実施**): `docs/design/data-model.md` (AC-1.2 / AC-3.4 / A-3 / A-4 / DR-3) —
-      設計判断 DM-1〜DM-20・**テーブル 43 (全件に `contract_id`) + 例外 11**・採番と冪等性 (BE-11)・
+      設計判断 DM-1〜DM-20・**テーブル 44 (全件に `contract_id`) + 例外 11**・採番と冪等性 (BE-11)・
       台帳のスキーマ契約 (BE-10 / BE-12)・派生物の無効化 (BE-4)・マイグレーション方式と投入順序。
       **Q-1 の未確定は「データ引き継ぎ範囲」だけ**と切り分け、移行部分のみ `[Answer]` ゲート (DM-A1〜A3)。
       **他文書への是正要求 8 件**を起票 (うち 3 件はメインセッションが即日反映)。旧記述: ← `architecture-designer`。
@@ -144,7 +145,7 @@ Q-3=A (会話型フローのみ) を前提とした場合:
       `AU-C-` = 提示資格情報の不一致 → フォーム内エラー / 未知は fail-safe で破棄。auth-accounts.md §3.1.1) —
       **TOTP の打ち間違いで強制ログアウトする問題を構造的に解消** /
       **AA-D-17** (認証済みの状態変更に添える本人確認は 400) / **AA-D-21** (認証失敗の監査記録は
-      `audit_logs` の `actor_id`/`contract_id` を NULL 可 + CHECK。メールは HMAC-SHA256 + pepper) /
+      `activity_logs` の `actor_id`/`contract_id` を NULL 可 + CHECK。メールは HMAC-SHA256 + pepper) /
       **AA-D-5④** (招待・リセットの秘密は `crypto/rand` 32B → base64url、**DB にはハッシュのみ**)。
       **是正要求は R-AA-1〜22** (data-model 4 件 / auth.md 4 件 / frontend.md 2 件 / observability 1 件ほか)。
       **メインセッション担当分は完了**: README.md §2.5 の範囲限定 + 429 を 8→11 本 / frontend.md の
@@ -153,7 +154,7 @@ Q-3=A (会話型フローのみ) を前提とした場合:
 - [x] **Task-3i-R3** (**2 巡目レビューと反映が完了 2026-07-31**): 再レビュー
       ([review-auth-accounts-round2.md](../../reviews/productionization/review-auth-accounts-round2.md)) は
       **1 巡目の 34 件すべて解消**を確認。新規 **重大 3 / 中 7 / 軽微 4 も全件反映済み**。
-      **新規重大は設計の誤りではなく並行編集による文書間の割れ**だった: ①`audit_logs` の形が 3 文書で不一致
+      **新規重大は設計の誤りではなく並行編集による文書間の割れ**だった: ①`activity_logs` の形が 3 文書で不一致
       (data-model が `actor_type='unauthenticated'` + CHECK を先に採用 → **スキーマの SSOT に合わせた**。
       ただし **`detail.email_hash` は HMAC-SHA256 + pepper を維持** = 2026-07-31 ユーザー決定。
       **素の SHA-256 はメールアドレスの低エントロピーゆえ総当たりで復元でき、「平文を保存しない」目的を達成しない**) /

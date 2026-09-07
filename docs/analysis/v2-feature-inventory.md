@@ -206,7 +206,7 @@ v3 の対応先は [../design/API/plans.md](../design/API/plans.md) (**2026-08-0
 | `POST /news` | `:227` | 既読化 (**記事 ID を持たない**) | `POST /news/{id}/read` (**記事単位**) | **引き継ぐ** |
 | `POST /webhook/microcms/news` | `:192` | microCMS からのお知らせ受信 (HMAC 検証) | **v3 に持ち込まない** — 受信は v2 backend が担い続ける (auth.md §6.7) | **例外 (承認済み)** |
 | `GET /event_logs/analytics` | `:236` | **利用状況の集計** | `GET /usage-summary` (settings.md。月 × メンバー × 活動種別) | **引き継ぐ** |
-| `POST /event_logs` | `:237` | **画面アクセス等のイベント記録** | `audit_logs` へ集約 (DM-15。**`event_logs` 相当の新設は却下**) | **統合** |
+| `POST /event_logs` | `:237` | **画面アクセス等のイベント記録** | **`event_logs` テーブルは v3 でも新設する** (**2026-08-29 に DM-15 の却下 (a) が撤回された**)。ただし**書き込みの受け口 (本エンドポイント相当) は本増分では作らない** — API を伴う操作は各 UseCase が直接書く。API を伴わない画面操作の受け口は先送り ([../design/API/settings.md](../design/API/settings.md) の **ST-Q10**) | **部分的に引き継ぐ (受け口は先送り)** |
 
 ---
 
@@ -222,25 +222,26 @@ v3 の対応先は [../design/API/plans.md](../design/API/plans.md) (**2026-08-0
 **例外 2 件目 (社内管理者による契約管理)** が加わり、`auth-accounts.md` §2.4 の②として
 作成・一覧・詳細・更新の 4 本が確定した (**AA-D-26** / questions.md の **Q-10 = A**)。
 したがって §6.2 の「それ以外」は現在**社内向けの利用状況閲覧・CSV 出力**を指す。
-**下表で「対象外 (要確認)」が残るのは社内管理者アカウントの自己管理系と CSV 出力**である。
+**下表で「対象外 (要確認)」が残るのは社内管理者アカウントの個別取得 (`:207`) と CSV 出力**である
+(**2026-08-29 に自己管理系 3 本が AA-D-33 で引き継ぎに転じた** — §3 の同追記を参照)。
 
 | v2 エンドポイント | 行 | v2 が搭載していた機能 | v3 の対応 | 状態 |
 |---|---|---|---|---|
 | `POST /admin/signin` | `:195` | 社内管理者のサインイン | auth-accounts.md §2.4 | **引き継ぐ** |
 | `GET /admin/me` | `:196` | 自分の管理者アカウント取得 | 同 | **引き継ぐ** |
-| `POST /admin/accounts/unlock` | `:211` | **全契約横断のロック解除** (**v2 は `CheckSuperAdminRole` を持たず Admin でも実行できる**) | 同 (**v3 も Admin で実行できる** — 2026-08-26 のオーナー判断。auth.md §6.2 の「社内管理者のロールによる制限の範囲」。**ロール制限は契約管理 4 本のみ**) | **引き継ぐ** (**権限も v2 と同じ** = C-16 の後退なし) |
+| `POST /admin/accounts/unlock` | `:211` | **全契約横断のロック解除** (**v2 は `CheckSuperAdminRole` を持たず Admin でも実行できる**) | 同 (**v3 も Admin で実行できる** — 2026-08-26 のオーナー判断。auth.md §6.2 の「社内管理者のロールによる制限の範囲」。**ロール制限が掛かるのは契約管理と管理者アカウント管理だけ** — 2026-08-29 に後者を追加 = AA-D-29。**範囲の SSOT は同節、本数は auth-accounts.md §2.4**) | **引き継ぐ** (**権限も v2 と同じ** = C-16 の後退なし) |
 | `POST /admin/companies/accounts/mfa/reset` | `:217` | 一般アカウントの MFA リセット | auth-accounts.md §2.4 (AA-Q2=a) | **引き継ぐ** |
-| `GET /admin/accounts/register/password/check` | `:199` | パスワード登録トークンの検証 (公開) | **v3 は API を作らず移行スクリプト投入 + 一時パスワード** (auth.md §6.2「初回登録の窓を閉じる」) | **例外 (承認済み)** |
-| `POST /admin/accounts/register/password` | `:200` | パスワード登録 (公開。**`math/rand` トークン経由 = §5-8**) | 同上 | **例外 (承認済み)** |
-| `POST /admin/accounts` | `:206` | 管理者アカウントの作成 | 移行スクリプト投入 (API を持たない) | **例外 (承認済み)** |
-| `GET /admin/accounts` | `:205` | 管理者アカウント一覧 | **対応先が設計に無い** | **対象外 (要確認)** |
-| `GET /admin/accounts/:id` | `:207` | 管理者アカウント取得 | 同 | **対象外 (要確認)** |
-| `DELETE /admin/accounts/:id` | `:208` | 管理者アカウント削除 | 同 | **対象外 (要確認)** |
-| `PUT /admin/accounts/name` | `:202` | 管理者の氏名変更 | 同 | **対象外 (要確認)** |
-| `PUT /admin/accounts/email` | `:203` | 管理者のメール変更 | 同 | **対象外 (要確認)** |
-| `PUT /admin/accounts/password` | `:204` | 管理者のパスワード変更 | 同 | **対象外 (要確認)** |
-| `PUT /admin/accounts/details` | `:209` | 管理者の詳細更新 (ロール等) | 同 | **対象外 (要確認)** |
-| `GET /admin/accounts/auth_roles` | `:210` | 管理者ロールのマスタ一覧 | 同 | **対象外 (要確認)** |
+| `GET /admin/accounts/register/password/check` | `:199` | パスワード登録トークンの検証 (公開) | **auth-accounts.md §2.1 の `POST /admin/password-registrations/lookup`** (**2026-08-29 の AA-Q15 = (c) 回答 = AA-D-30 で反転**。旧判定は「v3 は公開エンドポイントを作らない」だった)。**トークンはクエリではなくボディで受ける** (AA-D-4) | **引き継ぐ** |
+| `POST /admin/accounts/register/password` | `:200` | パスワード登録 (公開。**`math/rand` トークン経由 = §5-8**) | **同 §2.1 の `POST /admin/password-registrations`** (同上)。**トークンは `crypto/rand` + `token_hash` 保存に作り直す** (AA-D-5④ / AA-D-30②)。**v2 が持たない期限判定を設定側にも入れる** (AA-D-30⑤) | **引き継ぐ** |
+| `POST /admin/accounts` | `:206` | 管理者アカウントの作成 | **auth-accounts.md §2.4 の `POST /admin/admins`** (**2026-08-29 の AA-D-29 で反転**。旧判定は「移行スクリプト投入 (API を持たない)」= 例外) | **引き継ぐ** |
+| `GET /admin/accounts` | `:205` | 管理者アカウント一覧 | auth-accounts.md §2.4 の `GET /admin/admins` (**AA-D-22 で `mfa_registered` は返さない**) | **引き継ぐ** (2026-08-29 訂正 — 旧判定「対応先が設計に無い」は誤り。§2.4 の同行が `同:205` を移植元に挙げている) |
+| `GET /admin/accounts/:id` | `:207` | 管理者アカウント取得 | **対応先が設計に無い** (一覧で足りるため個別取得は作らない) | **対象外 (要確認)** |
+| `DELETE /admin/accounts/:id` | `:208` | 管理者アカウント削除 | **作らない** (auth-accounts.md §2.7。**v2 フロントエンドに呼び出し元が無い**うえ、物理削除は AA-D-13 の「削除せず無効化」と一貫しない) | **例外 (承認済み。2026-08-29 = AA-D-29)** |
+| `PUT /admin/accounts/name` | `:202` | 管理者の氏名変更 (**本人。`AdminAuthRequiredMiddleware` のみでロール判定なし**) | **auth-accounts.md §2.4 の④ `PUT /admin/admins/me`** (**2026-08-29 の AA-D-33 で反転**。旧判定は「作らない — SuperAdmin の `PUT /admin/admins/{admin_account_id}` が代行する」だったが、**その代行は SuperAdmin 限定なので `admin` ロールには代替が無い**。加えて **v2 FE に配線済みの画面がある** — `hassan-v2-frontend/src/app/admin/settings/account/name/edit/page.tsx` → `src/features/admin/settings/(routes)/account/components/admin-account-name-edit-form.tsx:44`)。**対象 ID をボディで受ける形は移植しない** (所有権検証が無い = 同書 V2-D7) | **引き継ぐ** |
+| `PUT /admin/accounts/email` | `:203` | 管理者のメール変更 (現在のパスワードの提示が必要) | **同 §2.4 の④ `PUT /admin/admins/me/email`** (AA-D-33)。FE は `admin-account-email-edit-form.tsx:60` | **引き継ぐ** |
+| `PUT /admin/accounts/password` | `:204` | 管理者のパスワード変更 (`old_password` の提示が必要) | **同 §2.4 の④ `PUT /admin/admins/me/password`** (AA-D-33。**`confirmed_new_password` の検証は v3 の追加**)。FE は `admin-account-password-edit.tsx:65` | **引き継ぐ** |
+| `PUT /admin/accounts/details` | `:209` | 管理者の詳細更新 (ロール等) | **auth-accounts.md §2.4 の `PUT /admin/admins/{admin_account_id}`** (**2026-08-29 の AA-D-29 で反転**。対象 ID はボディからパスへ = AA-D-3) | **引き継ぐ** |
+| `GET /admin/accounts/auth_roles` | `:210` | 管理者ロールのマスタ一覧 | **作らない** (auth-accounts.md §2.7。**v2 フロントエンドのラッパーはどこからも import されない死にコード**で、値域は 2 値の固定列挙のため FE が定数で持てる) | **例外 (承認済み。2026-08-29 = AA-D-29)** |
 | `GET /admin/companies` | `:215` | **契約 (会社) の一覧** | auth-accounts.md §2.4 の `GET /admin/contracts` (**AA-D-26**) | **引き継ぐ** |
 | `GET /admin/companies/:contract_id` | `:218` | 契約の個別取得 | 同 `GET /admin/contracts/{contract_id}` | **引き継ぐ** |
 | `POST /admin/companies` | `:220` | **契約の新規作成 (顧客のオンボーディング)** | 同 `POST /admin/contracts` | **引き継ぐ** |
@@ -258,6 +259,15 @@ v3 の対応先は [../design/API/plans.md](../design/API/plans.md) (**2026-08-0
 > 契約管理 4 本 (作成・一覧・詳細・更新) が同書 §2.4 の②として本増分の対象に入り、
 > **`auth.md` §6.2 の例外 2 件目**として登録された。**削除だけは引き続き作らない**。
 > **残る「対象外 (要確認)」は社内管理者アカウントの自己管理系と CSV 出力**である。
+>
+> **⚠️ 2026-08-29 追記 (AA-D-29)**: **社内管理者アカウントの作成 (`:206`) と権限変更 (`:209`) も
+> 同書 §2.4 の③として本増分の対象に入った** (`auth.md` §6.2 の**例外 3 件目**)。
+> **削除 (`:208`) とロール一覧 (`:210`) は引き続き作らない** — **v2 フロントエンドに呼び出し元が無い**
+> (実装リポ issue #181 の調査。出典は同書 §2.7)。
+> **⚠️ 2026-08-29 追記 2 (AA-D-33)**: **自己管理系 3 本 (`:202`〜`:204`) も同書 §2.4 の④として
+> 本増分の対象に入った** (`auth.md` §6.2 の**例外 4 件目**)。**同じ判定基準 (v2 FE の配線の有無) を
+> 隣の 3 本に適用していなかった**ことが同日のレビューで検出されたためである。
+> **残る「対象外 (要確認)」は `GET /admin/accounts/:id` (個別取得) と CSV 出力**である。
 
 ---
 
@@ -279,7 +289,7 @@ v3 の対応先は [../design/API/plans.md](../design/API/plans.md) (**2026-08-0
 |---|---|---|---|
 | 1 | **契約 (会社) の新規作成・更新・削除** | `:220` / `:221` / `:219` | **v3 単独で新規顧客を受け入れられない**。C-15 (全面切替) と両立しない |
 | 2 | 契約 (会社) の一覧・個別取得 | `:215` / `:218` | 社内の顧客管理業務が v3 でできない |
-| 3 | 管理者アカウントの CRUD・ロール管理 | `:202`〜`:210` | 管理者の追加・削除・ロール変更が製品内でできない (移行スクリプト運用のみ) |
+| 3 | 管理者アカウントの CRUD・ロール管理 | `:202`〜`:210` | **大部分は 2026-08-29 に解消 (AA-D-29)**: 作成 (`:206`) と権限変更 (`:209`) が [../design/API/auth-accounts.md](../design/API/auth-accounts.md) §2.4 の③に入り、一覧 (`:205`) は当初から `GET /admin/admins` として引き継いでいる。**削除 (`:208`) とロール一覧 (`:210`) は承認済みの対象外** (v2 FE に呼び出し元が無い)。**公開のパスワード登録 2 本 (`:199` / `:200`) は 2026-08-29 の AA-D-30 で引き継ぎに転じた**。**自己管理系 3 本 (`:202`〜`:204`。氏名・メール・パスワードを本人が変える経路) も同日中に解消した (AA-D-33)** — 同書 §2.4 の④に入った。**旧記述「代替経路 (SuperAdmin による代行と登録リンクの再発行) があるので対象外」は誤り**で、**代行は SuperAdmin 限定なので `admin` ロールには代替が無く**、v2 FE にも配線済み画面がある (出典は同書 §2.7)。**残るのは個別取得 (`:207`) のみ** — 一覧 (`GET /admin/admins`) で足りるという判断 (本書 §3 の同行) |
 | 4 | 全契約横断のアカウント検索 | `:216` | 問い合わせ対応の調査手段が無い |
 | 5 | 顧客一覧・利用状況の CSV エクスポート | `:222` / `:223` | 社内のレポート業務が v3 でできない |
 | 6 | **会社情報の LLM 生成** | `:94` | 会社情報の入力補助が無くなる |

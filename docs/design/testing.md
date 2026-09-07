@@ -320,7 +320,7 @@ E2E では「呼ばれなかった」と「越境しなかった」を区別で�
 
 | # | シナリオ | ①②③ の該当 | E2E でしか見えないもの |
 |---|---|---|---|
-| **E-1** | サインイン → 初期画面到達 (**MFA 画面遷移は対象外** — T-Q3=B。§7.3 の代償欄) | ①②③ | Vercel の FE と ECS の BE の間の Cookie / トークン受け渡し。**CORS は E-1 の対象から外す**見込み — [frontend.md](frontend.md) §12 の FE-D (BE 呼び出しを Next.js のサーバ経由にする) が成立すると**ブラウザ → BE のクロスオリジンが無くなる**ため。**確定は FE-Q2 (Vercel で SSE 中継が可能か) の実測後** ([frontend.md](frontend.md) §16.1)。不成立なら CORS は E-1 の担保対象に戻る |
+| **E-1** | サインイン → 初期画面到達 (**MFA 画面遷移は対象外** — T-Q3=B。§7.3 の代償欄) | ①②③ | Vercel の FE と ECS の BE の間の Cookie / トークン受け渡し。**CORS (プリフライトを含む) は E-1 の担保対象である** — [frontend.md](frontend.md) §2.0 の**段階1** (2026-08-29 に FE-D を反転。全経路をブラウザから直接叩く) により、**ブラウザ → BE のクロスオリジンが全経路で発生する** (同書 §12.3)。E-1 は実ブラウザで `app.hassan.jp` から `api.hassan.jp` を叩くため、**許可オリジン・許可ヘッダ・プリフライトの疎通を E-1 が担保する**。**段階2 へ移ったら対象から外す** (クロスオリジンが消えるため)。**v2 併用期間中の FE → v2 の CORS は E-1 の対象外** (v2 は E2E 環境に無い。同書 §12.4.4) |
 | **E-2** | テーマ作成 → アセット登録 (ファイル) → 抽出完了が画面に出る | ①②③ | 非同期ジョブの状態機械 + **DB 状態のポーリング配信** ([design_memo.md](design_memo.md):187 の決定ログ 3 — 「非同期ジョブの SSE 進捗はプロセス内 channel でなく DB 状態のポーリング配信」) が実ブラウザで完結すること |
 | **E-3** | 会話 1 ターン: 発話 → SSE で本文が流れ始める → 完了イベント | ①②③ | **ALB / Vercel を跨いだ SSE が実ブラウザに届くこと** (keep-alive 15 秒・バッファリングの有無) |
 | **E-4** | 会話からアイデアを生成 → アイデア一覧に現れる | ①②③ | ツール実行 → 永続化 → **別画面での参照**という還流が端から端まで通ること |
@@ -357,7 +357,7 @@ E2E では「呼ばれなかった」と「越境しなかった」を区別で�
 | 項目 | 決定 | v2 との差 |
 |---|---|---|
 | テストアカウント | **第 1 リリースでは E2E 専用契約 A を 1 つ + 1 アカウントだけ作る**。§6 の越境は I 段で見るため E2E に 2 契約は不要である。**契約 B は共有機能 (A-7) を E2E に載せる時点で追加する** — それまで作らない (作ると資格情報が 1 組増え、使われないまま失効してローテーション対象になる) | v2 は 1 アカウント |
-| 資格情報の所在 | **dev の Secrets Manager**。E2E ジョブが **専用 environment `dev-e2e`** の OIDC ロールで取得する (**`dev` と分ける** — モノレポでは `sub` クレームが environment で決まるため、共有すると E2E が dev のデプロイ用ロールを引き受けられる。[infrastructure.md](infrastructure.md) §4.5 / 2026-08-05 変更)。[operations.md](operations.md) §4.1 の経路に合わせる (GitHub secret に置かない) | v2 は環境変数 (CI が無いのでローカルのみ) |
+| 資格情報の所在 | **staging の Secrets Manager** (E2E の対象は `main` の継続デプロイ先 = staging。旧 dev。[infrastructure.md](infrastructure.md) INF-U)。E2E ジョブが **専用 environment `staging-e2e`** の OIDC ロールで取得する (**`staging` と分ける** — モノレポでは `sub` クレームが environment で決まるため、共有すると E2E が staging のデプロイ用ロールを引き受けられる。[infrastructure.md](infrastructure.md) §4.5 / 2026-08-05 変更)。[operations.md](operations.md) §4.1 の経路に合わせる (GitHub secret に置かない) | v2 は環境変数 (CI が無いのでローカルのみ) |
 | **MFA** | **E2E 専用アカウントは MFA 無効とする** (**2026-07-31 のユーザー決定 = §13.1 T-Q3 の案 B**。当初推奨の「TOTP を実行時生成」はシークレット 1 件増と時刻ずれ起因のフレークを理由に不採用)。**代償**: E-1 は MFA 画面遷移を担保しない (U / I 段に委ねる — §7.1 の E-1 行に明記)。**歯止め**: MFA 無効の例外は **dev の E2E 専用アカウントに限定し、prod には作らない**。例外の表現方法は Task-3i が定義する。**却下: 固定コードを環境変数で渡す** — TOTP は時刻依存で固定値では成立しない (v2 の `E2E_MFA_CODE` はこの形。T-F12) | v2 は固定コード |
 | `baseURL` | **dev の固定 URL** を渡す。**環境変数名は `E2E_BASE_URL` に固定**し (雛形の [e2e.yml](../../templates/app-monorepo/.github/workflows/e2e.yml) の Playwright 実行ステップ が渡している名前)、**`playwright.config.ts` は既定値を持たず、未設定なら読み込み時に throw する**。Vercel の Preview URL は使わない (デプロイごとに変わる)。**却下: v2 の `PLAYWRIGHT_BASE_URL` を踏襲する** — v2 は既定 `http://localhost:3000` を持つため (T-F11)、CI で env が落ちたときに**存在しないローカルへ接続して全件赤**になり、原因が「env 落ち」か「dev の障害」か切り分けられない。既定値を持たない方が失敗メッセージが 1 行で確定する | v2 は `PLAYWRIGHT_BASE_URL` (既定 `localhost:3000`) |
 
@@ -574,7 +574,7 @@ Go の慣習では「DB が無い環境ではスキップ」と書きがちだ�
 | **F-C2** | デザイントークン強制 (FE-3。[frontend.md](frontend.md) §7.2) | **C** | **✓** (`npm run lint`) | 同 :30 (`tailwindcss/no-arbitrary-value`) / :31〜38 (`no-custom-classname` + whitelist `^(app\|admin)-.*`) / :45〜48 (生 hex) / :49〜52 (`style` 属性)。例外は `src/styles/**` と `tailwind.config.*` のみ (同 :196〜224) |
 | **F-C3** | **併置テストの存在** (FE-4 / FE-6。[frontend.md](frontend.md) §8.2) | **U** (存在検査。§10 の 6 番) | **✓** | [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `frontend` ジョブの「検査 1 併置テストの存在」ステップ |
 | **F-C4** | 公開パス許可リストとルートグループの一致 ([frontend.md](frontend.md) §11.2.3) | **C** | **✓** | 同 `ci.yml` の `frontend` ジョブの「検査 2 公開パスの許可リストとルートグループの一致」ステップ (許可リスト `PUBLIC_PATHS` の存在確認 + `scripts/check-public-paths.sh` の呼び出し。**スクリプト本体は実装リポで書く** — 未実装なら同ステップ内で `exit 1` する) |
-| **F-C5** | `NEXT_PUBLIC_` 許可リスト ([frontend.md](frontend.md) §12) | **C** | **✓** | 同 `ci.yml` の `frontend` ジョブの「検査 3 NEXT_PUBLIC_ の許可リスト」ステップ (`ALLOWED="NEXT_PUBLIC_APP_ENV"`) |
+| **F-C5** | `NEXT_PUBLIC_` 許可リスト ([frontend.md](frontend.md) §12) | **C** | **✓** | 同 `ci.yml` の `frontend` ジョブの「検査 3 NEXT_PUBLIC_ の許可リスト」ステップ (`ALLOWED="NEXT_PUBLIC_APP_ENV NEXT_PUBLIC_API_BASE_URL"` = 段階1 の 2 件。値の SSOT は [frontend.md](frontend.md) §12.2) |
 | **F-C6** | `globals.css` の行数可視化 (FE-3) | **C** | **✗ (非ブロック)** | 同 `ci.yml` の `frontend` ジョブの「検査 4 globals.css の行数」ステップ (`if: always()` + `::notice` のみ。ブロックしないのは [frontend.md](frontend.md) §7.2 の判断) |
 | **F-C7** | **`X-Admin-Token` の局所化** ([frontend.md](frontend.md) §5.2.1) | **C** | **✓** (`npm run lint`) | [.eslintrc.json.tmpl](../../templates/app-monorepo/frontend/.eslintrc.json.tmpl):162〜195 (`src/**` から `admin-mutator.ts` を除外し `Literal` / `Property` の 2 セレクタで禁止) + :196〜224 (styles 側の override でも維持) |
 

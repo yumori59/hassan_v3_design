@@ -29,7 +29,7 @@
 ## 1. 承認点一覧 (AC-4.1)
 
 **必須 4 点 (H-1〜H-4) + 条件付き 1 点 (H-5)**。これ以外の工程 (実装・レビュー・指摘反映・
-dev への継続デプロイ) は人間の承認を要求しない (AI 駆動の待ち時間を作らないため)。
+staging への継続デプロイ・dev = PR 単位プレビューの構築) は人間の承認を要求しない (AI 駆動の待ち時間を作らないため)。
 
 ### 1.1 一覧
 
@@ -41,11 +41,12 @@ dev への継続デプロイ) は人間の承認を要求しない (AI 駆動の
 | **H-4** | **本番環境への適用 (デプロイ)** | S-10 とは独立した判断 (手動起動) | app: `backend/` (ECS) / `frontend/` (Vercel) / infra リポ (`terraform apply`) | ① 対象イメージタグ / コミット SHA ② その変更が dev で検証済みであること ③ H-2 / H-3 が先に完了していること ④ infra は `plan` 差分 (`destroy` / `replace` の有無) ⑤ ロールバック手段 ⑥ **`frontend/` を prod へ出す PR の head が `main` であること** (`guard-production-pr.yml` が機械で見るが、必須チェックの指定漏れで無効化され得るため人間も見る。§4.1) ⑦ **最新の E2E 結果と、それが対象 commit を検証したものか** — **`frontend/` のみの変更では `deploy-backend.yml` が起動せず E2E も走らない** (MR-1 の path filter の帰結) ため、**FE の変更を prod へ出すときは E2E を `workflow_dispatch` で 1 回手動実行し、その結果を承認材料にする** (nightly を待つと最大 24 時間空く。2026-08-04 の design-reviewer 指摘 中 9) | **GitHub environment の承認履歴** (`prod`) / Vercel の Promote 操作ログ / infra は `apply` 実行者本人 | `workflow_dispatch` + environment 承認 + `main` 限定 §2.4 |
 | **H-5** | **着手前の計画承認** (**条件付き**) | S-2 (§1.2 の条件に該当する issue のみ) | 両リポ | ① 変更計画 (触るファイル・層・追加するテーブル / エンドポイント) ② 設計書の該当節との対応 ③ **infra 跨ぎの場合はマージ順序と `apply` の位置** ④ 却下する場合は設計リポへ差し戻すかの判断 | **issue コメント** (承認者と日付を明記) | issue テンプレートの必須欄 + `needs-human` ラベルでの停止 + PR の DoD 欄 → **H-1 で検証** §2.5 |
 
-**H-4 の環境別の扱い** (dev を人間承認で止めない — C-15「dev へ継続デプロイして検証」を律速させないため):
+**H-4 の環境別の扱い** (staging / dev を人間承認で止めない — C-15「継続デプロイして検証」を律速させないため。**環境は local / dev (PR 単位プレビュー) / staging (`main` の継続デプロイ先。旧 dev) / prod の 4 つ** = 設計リポ `docs/design/infrastructure.md` INF-U):
 
 | 適用先 | backend の DB マイグレーション (H-2) | backend の Agent 再発行 (H-3) | サービスのリリース (H-4) |
 |---|---|---|---|
-| **dev** | **非破壊なら自動適用** / **破壊的変更は承認必須** (`dev-db-destructive`) | 自動 (dev の Agent ID は dev 専用。切断の影響は開発者のみ) | 自動 (`main` への push で継続デプロイ。**backend は `backend/` `api/` に差分がある場合のみ / frontend は Vercel の Ignored Build Step が判定する** — MR-1 / MR-2) |
+| **dev** (PR 単位プレビュー) | **自動** (破壊的変更も。使い捨てスキーマ `br_pr_<N>` で PR close 時に `DROP SCHEMA`) | 自動 (PR ごとに発行・破棄) | 自動 (PR の `preview` ラベルで `deploy-preview.yml` が FE / BE を ECS に出す。`environment: dev-preview`。承認者なし) |
+| **staging** (旧 dev) | **非破壊なら自動適用** / **破壊的変更は承認必須** (`staging-db-destructive`) | 自動 (staging の Agent ID は staging 専用。切断の影響は開発者のみ) | 自動 (`main` への push で継続デプロイ。**backend は `backend/` `api/` に差分がある場合のみ / frontend は Vercel の Ignored Build Step が判定する** — MR-1 / MR-2) |
 | **prod** | **承認必須** (`prod-db`) | **承認必須** (`prod-agent`) | **承認必須** (`prod`。手動起動のみ) |
 
 - **infra リポは dev の `terraform apply` も人間が実行する** (既存規約を維持。CI は `plan` まで)。
@@ -105,8 +106,9 @@ GitHub のブランチ保護ルール (`main`) で担保する。設定内容は
 
 | 適用先 × 変更クラス | 通す environment | 承認者 |
 |---|---|---|
-| dev × 非破壊 | `dev` | 不要 (自動) |
-| dev × **破壊的** | `dev-db-destructive` | 必要 |
+| dev (PR 単位プレビュー) × 任意 | `dev-preview` | 不要 (使い捨てスキーマ。破棄時に `DROP SCHEMA`) |
+| staging × 非破壊 | `staging` | 不要 (自動) |
+| staging × **破壊的** | `staging-db-destructive` | 必要 |
 | prod × 任意 | `prod-db` | 必要 |
 
 **破壊的変更の定義 (機械判定。`plan_migration` の検査対象)** — 次のいずれかを含めば `destructive=true`:
@@ -146,7 +148,8 @@ D-4)。方式が決まるまで `plan_migration` の差分生成コマンドは�
 
 | 適用先 | 通す environment | 承認者 |
 |---|---|---|
-| dev | `dev` | 不要 (自動) |
+| dev (PR 単位プレビュー) | `dev-preview` | 不要 (PR ごとに発行し、破棄時に削除) |
+| staging | `staging` | 不要 (自動) |
 | prod | `prod-agent` | 必要 |
 
 - `plan_agent` は **`prompts/agents.yaml` が列挙した「Agent に登録されるプロンプトと tool schema」の集合のハッシュ**を前回発行時の記録 (`/hassan-v3/<env>/agent/<name>/source-hash`) と比較し、差分が無ければ
@@ -169,10 +172,10 @@ D-4)。方式が決まるまで `plan_migration` の差分生成コマンドは�
 | **frontend** | Vercel の Production Branch を **`production`** に設定し、`main` は Preview にする。本番昇格は人間の Promote 操作 (または `production` への人間によるマージ)。`main` を Production Branch にしない。**Root Directory = `frontend`** (モノレポのため。§4.4) |
 | **infra** | `apply` を CI に持たせない。人間が `plan` 差分を読んで手元で実行する。エージェント側は deny (§3) |
 
-**dev への継続デプロイは承認を挟まない** (`main` への push で `release` ジョブが `environment: dev` を通る。
+**staging への継続デプロイは承認を挟まない** (`main` への push で `release` ジョブが `environment: staging` を通る。
 **`backend/` `api/` に差分が無い push では backend のデプロイが走らない** — path filter の判定は
 `ci.yml` と `deploy-backend.yml` で同じ条件にする (片方だけ更新するとデプロイ漏れになる)。
-`dev` には承認者を設定しない)。これは親 feature の確定制約 C-15 (dev 先行構築 + 継続デプロイ、
+`staging` には承認者を設定しない)。**dev = PR 単位プレビューも承認を挟まない** (`deploy-preview.yml` が `environment: dev-preview` を通る)。これは親 feature の確定制約 C-15 (dev 先行構築 + 継続デプロイ、
 本番は開発完了後に一括切替) に対応する。
 
 **未検証の変更を本番に出さない担保**: prod 起動時に ① ref が `main` であること (機械チェック)
@@ -205,7 +208,7 @@ AI 駆動の利点が消える。**手戻りが最大になる 3 条件だけに
 | 承認点 | 機構 | 回避可能性 | 二重化 |
 |---|---|---|---|
 | H-1 マージ | ブランチ保護 (GitHub) | **回避不可** (サーバ側) | **app モノレポは `gate` ジョブを必須チェックに指定していることが前提** (MR-1)。指定漏れ = CI 無しでマージ可能 |
-| H-2 マイグレーション | environment `prod-db` / `dev-db-destructive` の required reviewers | **回避不可** (GitHub Actions がジョブを待機させる) | エージェントには prod の DB 接続情報を渡さない (§3.3) |
+| H-2 マイグレーション | environment `prod-db` / `staging-db-destructive` の required reviewers | **回避不可** (GitHub Actions がジョブを待機させる) | エージェントには prod の DB 接続情報を渡さない (§3.3) |
 | H-3 Agent 再発行 | environment `prod-agent` の required reviewers | **回避不可** | **prod の Anthropic API キーは Secrets Manager が唯一の所在**。`apply_agent` は environment `prod-agent` の OIDC ロールで `secretsmanager:GetSecretValue` して取得する (§4.2 — GitHub secret には置かない)。エージェントのローカルには prod のキーを配らない (§3.3) |
 | H-4 本番デプロイ | backend / infra: `workflow_dispatch` + environment `prod` + ref 制限。frontend: **`production` ブランチ保護 (§4.1) + Vercel の Promote 権限限定 (§4.4)** | **回避不可** | `.claude/settings.json` で `gh workflow run` と `production` への push を deny (§3.2) |
 | H-5 着手前承認 | issue 必須欄 + `needs-human` ラベル + PR の DoD 欄 → H-1 で検証 | **回避可** (ラベルを無視して進める余地がある) | H-1 の必須レビューで事後検出する |
@@ -376,9 +379,10 @@ deny パターンの網羅性に依存した設計にしない。
 
 | environment | 承認者 | 用途 | 保持する値 (**IAM ロール ARN と非秘密の識別子のみ。下記以外を置かない**) |
 |---|---|---|---|
-| `dev` | **設定しない** (自動) | dev への継続デプロイ・非破壊マイグレーション・dev の Agent 再発行 | dev の**デプロイ用 / マイグレーション用 IAM ロール ARN** / リージョン / **ECR リポジトリ名・ECS クラスタ名・ecspresso 設定パス** (いずれも秘密ではないので variable でよい) |
-| `dev-db-destructive` | **1 名以上** | dev の破壊的マイグレーションのみ | (dev と同じ) |
-| **`dev-e2e`** | **設定しない** (自動) | **E2E (Playwright) の実行**。**`dev` と分ける** — モノレポでは OIDC の `sub` クレームが environment で決まるため、共有すると **E2E が dev のデプロイ用ロール (ECR push / ecspresso) を引き受けられる** (2026-08-05 追加。設計は hassan_v3 `docs/design/infrastructure.md` §4.5) | **E2E 用 IAM ロール ARN** (権限は Secrets Manager の read のみ) / リージョン / dev の baseURL |
+| **`dev-preview`** | **設定しない** (自動) | **dev = PR 単位プレビュー**の構築・再デプロイ・破棄 (`deploy-preview.yml`。FE / BE の ECS サービス・ALB リスナールール・DB スキーマ・Agent)。**`pull_request` から起動するため Deployment branches を制限しない**。staging 系と共有しない (共有すると任意の PR が staging を書き換えられる) | preview 用 IAM ロール ARN / リージョン / dev クラスタ名・ALB リスナー ARN・FE / BE の ECR リポジトリ名・ワイルドカードドメイン |
+| `staging` (旧 `dev`) | **設定しない** (自動) | staging への継続デプロイ・非破壊マイグレーション・staging の Agent 再発行 | staging の**デプロイ用 / マイグレーション用 IAM ロール ARN** / リージョン / **ECR リポジトリ名・ECS クラスタ名・ecspresso 設定パス** (いずれも秘密ではないので variable でよい) |
+| `staging-db-destructive` | **1 名以上** | staging の破壊的マイグレーションのみ | (staging と同じ) |
+| **`staging-e2e`** | **設定しない** (自動) | **E2E (Playwright) の実行**。**`staging` と分ける** — モノレポでは OIDC の `sub` クレームが environment で決まるため、共有すると **E2E が staging のデプロイ用ロール (ECR push / ecspresso) を引き受けられる** (2026-08-05 追加。設計は hassan_v3 `docs/design/infrastructure.md` §4.5) | **E2E 用 IAM ロール ARN** (権限は Secrets Manager の read のみ) / リージョン / staging の baseURL |
 | `prod-db` | **1 名以上** | prod の DB マイグレーション | prod の**マイグレーション用 IAM ロール ARN** / リージョン / **ECS クラスタ名・マイグレーション用タスク定義名・ロググループ名・サブネット ID・セキュリティグループ ID** (RunTask の宛先。いずれも秘密ではないので variable でよい) |
 | `prod-agent` | **1 名以上** | prod の Managed Agent 再発行 | prod の**デプロイ用 IAM ロール ARN** |
 | `prod` | **1 名以上** | prod のサービスリリース (ecspresso) | prod の**デプロイ用 IAM ロール ARN** |
@@ -394,12 +398,12 @@ deny パターンの網羅性に依存した設計にしない。
   次の `apply_migration` / `apply_agent` が旧値で動く (原因の分かりにくい失敗になる)。
   Agent ID が複数箇所にあると切り戻し先も判断できなくなる
 
-- [ ] 上記 **6 つ**の environment を作成 (`dev` / `dev-e2e` / `dev-db-destructive` / `prod-db` / `prod-agent` / `prod`)
+- [ ] 上記 **7 つ**の environment を作成 (`dev-preview` / `staging` / `staging-e2e` / `staging-db-destructive` / `prod-db` / `prod-agent` / `prod`)
 - [ ] **IAM ロールの信頼条件 (`sub` クレーム) を environment ごとに固定する** —
   モノレポでは `repo:` で分離できないため、**`repo:<org>/<app-repo>:environment:<name>` で分ける**
   (設計は hassan_v3 `docs/design/infrastructure.md` §4.5)。
-  **`dev` と `dev-e2e` を同じロールに紐付けない**
-- [ ] `prod*` と `dev-db-destructive` に required reviewers を設定 (**リポジトリのオーナー本人を含める**)
+  **`staging` と `staging-e2e` を同じロールに紐付けない**。**`dev-preview` も staging 系のロールに紐付けない**
+- [ ] `prod*` と `staging-db-destructive` に required reviewers を設定 (**リポジトリのオーナー本人を含める**)
 - [ ] `prod*` に **Deployment branches: `main` のみ** を設定 (ref 制限の二重化)
 - [ ] 上表の値 (IAM ロール ARN と非秘密の識別子) を environment secret / variable として登録する (**リポジトリ全体の変数に置かない** —
   環境ごとに値が違うため)。**DB 接続情報・API キー・Agent ID / Environment ID を登録しないこと**を
@@ -413,7 +417,7 @@ deny パターンの網羅性に依存した設計にしない。
 ### 4.4 Vercel (app モノレポの `frontend/`)
 
 - [ ] **Root Directory を `frontend` に設定**する (モノレポのため。既定のリポジトリルートではビルドできない)
-- [ ] **Ignored Build Step を設定**する — `frontend/` と `api/` に差分が無い push ではビルドしない
+- [ ] **Ignored Build Step を設定**する — **①`main` / `production` 以外のブランチはビルドしない** (feature ブランチの検証は dev = PR 単位プレビュー。設計リポ INF-U) **かつ ②`frontend/` と `api/` に差分が無い push ではビルドしない**
       (**モノレポ機構の MR-2**。設定しないと backend だけの PR でも毎回 Preview ビルドが走る)
 - [ ] **Production Branch を `production` に変更**する (既定の `main` のままにしない)
 - [ ] `main` への push は Preview デプロイに留める
@@ -458,7 +462,7 @@ gh api "repos/:owner/:repo/branches/production/protection" \
   --jq '{reviews: .required_pull_request_reviews, force_push: .allow_force_pushes.enabled, deletions: .allow_deletions.enabled}'
 
 # environment と承認者 (app モノレポ。reviewers が空の prod* があれば設定漏れ)
-for e in dev dev-e2e dev-db-destructive prod-db prod-agent prod; do
+for e in dev-preview staging staging-e2e staging-db-destructive prod-db prod-agent prod; do
   echo "== $e"
   gh api "repos/:owner/:repo/environments/$e" \
     --jq '.protection_rules[] | select(.type=="required_reviewers") | .reviewers[].reviewer.login' || echo "  (environment が無い)"
