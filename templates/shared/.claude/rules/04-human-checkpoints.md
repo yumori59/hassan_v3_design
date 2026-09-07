@@ -366,7 +366,7 @@ deny パターンの網羅性に依存した設計にしない。
   **GitHub のブランチ保護 / ruleset には「PR の head ブランチを制限する」設定が無い**
   (2026-08-05 時点の理解。§5 の要確認 — 有るなら設定へ移す)。
   設定だけに頼ると、任意の `feature/*` から `production` へ PR を出して承認 1 名で
-  **`main` を経ずに FE 本番へ出せる** (`operations.md` §7.3 の「dev の未リリース変更を prod に出さない」
+  **`main` を経ずに FE 本番へ出せる** (`operations.md` §7.3 の「staging の未リリース変更を prod に出さない」
   4 段のうち機械の 3 段は BE にしか効かない)。したがって:
   - `.github/workflows/guard-production-pr.yml` (雛形にあり) を**必須ステータスチェックに指定する** —
     `github.head_ref != 'main'` の PR を落とす
