@@ -36,9 +36,9 @@ staging への継続デプロイ・dev = PR 単位プレビューの構築) は�
 | ID | 承認点 | ループ上の位置 | 対象リポ | 承認前に見るもの (確認観点) | 承認の記録先 | 止める機構 (§2) |
 |---|---|---|---|---|---|---|
 | **H-1** | **PR のマージ** | S-10 | 両リポ | ① CI の **`gate` ジョブ** green (app モノレポ。個別ジョブは skip され得る — モノレポ機構の MR-1) ② PR 本文のレビュー結果要約に**重大ゼロ** ③ DoD チェックリストの充足 ④ 対象 AC-ID とテスト名の照合出力 ⑤ 依存 issue のマージ済み (infra は `apply` 済みまで) ⑥ H-2 / H-3 の該当宣言の有無 ⑦ H-5 該当 issue なら承認コメントの URL ⑧ **API 破壊的変更の段の宣言があり、①②③ が同梱されていないこと** (MR-6) | **PR の approve レビュー + マージコミット** | ブランチ保護 (必須レビュー + 必須ステータスチェック + `main` への直接 push 禁止) §2.1 |
-| **H-2** | **DB マイグレーションの適用** | S-10 後 (`deploy-backend.yml` の `apply_migration` ジョブ) | app (`backend/`) | ① 適用される DDL 差分の全文 ② **破壊的変更の検出結果** (§2.2 の定義) ③ 適用先環境 ④ 後方互換か (旧イメージが動き続けるか) ⑤ ロールバック手順の有無 | **GitHub environment の承認履歴** (`prod-db` / `dev-db-destructive`) | GitHub Actions environment の required reviewers §2.2 |
+| **H-2** | **DB マイグレーションの適用** | S-10 後 (`deploy-backend.yml` の `apply_migration` ジョブ) | app (`backend/`) | ① 適用される DDL 差分の全文 ② **破壊的変更の検出結果** (§2.2 の定義) ③ 適用先環境 ④ 後方互換か (旧イメージが動き続けるか) ⑤ ロールバック手順の有無 | **GitHub environment の承認履歴** (`prod-db` / `staging-db-destructive`) | GitHub Actions environment の required reviewers §2.2 |
 | **H-3** | **Managed Agent の再発行** | S-10 後 (`apply_agent` ジョブ。**アプリのリリースより前**) | app (`backend/`) | ① prompt / tool schema の差分 ② **schema ↔ handler ↔ prompt の 3 者一致検査が green** ③ `Tools` の全置換で既存ツール (web_search 等) が落ちていないこと ④ Agent ID が変わることによる**進行中セッションの切断**の影響 | **GitHub environment の承認履歴** (`prod-agent`) | 同上 §2.3 |
-| **H-4** | **本番環境への適用 (デプロイ)** | S-10 とは独立した判断 (手動起動) | app: `backend/` (ECS) / `frontend/` (Vercel) / infra リポ (`terraform apply`) | ① 対象イメージタグ / コミット SHA ② その変更が dev で検証済みであること ③ H-2 / H-3 が先に完了していること ④ infra は `plan` 差分 (`destroy` / `replace` の有無) ⑤ ロールバック手段 ⑥ **`frontend/` を prod へ出す PR の head が `main` であること** (`guard-production-pr.yml` が機械で見るが、必須チェックの指定漏れで無効化され得るため人間も見る。§4.1) ⑦ **最新の E2E 結果と、それが対象 commit を検証したものか** — **`frontend/` のみの変更では `deploy-backend.yml` が起動せず E2E も走らない** (MR-1 の path filter の帰結) ため、**FE の変更を prod へ出すときは E2E を `workflow_dispatch` で 1 回手動実行し、その結果を承認材料にする** (nightly を待つと最大 24 時間空く。2026-08-04 の design-reviewer 指摘 中 9) | **GitHub environment の承認履歴** (`prod`) / Vercel の Promote 操作ログ / infra は `apply` 実行者本人 | `workflow_dispatch` + environment 承認 + `main` 限定 §2.4 |
+| **H-4** | **本番環境への適用 (デプロイ)** | S-10 とは独立した判断 (手動起動) | app: `backend/` (ECS) / `frontend/` (Vercel) / infra リポ (`terraform apply`) | ① 対象イメージタグ / コミット SHA ② その変更が staging (`main` の継続デプロイ先。旧 dev) で検証済みであること ③ H-2 / H-3 が先に完了していること ④ infra は `plan` 差分 (`destroy` / `replace` の有無) ⑤ ロールバック手段 ⑥ **`frontend/` を prod へ出す PR の head が `main` であること** (`guard-production-pr.yml` が機械で見るが、必須チェックの指定漏れで無効化され得るため人間も見る。§4.1) ⑦ **最新の E2E 結果と、それが対象 commit を検証したものか** — **`frontend/` のみの変更では `deploy-backend.yml` が起動せず E2E も走らない** (MR-1 の path filter の帰結) ため、**FE の変更を prod へ出すときは E2E を `workflow_dispatch` で 1 回手動実行し、その結果を承認材料にする** (nightly を待つと最大 24 時間空く。2026-08-04 の design-reviewer 指摘 中 9) | **GitHub environment の承認履歴** (`prod`) / Vercel の Promote 操作ログ / infra は `apply` 実行者本人 | `workflow_dispatch` + environment 承認 + `main` 限定 §2.4 |
 | **H-5** | **着手前の計画承認** (**条件付き**) | S-2 (§1.2 の条件に該当する issue のみ) | 両リポ | ① 変更計画 (触るファイル・層・追加するテーブル / エンドポイント) ② 設計書の該当節との対応 ③ **infra 跨ぎの場合はマージ順序と `apply` の位置** ④ 却下する場合は設計リポへ差し戻すかの判断 | **issue コメント** (承認者と日付を明記) | issue テンプレートの必須欄 + `needs-human` ラベルでの停止 + PR の DoD 欄 → **H-1 で検証** §2.5 |
 
 **H-4 の環境別の扱い** (staging / dev を人間承認で止めない — C-15「継続デプロイして検証」を律速させないため。**環境は local / dev (PR 単位プレビュー) / staging (`main` の継続デプロイ先。旧 dev) / prod の 4 つ** = 設計リポ `docs/design/infrastructure.md` INF-U):
@@ -51,7 +51,7 @@ staging への継続デプロイ・dev = PR 単位プレビューの構築) は�
 
 - **infra リポは dev の `terraform apply` も人間が実行する** (既存規約を維持。CI は `plan` まで)。
   理由: Terraform の差分は「非破壊」を機械判定しにくく、`replace` が RDS / ECS の作り直しになる経路がある。
-- dev の破壊的マイグレーションだけ承認を要求する理由: dev の検証データ (会話ログ・生成物) は
+- staging の破壊的マイグレーションだけ承認を要求する理由: staging の検証データ (会話ログ・生成物) は
   再現コストが高く、消えると受入確認自体ができなくなる。**環境の重要度ではなくデータ喪失の不可逆性**で線を引く。
 
 ### 1.2 H-5 (着手前承認) の該当条件 — S-2 で機械的に判定する
@@ -132,7 +132,7 @@ D-4)。方式が決まるまで `plan_migration` の差分生成コマンドは�
 **承認が挟まる位置 (どのジョブが environment で待つか) は方式に依存しないため、本ルールで確定させる**。
 
 **却下案**: マイグレーションをアプリ起動時に自動適用する (PoC 方式)。却下理由: 適用の可否を人間が
-見る機会が無くなり、ECS のタスク複数起動時に同時適用が競合する。dev の非破壊のみ自動適用する現案は、
+見る機会が無くなり、ECS のタスク複数起動時に同時適用が競合する。staging の非破壊 (と使い捨ての dev = preview) のみ自動適用する現案は、
 「見る価値のある差分だけを人間に見せる」ための線引きである。
 
 **却下案**: 単一の `prod` environment で 1 回だけ承認する。却下理由: GitHub の承認は
@@ -179,7 +179,7 @@ D-4)。方式が決まるまで `plan_migration` の差分生成コマンドは�
 本番は開発完了後に一括切替) に対応する。
 
 **未検証の変更を本番に出さない担保**: prod 起動時に ① ref が `main` であること (機械チェック)
-② その commit が dev にデプロイ済みであること (承認前に人間が確認する項目。H-4 の確認観点②) の 2 段。
+② その commit が staging にデプロイ済みであること (承認前に人間が確認する項目。H-4 の確認観点②) の 2 段。
 ①は機械、②は人間の確認事項として承認材料に含める。
 
 ### 2.5 H-5 (着手前計画承認) = ラベル停止 + PR チェックリスト + H-1 での検証
@@ -333,7 +333,7 @@ deny パターンの網羅性に依存した設計にしない。
     path filter で skip され得る。**skip されたジョブは status を返さない**ため、必須に指定すると
     PR が永久に pending になりマージ不能になる (モノレポ機構の MR-1)。
     `gate` は `if: always()` で全ジョブの結果を集約し、`success` / `skipped` 以外を失敗にする
-  - infra リポ: `fmt / validate / lint` と `plan (dev)`
+  - infra リポ: `fmt / validate / lint` と `plan (dev)` / `plan (staging)` (**`envs/staging` を作る PR で CI の plan ジョブを staging 対応させる**。無いと plan の検査が空振りしたまま `gate` が緑になる)
 - [ ] **app モノレポ: `gate` の挙動を 3 通りの PR で確認する** — 「backend のみ変更」「frontend のみ変更」
   「両方変更」。`gate` の skipped 許容条件を書き損ねると**逆に常に落ちる**ため、
   設定直後に 1 回検証する (この確認をしていないブランチ保護は未完了とみなす)
