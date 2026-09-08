@@ -49,7 +49,8 @@
 | F-8 | リージョンは `ap-northeast-1` 固定 | 同書 §1.1 |
 | F-9 | ロググループは `/ecs/hassan-v2-api` (prod) / `/ecs/hassan-v2-api-dev` (dev)、`awslogs-create-group: true` で**アプリのデプロイ時に自動作成**される (保持期間の設定が定義に無い) | 同書 §2 |
 | F-10 | DB スキーマ適用は**踏み台サーバーへの SSH トンネル + `psqldef` の手動実行** | `hassan-v2-backend/README.md:74`, `:81`, `:87` |
-| F-11 | API の公開エンドポイントは **ALB の生 DNS 名**が README に記載されている (`hassan-v2-api-dev-alb-….elb.amazonaws.com`) | `hassan-v2-backend/README.md:14` |
+| F-11 | API の公開エンドポイントは **ALB の生 DNS 名**が README に記載されている (`hassan-v2-api-dev-alb-….elb.amazonaws.com`。**dev 環境の記述**) | `hassan-v2-backend/README.md:14` |
+| **F-13** (2026-09-07 追加。issue #5 の実測) | **prod は生 DNS 名ではなく `api.hassan.jp` の Route53 A (alias) レコードで公開されている** (dev は `dev-api.hassan.jp`)。F-11 は README (dev) 由来の記述で、**prod の実態は別**だった — README を「v2 全体の事実」に一般化した推測が誤りだった (DR-1) | `hassan-terraform` (v2 の Terraform。最終コミット 2025-11-08) の `prod/route53_records.tf` / `dev/route53_records.tf` |
 | F-12 | RDS のエンドポイントは `hassan-v2-{dev,prod}-instance-1.….rds.amazonaws.com`。コンソールリンクに `is-cluster=true` が含まれる | `hassan-v2-backend/README.md:24`, `:25` |
 | F-13 | S3 は稼働中 (`S3_BUCKET_NAME` を設定に持つ)。`uploadFile` が `ACL: ObjectCannedACLPublicRead` を付けて**恒久・無署名の公開 URL** を返す | `hassan-v2-backend/aws/s3.go`、[API/README.md](API/README.md) D-API-14' |
 
@@ -131,10 +132,12 @@
 | VPC | v3 専用の VPC を新規作成 (v2 と分離。INF-O) | CIDR が異なるだけ | TF | 前提 |
 | public subnet × 2 AZ | ALB / NAT Gateway の配置 | 同一構成 | TF | 前提 |
 | private subnet × 2 AZ | ECS タスク / RDS の配置 (INF-F) | 同一構成 | TF | 前提 |
-| NAT Gateway | タスクの外向き通信 (Anthropic API・ECR・Secrets Manager) | **dev 1 個 / prod 2 個 (AZ 冗長)** | TF | **要確認** (dev のコスト削減として 1 個にする案の可否) |
+| NAT Gateway | タスクの外向き通信 (Anthropic API・ECR・Secrets Manager) | **dev (preview) 1 個 / staging 1 個 / prod 2 個 (AZ 冗長)** | TF | 前提 (2026-09-09 ユーザー回答。B-1: dev/staging はコスト優先で 1 個、prod のみ AZ 冗長) |
 | S3 Gateway エンドポイント | S3 通信を NAT を通さない | 同一 | TF | 前提 |
 | セキュリティグループ (ALB / ECS / RDS / RunTask) | 三段構成 (ALB→ECS→RDS のみ許可)。**ECS の egress は 443/tcp のみ** (INF-R) | 同一 | TF | 前提 |
-| Interface エンドポイント (ECR / Secrets / Logs) | NAT 転送量の削減。**NAT を通る通信を Anthropic API 相当に限定するセキュリティ上の効果も持つ** (INF-R) | — | TF | **要確認** (初期導入するか、転送量が問題化してから足すか。§2 INF-F は後者を提案。**INF-R によりセキュリティ観点も判断材料に加える**) |
+| Interface エンドポイント (ECR / Secrets / Logs) | NAT 転送量の削減。**NAT を通る通信を Anthropic API 相当に限定するセキュリティ上の効果も持つ** (INF-R) | — | TF | 前提 (2026-09-09 ユーザー回答。B-2: **初期導入しない**。NAT 転送量が問題化した時点、またはセキュリティ要件が具体的に出た時点で追加する) |
+| **S3 Gateway エンドポイントのポリシー** (2026-09-09 追加。#17 確認事項 1) | 既定 (ポリシー無し) は全 S3 アクション・全バケットを許可し、private subnet から他アカウントの任意バケットへ到達できてしまう (データ持ち出し経路) | 同一 | TF | 前提 (2026-09-09 ユーザー回答。D-1: **ポリシーを付ける**。許可範囲は「自アカウントのバケット」+ **ECR のレイヤ格納バケット** (`arn:aws:s3:::prod-<region>-starport-layer-bucket/*` など、AWS が公開しているリージョン別バケット名。ECR pull がここを経由するため絞りすぎるとイメージ取得が壊れる) に限定する |
+| **VPC Flow Logs** (2026-09-09 追加。#17 確認事項 2) | ネットワーク層の事後追跡・疎通トラブルの切り分け。設計に記述が無かった欠落 | **prod のみ取得** (dev / staging は取らない。転送量課金を避ける) | TF | 前提 (2026-09-09 ユーザー回答。D-2: **REJECT のみを S3 へ出力し 90 日保持**。ALL を取らない — 許可された通信の全量記録は費用対効果が低い) |
 | 踏み台 EC2 (`t4g.nano`。private subnet) | 人間が DB へ GUI 接続するための SSM ポートフォワード専用ホスト (INF-S) | 環境ごとに 1 台・常時 stopped。IAM ロールは環境ごとに別 | TF | 前提 (2026-08-07 ユーザー決定・Q-INF-5) |
 
 ### 3.2 コンピュート・配信
@@ -143,8 +146,8 @@
 |---|---|---|---|---|
 | ALB + リスナー (443) + ターゲットグループ | HTTPS 終端・SSE の通し口 | **アイドルタイムアウト 300 秒は共通** (INF-C)。証明書のドメインが異なる | TF | 前提 |
 | ターゲットグループのヘルスチェック | `/alive` / 判定主体はここだけ (INF-D) | 同一 | TF | 前提 |
-| ALB のアクセスログ (S3) | リクエスト単位の事後調査 | **prod のみ有効** | TF | **要確認** (dev でも有効にするか) |
-| ECR リポジトリ | backend イメージ。**タグ不変 (immutable) + スキャン有効 + ライフサイクル (直近 N 世代保持)** | 共通 (1 リポジトリを両環境で共有) | TF | **要確認** (dev/prod でリポジトリを分けるか) |
+| ALB のアクセスログ (S3) | リクエスト単位の事後調査 | **prod のみ有効** | TF | 前提 (2026-09-09 ユーザー回答。B-3: dev / staging では有効にしない) |
+| ECR リポジトリ (backend) | backend イメージ。**タグ不変 (immutable) + スキャン有効 + ライフサイクル (直近 N 世代保持)** | **環境ごとに分ける** (`hassan-v3-dev-backend` / `hassan-v3-staging-backend` / `hassan-v3-prod-backend`) | TF | 前提 (2026-09-09 ユーザー回答。B-4: **分割する**。共有だと preview ロール (`hassan-v3-dev-preview`。#42) の削除権限が prod のイメージへ届く経路が生まれる — 実装リポ `hassan-v3-infra` の `modules/iam/README.md` の残存リスクを参照。分割は #34 / #44 で実施する) |
 | ECS クラスタ (Fargate) | タスクの実行基盤 | 環境ごとに 1 クラスタ | TF | 前提 |
 | **ECS サービス / タスク定義** | アプリの実行単位・リリース | `desiredCount` dev 1 / prod 2 (INF-E) | **ECS** | 前提 (C-14) |
 | マイグレーション実行タスク定義 | INF-H の RunTask 用。**接続情報は `secrets` で Secrets Manager から注入する** (CI に DB 接続情報を渡さない — [operations.md](operations.md) §4.1) | 同一 (イメージは同じ) | **ECS** | 前提 |
@@ -153,21 +156,21 @@
 | **ALB リスナールール (PR 単位)** | ホストヘッダ `pr-<N>.dev.<domain>` → FE の TG (**`authenticate-oidc` 付き**) / `pr-<N>-api.dev.<domain>` → BE の TG。リスナーの既定アクションは 404 | **dev のみ** | **`deploy-preview.yml`** (Terraform 管理外。X-11) | 前提 (INF-U) |
 | **Fargate Spot キャパシティプロバイダ** | preview のコスト削減。中断されても使い捨て環境なので再起動で足りる | **dev のみ** (staging / prod は通常 Fargate) | TF | 前提 (INF-U) |
 | **ALB の OIDC 認証用 IdP クライアント** | preview の FE ホストを社内に閉じる。クライアントシークレットは Secrets Manager (INF-G の器) | **dev のみ** | TF (器) / 値は人が投入 | 前提 (INF-U。IdP は Google Workspace を暫定既定) |
-| AWS WAF (ALB にアタッチ) | 未認証エンドポイントの上位防御 + **Geo Match (JP のみ許可)** (INF-L) | **prod = block / dev = count** | TF | **要確認** (マネージドルール・レートベースルールの要否。**Geo Match は v2 で運用中の `AllowJapanOnly` を引き継ぐ前提**) |
+| AWS WAF (ALB にアタッチ) | 未認証エンドポイントの上位防御 + **Geo Match (非 JP を block)** (INF-L) | **prod = block / dev,staging = count** | TF | 前提 (2026-09-09 ユーザー回答。B-5: マネージドルール (Common / KnownBadInputs / IPReputation) + レートベース + Geo Match を導入する。**v2 の `AllowJapanOnly` は `default_action allow` の no-op だったため引き継ぐ実体が無く、v3 は `not_statement` で「JP 以外」を block として新規定義する** (#9 の PR #41 で実装済み)。**prod へ block で適用する前に #49 (WAF ログ配信・`SizeRestrictions_BODY` の扱い・Geo Block の副作用確認) を解消すること** |
 
 ### 3.3 データストア
 
 | 要素 | 用途 | dev / prod の差 | 管理主体 | 確認 |
 |---|---|---|---|---|
-| RDS PostgreSQL (インスタンス) | アプリの DB (C-6) | **dev: Single-AZ / prod: Multi-AZ**。インスタンスクラスは §5 | TF | **要確認** (Aurora PostgreSQL にするか RDS for PostgreSQL にするか。F-12 により v2 の種別が未確定) |
-| 自動バックアップ + PITR | 復旧手段 | **dev 7 日 / prod 30 日** | TF | **要確認** (prod の保持日数) |
+| **Aurora PostgreSQL (Provisioned)** | アプリの DB (C-6) | **dev(preview)・staging: Single-AZ 相当 (1 ライター) / prod: Multi-AZ (ライター + リーダー)**。インスタンスクラスは §5 | TF | 前提 (2026-09-09 ユーザー回答。B-6: **Aurora PostgreSQL (Provisioned) に確定** — RDS for PostgreSQL ではない。F-12 により v2 の実クラスは未調査のままだが、種別自体は Serverless v2 ではなく Provisioned を採る。**`modules/rds` は既にこの構成で実装済み** — 本行はその実装に設計側を追随させたもの) |
+| 自動バックアップ + PITR | 復旧手段 | **dev(preview)・staging 7 日 / prod 30 日** | TF | 前提 (2026-09-09 ユーザー回答。B-7: prod 30 日で確定) |
 | ストレージ暗号化 (KMS) | 保管時の暗号化 | 両環境で有効 | TF | 前提 |
 | 削除保護 (`deletion_protection`) | 誤削除防止 | **dev 無効 / prod 有効** | TF | 前提 |
-| パラメータグループ | ログ設定 (`log_min_duration_statement` 等) | 同一 | TF | **要確認** (スロークエリログの取得方針) |
+| パラメータグループ | ログ設定 (`log_min_duration_statement` 等) | 同一 (全環境) | TF | 前提 (2026-09-09 ユーザー回答。B-8: **`log_min_duration_statement = 1000` (ms) を全環境で有効化**。運用開始後の実測で調整する) |
 | S3 バケット (アセット・ナレッジのファイル) | 添付ファイルの保管。**非公開 + ACL を付けない + presigned URL のみ** ([API/README.md](API/README.md) D-API-14') | バケットを環境ごとに分離 | TF | 前提 |
 | 同バケットの CORS | ブラウザから presigned URL で GET する場合に必要 | **許可オリジン = FE のホスト名** (prod は `https://app.hassan.jp`。dev は Q-INF-3 の派生①) | TF | **前提** — [frontend.md](frontend.md) §12.3 の末尾が「FE はダウンロード URL をブラウザで直接開く」と回答済み |
-| 同バケットのライフサイクル | 不完全マルチパートの削除・世代管理 | 同一 | TF | **要確認** |
-| S3 バケット (ALB アクセスログ用) | 3.2 のログ出力先 | prod のみ | TF | 要確認 (3.2 と同じ判断) |
+| 同バケットのライフサイクル | 不完全マルチパートの削除・世代管理 | 同一 | TF | 前提 (2026-09-09 ユーザー回答。B-9: **不完全マルチパートを 7 日で削除、世代管理 (バージョニング) は導入しない** — 添付ファイルは削除 API で消す前提であり、S3 側の世代保持は要求されていない) |
+| S3 バケット (ALB アクセスログ用) | 3.2 のログ出力先 | prod のみ | TF | 前提 (§3.2 の ALB アクセスログと同じ判断。B-3) |
 
 ### 3.4 設定・シークレット
 
@@ -186,14 +189,14 @@
 |---|---|---|---|---|
 | CloudWatch ロググループ (アプリ / RunTask) | アプリログの集約 (O-1) | **保持期間 dev 30 日 / prod 400 日** (INF-N) | TF | 前提 |
 | CloudTrail Trail + 専用 S3 バケット | アカウント全体の管理イベントの監査証跡 (INF-T)。踏み台の `StartSession` (INF-S) を含む | 環境差なし (アカウント共通の Trail 1 本) | TF | 前提 (2026-09-02 ユーザー決定) |
-| GuardDuty / IAM Access Analyzer | 脅威検知・意図しない外部アクセス許可の検出 | — | — | **要確認** (導入コスト・運用体制を含め未確定。INF-T とは別判断) |
+| GuardDuty / IAM Access Analyzer | 脅威検知・意図しない外部アクセス許可の検出 | — | — | 前提 (2026-09-09 ユーザー回答。B-14: **今回は導入しない**。運用体制が整った時点で別途判断する) |
 | メトリクスフィルタ | ログから LLM 失敗・429 等を抽出 ([observability.md](observability.md) §4.3 / §8 の仮定「ログからのフィルタで始める」) | 同一定義 | TF | 前提 |
 | CloudWatch アラーム | [observability.md](observability.md) §4.6 の AL-1〜AL-7 (しきい値の SSOT) | **アラーム自体は dev / prod とも AL-1〜AL-7 の全件を作る**。**通知先に繋ぐ範囲が環境で変わる** (dev は AL-6 のみ) — 環境差の SSOT は [operations.md](operations.md) §7.5 | TF | 前提 |
 | SNS トピック | アラームの通知先 (INF-K) | **prod 2 本** (`alerts-critical` / `alerts-warning`) **/ dev 1 本** (`alerts-dev`)。束ね方と対応するアラーム番号は [operations.md](operations.md) §7.5 | TF | 前提 |
-| **SNS の email 購読** | Slack が使えない間の経路。**prod の `alerts-critical` のみに付ける** ([operations.md](operations.md) §7.5) | prod のみ | TF (**確認メールの承認は受信者本人** = 外部) | **要確認** (宛先メールアドレス) |
-| AWS Chatbot (Slack 連携) | Slack への配信 | 同一 | TF (**ワークスペース承認は外部** §7) | **要確認** (Slack を使うか) |
-| CloudWatch ダッシュボード | [observability.md](observability.md) §6 の最低限ダッシュボード | prod のみ | TF | **要確認** |
-| AWS Budgets + 予算アラート | **AWS 利用料**の急増検知 (LLM コストは AWS 課金ではないため別系統 — [observability.md](observability.md) AL-4 が担当) | prod のみ / dev は少額のしきい値 | TF | **要確認** (C-12 は LLM の上限なしを定めるが、AWS 側の予算監視は別論点) |
+| **SNS の email 購読** | Slack が使えない間の経路。**prod の `alerts-critical` のみに付ける** ([operations.md](operations.md) §7.5) | prod のみ | TF (**確認メールの承認は受信者本人** = 外部) | 前提 (2026-09-09 ユーザー回答。B-13: **仕組みは確定** (prod の critical のみ)。**宛先アドレスそのものは設計の管理対象にしない** — INF-G の「器と値の分離」と同じ扱いで、値は構築時に人が Terraform 変数として投入する (`.tf` に平文で書かない) |
+| AWS Chatbot (Slack 連携) | Slack への配信 | 同一 | TF (**ワークスペース承認は外部** §7) | 前提 (2026-09-09 ユーザー回答。B-10: **Slack を使う**) |
+| CloudWatch ダッシュボード | [observability.md](observability.md) §6 の最低限ダッシュボード | prod のみ | TF | 前提 (2026-09-09 ユーザー回答。B-11: prod のみ・§6 の最低限セットで確定) |
+| AWS Budgets + 予算アラート | **AWS 利用料**の急増検知 (LLM コストは AWS 課金ではないため別系統 — [observability.md](observability.md) AL-4 が担当) | prod に予算アラート / dev,staging は少額のしきい値 | TF | 前提 (2026-09-09 ユーザー回答。B-12: 導入する。**具体的な金額は構築時に変数として投入する** (器と値の分離。INF-G と同じ扱い) |
 
 ### 3.6 CI/CD・その他
 
@@ -409,7 +412,7 @@ backend 用ロールしか引き受けられず、frontend リポからは AWS �
 
 | 段 | 内容 | 完了条件 (観測可能な形) |
 |---|---|---|
-| **0** | §11.1 の `[Answer]:` を解消する (**残 3 件**: 要素一覧 Q-INF-1 / **staging のホスト名 Q-INF-3 派生①** / **既存 Route53 レコードとの衝突確認 Q-INF-3 派生②**。AWS アカウント構成 = Q-INF-2 と prod のドメイン名 = Q-INF-3 は回答済み) | 一覧が確定し、本書の §3 の「要確認」がゼロになる |
+| **0** | §11.1 の `[Answer]:` を解消する。**2026-09-09 に Q-INF-1 / Q-INF-3 派生① を回答し §3 の「要確認」はゼロになった**。残るのは **Q-INF-3 派生② のライブ確認** (`aws route53 list-resource-record-sets` を人間が実行する。設計判断としては完結済み) のみ | §3 の「要確認」がゼロ (**達成**)。派生②のライブ確認は段 5 着手前のチェックリスト項目として残す |
 | **1** | **tfstate の置き場を作る** — S3 バケット (バージョニング + SSE-KMS + パブリックブロック) を **CLI で 1 回だけ手作業で作成** (§7 の例外) | `terraform init` が S3 backend で成功する |
 | **2** | **OIDC プロバイダ + [§4.5](#45-oidc-の信頼条件-sub-クレーム--モノレポでは-environment-で分ける) の表のロール一式** (INF-I) を apply。**表の行を 1 つでも落とさない** — 落とした分は「その機能を初めて動かしたとき」まで気付けない | ①CI の `plan` ジョブが PR にコメントできる (キーを一切置いていないこと) ②**§4.5 の表の各ロールについて `aws iam get-role` が成功する** (`plan` だけの確認では `staging-e2e` / `prod-agent` / `prod-db` の欠落を見逃す) |
 | **3** | **network** — VPC / subnet / SG / NAT / S3 エンドポイント | `plan` の差分ゼロ。private subnet からの外向き通信が確認できる |
@@ -535,10 +538,13 @@ app モノレポ
 
 ### 9.2 全面切替のリソース面の手順 (AC-3.5 のインフラ側)
 
-**前提 (実測事実から導かれる制約)**: **v2 の API 公開エンドポイントは ALB の生 DNS 名であり (F-11)、
-API 用の Route53 レコードが存在しない**。v3 は最初から別ホスト名で自分の ALB を指す (INF-J)。
-したがって **API 側には「付け替えるレコード」も「DNS で戻すレバー」も無い**。
-**実質的な切替・切り戻しのレバーは FE の公開ドメイン 1 レコード (と Vercel の Promote) だけ**である。
+**前提 (2026-09-09 に是正。F-13 の実測を反映)**: ~~v2 の API 公開エンドポイントは ALB の生 DNS 名であり (F-11)、
+API 用の Route53 レコードが存在しない~~ — **これは誤りだった** (F-11 は dev 環境の README 由来の記述を
+prod にも一般化した推測。F-13: **v2 prod は `api.hassan.jp` の Route53 レコードで公開されている**)。
+**API 側にも DNS レバーがある**。v3 は最初から別ホスト名 `api.hassan.jp` を使う設計 (INF-J) だが、
+**この名前は v2 prod が既に使っているため、全面切替時に v2 → v3 へレコードを付け替える必要がある**
+(Q-INF-3 の追記・案 B)。**切替・切り戻しのレバーは FE の公開ドメインと API (`api.hassan.jp`) の
+2 レコード (と Vercel の Promote)** になる。
 
 **公開方式は 2 ケースあり、どちらを採るかは未確定**。
 **2026-08-29 に Q-INF-3 が回答され、v3 のホスト名は `app.hassan.jp` (FE) / `api.hassan.jp` (BE) に確定した**
@@ -547,8 +553,8 @@ API 用の Route53 レコードが存在しない**。v3 は最初から別ホ�
 
 | | ケース A | ケース B |
 |---|---|---|
-| 最終的に案内する URL | **v2 が今使っている FE の公開ドメイン** (`hassan.jp` / `v2.hassan.jp` 等。**実レコードは未確認** = §11.3) を v3 の Vercel へ向け替える | **`app.hassan.jp` のまま**案内する |
-| DNS 操作 | **あり** (切替時と切り戻し時) | **なし** |
+| 最終的に案内する URL | **v2 が今使っている FE の公開ドメイン** (`hassan.jp`。**2026-09-07 に実測確認済み** — `hassan-terraform` の `route53_records_app.tf` に `hassan.jp` A → Vercel の記録がある。F-13 と同じ実測) を v3 の Vercel へ向け替える | **`app.hassan.jp` のまま**案内する |
+| DNS 操作 | **あり** (FE のレコードのみ。切替時と切り戻し時) | **なし** |
 | 未確定の理由 | **v2 の FE がどのレコードで公開されているかが未確認**である (§11.3)。**確認できれば A を選べる** | — |
 
 (運用側の SSOT は [operations.md](operations.md) §6.3 の ⑥):
@@ -556,9 +562,9 @@ API 用の Route53 レコードが存在しない**。v3 は最初から別ホ�
 | # | 手順 | ケース A (既存の公開ドメインを v3 へ付け替える) | ケース B (v3 を別 URL で公開する) |
 |---|---|---|---|
 | 1 | **切替前** | v3 の prod を §6.2 で構築し、**v3 のホスト名**で FE の Production を動作確認する (この時点で v2 は無変更のまま稼働) | 同左 |
-| 2 | **TTL の短縮** | **FE の公開ドメインのレコード**の TTL を 60 秒に下げ、旧 TTL の期間だけ待つ (**対象は FE のレコード 1 件のみ**。API 側には対象レコードが無い) | **不要** (DNS を触らない) |
-| 3 | **切替** | **FE の公開ドメインを v3 の Vercel Production へ向ける**。**API のホスト名は DNS ではなく FE (Vercel) の環境変数で切り替わる** — Production スコープの API ベース URL が v3 の ALB ホスト名を指しており、**Promote が実質の切替操作**である (§5.3) | **v3 の URL をユーザーへ案内する**。既存ドメインは v2 のまま |
-| 4 | **切り戻し (ロールバック)** | **FE の公開ドメインのレコードを旧レコード (v2 の FE) へ戻す** (TTL 60 秒のまま作業する)。v2 側は無変更のため再構築は不要 | **v3 FE の Production を利用停止の案内表示に Promote し、v2 の URL を案内する** (DNS 操作は無い) |
+| 2 | **TTL の短縮** | **FE と API 両方の公開ドメインレコード**の TTL を 60 秒に下げ、旧 TTL の期間だけ待つ (**2026-09-09 追記: `api.hassan.jp` も対象に追加** = F-13 / Q-INF-3 案 B) | **API のみ** TTL を下げる (FE は既に `app.hassan.jp` で運用中のため対象外) |
+| 3 | **切替** | **FE の公開ドメインを v3 の Vercel Production へ向け、`api.hassan.jp` の A (alias) を v2 の ALB → v3 の ALB へ付け替える** (2026-09-09 追記。**この 2 レコードは同時に切り替える** — 片方だけ先行すると FE/BE の対向がずれる) | **`api.hassan.jp` を v2 の ALB → v3 の ALB へ付け替える**。**v3 の URL (`app.hassan.jp`) をユーザーへ案内する**。既存 FE ドメイン (`hassan.jp`) は v2 のまま |
+| 4 | **切り戻し (ロールバック)** | **FE と API 両方の公開ドメインレコードを旧レコード (v2) へ戻す** (TTL 60 秒のまま作業する)。v2 側は無変更のため再構築は不要 | **`api.hassan.jp` を v2 の ALB へ戻す**。**v3 FE の Production を利用停止の案内表示に Promote し、v2 の URL を案内する** |
 | 5 | **期間** | **切り戻し可能期間は v3 公開後 7 日**。**この定義と根拠は [operations.md](operations.md) §6.4 が SSOT** (Q-1 のデータ移行方式の確定に依存しない) | 同左 |
 | 6 | **v2 の停止** | 上記 7 日の経過後、§9.1 の順序で削除する | 同左 |
 
@@ -625,7 +631,14 @@ API 用の Route53 レコードが存在しない**。v3 は最初から別ホ�
 RDS の種別・バックアップ日数・パラメータ / S3 の CORS とライフサイクル / **Slack 通知** /
 ダッシュボード / **AWS Budgets**) の要否。
 
-[Answer]:
+[Answer]: **確定 (2026-09-09 ユーザー回答)**。12 行それぞれの決定は §3 の各行に **前提** として記載した
+(B-1〜B-14。要旨: NAT は dev/staging 1・prod 2 / Interface エンドポイントは初期導入しない /
+ALB アクセスログは prod のみ / ECR は環境ごとに分割 / WAF はマネージドルール + レートベース + Geo Match block /
+RDS は Aurora PostgreSQL Provisioned / バックアップは prod 30 日 / スロークエリログは全環境 1000ms /
+S3 は不完全マルチパート 7 日削除・世代管理なし / Slack 通知は使う / ダッシュボードは prod のみ最低限 /
+AWS Budgets は prod に予算アラート・金額は構築時に変数投入 / GuardDuty 等は今回導入しない)。
+併せて **S3 Gateway エンドポイントのポリシー**と **VPC Flow Logs** (issue #17 の確認事項 2 点) も
+本回答で決定した (D-1 / D-2。§3.1 に前提として追加)。
 
 **Q-INF-2. AWS アカウント構成**: v3 を **v2 と同一の AWS アカウント**に新規リソースとして作るか、
 **別アカウント**にするか。dev / prod をアカウントで分けるか。
@@ -648,28 +661,50 @@ v2 は ALB の生 DNS 名を使っている (F-11) ため、v3 で独自ドメ�
 同書の段階2 (HttpOnly Cookie 化) で `Domain=hassan.jp` の Cookie を共有できるようにし、
 **移行時にドメイン変更を伴わせない**ため。**dev の 2 件と既存レコードとの衝突確認は下記の派生①②で残す**。
 
-**Q-INF-3 派生①: dev 環境のホスト名 2 件** (FE / BE)。
+**追記 (2026-09-09。issue #5 の実測 F-13 を受けて)**: **`api.hassan.jp` は v2 prod の ALB が既に使用中**であることが判明した
+(F-13。想定していた「API 側に切替レバーが無い」という §9.2 の前提が誤りだった)。この衝突への対応を確定する:
+
+| 案 | 内容 | 影響 |
+|---|---|---|
+| A | prod BE を別名にする (`api-v3.hassan.jp` 等) | FE の CORS 許可オリジン・Vercel 環境変数・§5.3 の対応表を変更する必要がある |
+| **B (採用)** | **`api.hassan.jp` を維持し、全面切替時に v2 の A (alias) レコードを v3 の ALB へ付け替える** | INF-J の判断 (ホスト名そのもの) は変わらない。**§9.2 の切替手順に「API 側にも DNS レバーがある」ことを反映する必要がある** (下記) |
+
+**2026-09-09 ユーザー回答: 案 B を採用**。段 5 (ALB / ACM / Route53) の staging 構築では `api-staging.hassan.jp` 等の別名で検証し、
+`api.hassan.jp` の付け替えは全面切替 (§9.2) のときに一度だけ行う。§9.2 を本回答に合わせて改訂した。
+
+**Q-INF-3 派生①: staging (旧 dev) 環境のホスト名 2 件** (FE / BE)。
 **`dev.hassan.jp` は v2 の dev FE が使っている**ため使えない
 (`hassan-v2-backend/internal/corsutil/origin.go:14` の許可オリジンに存在する。
 **ただしこれは CORS の許可リストであって Route53 のレコードではない** — 実レコードの確認は派生②)。
-**暫定既定**: `app-dev.hassan.jp` / `api-dev.hassan.jp` を仮に置いて設計を進める
-(**2026-09-07 の INF-U 以降、この 2 件は staging の FE / BE を指す**。加えて dev = preview 用に
-**`*.dev.hassan.jp` のワイルドカード** (FE `pr-<N>.dev.` / BE `pr-<N>-api.dev.`) が要る — Q-INF-6)
-(**確定値ではない**。命名だけの問題であり、決まっても §2 の判断は変わらない)。
-**決まらないと止まるもの**: BE の CORS 許可オリジン設定 ([frontend.md](frontend.md) §12.3 の決定 2) と
-ACM 証明書の SAN、Vercel の独自ドメイン設定。**§6.1 の段 5 までに必要**。
 
-[Answer]:
+[Answer]: **`app-staging.hassan.jp` / `api-staging.hassan.jp` で確定** (2026-09-09 ユーザー回答)。
+**当初の暫定既定は `app-dev.hassan.jp` / `api-dev.hassan.jp` だったが、INF-U で dev の意味が変わったため、
+staging と分かる名前に改める** (2025-11 時点の衝突確認 = 派生② では `app-dev` / `api-dev` は空きだったが、
+`app-staging` / `api-staging` は未確認の新しい名前のため、**着手前 (段 5) に改めて衝突確認を行う** — 派生②参照)。
+dev (preview) 用の **`*.dev.hassan.jp` のワイルドカード** (FE `pr-<N>.dev.` / BE `pr-<N>-api.dev.`) は
+Q-INF-6 (INF-U) のとおり据え置く — v2 の `dev.hassan.jp` は**完全一致のレコード**であり、
+`*.dev.hassan.jp` の**ワイルドカード**とは階層が同じでも一致条件が異なるため**共存できる**
+(DNS はより詳細な完全一致を優先する。ワイルドカードは他に一致するレコードが無いときだけ使われる)。
+**決まったもの**: BE の CORS 許可オリジン設定 ([frontend.md](frontend.md) §12.3 の決定 2) と
+ACM 証明書の SAN、Vercel の独自ドメイン設定に使う。
 
-**Q-INF-3 派生②: 既存の Route53 レコードとの衝突確認** (**未実施**)。
-**`hassan.jp` のホストゾーンに `app` / `api` / `app-dev` / `api-dev` のレコードが
-既に存在しないことを確認していない**。**本リポジトリからは確認できない**
-(v2 は IaC を持たない = F-1。§11.3 に既知の未調査として計上済み)。
-**確認方法**: `aws route53 list-resource-record-sets --hosted-zone-id <id>` の 1 回の実行。
-**衝突していた場合**: ホスト名を変える (INF-J の判断は変わらない) か、
-既存レコードの用途を確認して整理する。**§6.1 の段 5 (ALB / ACM / Route53) の着手前に潰す**。
+**Q-INF-3 派生②: 既存の Route53 レコードとの衝突確認** (**v2 Terraform の実測で部分的に判明。ライブ確認は未実施**)。
 
-[Answer]:
+**2026-09-07 の実測 (issue #5。v2 Terraform `hassan-terraform` の 2025-11-08 スナップショット)**:
+
+| ホスト名 | 状態 | 備考 |
+|---|---|---|
+| `api.hassan.jp` | **衝突 (v2 prod の ALB が使用中)** | 上記 Q-INF-3 の追記のとおり案 B (全面切替時に付け替え) で対応 |
+| `app.hassan.jp` / `app-dev.hassan.jp` / `api-dev.hassan.jp` | 2025-11 時点では空き | ただしスナップショット時点の情報であり、ライブ確認ではない |
+| `app-staging.hassan.jp` / `api-staging.hassan.jp` (2026-09-09 に新規決定) | **未確認** | 上記 2025-11 スナップショットの調査対象に含まれていない新しい名前 |
+
+**本リポジトリから実行できないため、次の 1 手は人間が行う**:
+`aws route53 list-resource-record-sets --hosted-zone-id <id>` で `app` / `api` / `app-dev` / `api-dev` /
+`app-staging` / `api-staging` の現物を確認する。**§6.1 の段 5 (ALB / ACM / Route53) の着手前に実施する**
+(staging の段 5 着手前後どちらでもよいが、`api.hassan.jp` の付け替えは全面切替の直前に確認し直す)。
+
+[Answer]: 方針は確定 (上記 2 表)。**ライブでの衝突確認は運用手順として残る** (段 5 着手前のチェックリスト項目。
+設計判断としてはここまでで完結する — 確認の結果ホスト名を変える必要が生じても INF-J の判断構造は変わらない)。
 
 **Q-INF-4. dev 環境のコストと可用性のバランス**: §5.2 の dev 側の値 (Single-AZ / NAT 1 個 /
 タスク 1 本 / ログ 30 日) でよいか。dev は開発期間中フル稼働する (C-15) ため、
@@ -707,9 +742,9 @@ nightly E2E ([testing.md](testing.md) §7.4) との干渉が無く運用が単�
 
 ### 11.3 未調査の事実 (推測で埋めていない項目)
 
-- **v2 の RDS のエンジン種別・バージョン・インスタンスクラス・Multi-AZ の有無** — README には
-  エンドポイントと DB 名のみ (F-12)。コンソールアクセスが必要。
-  **v3 の RDS 種別 (Aurora / RDS for PostgreSQL) の判断材料として要る** (§3.3 の確認対象)
+- ~~v2 の RDS のエンジン種別・バージョン・インスタンスクラス・Multi-AZ の有無~~ — **解消 (2026-09-09)**。
+  v3 の RDS 種別は v2 の実態を待たずに **Aurora PostgreSQL (Provisioned) に確定した** (§3.3 B-6)。
+  v2 の実クラスタ種別 (F-12) は引き続き未調査のままだが、v3 の判断はそれに依存しない
 - **v2 の ALB のリスナー・ターゲットグループ・ヘルスチェック設定** — IaC が無いためリポジトリから
   確認できない (F-1)。INF-D の `/alive` は v2 のコードにエンドポイントが存在する事実
   ([../analysis/v2-deploy-observability.md](../analysis/v2-deploy-observability.md) の推測節) に基づく提案であり、
@@ -720,11 +755,10 @@ nightly E2E ([testing.md](testing.md) §7.4) との干渉が無く運用が単�
   **ただしオーナー確認により、Geo Match ルール `AllowJapanOnly` を運用していることは判明している**
   (2026-08-29。ルールの詳細 — 適用先・優先度・例外 — は未確認)。
   INF-L はこの未確認に依存しない (v3 で新規に入れる判断)
-- **v2 の FE がどの Route53 レコードで公開されているか** — v2 の FE は Vercel であり、
-  BE 側の CORS 許可リストには `hassan.jp` / `v2.hassan.jp` / `dev.hassan.jp` / `sparkfield-ai.com` が
-  並んでいる (`hassan-v2-backend/internal/corsutil/origin.go:10-15`) が、
-  **これは許可リストであって実際の公開レコードの証拠ではない**。
-  **§9.2 のケース A / B の選択と、Q-INF-3 派生②の衝突確認の両方がこの確認を待っている**
+- ~~v2 の FE がどの Route53 レコードで公開されているか~~ — **解消 (2026-09-07。issue #5 の実測 = F-13)**。
+  `hassan-terraform` の `route53_records_app.tf` に **`hassan.jp` A → Vercel** の記録があり、
+  §9.2 のケース A (`hassan.jp` を v3 へ向け替える) は選択可能と確認された。
+  **ただしケース A / B のどちらを最終的に採るかは別途未確定のまま** (§9.2 参照)
 - **Vercel の Function の egress IP がどの国と判定されるか** — v2 は通常 API を
   Vercel のサーバ経由で叩きながら (`hassan-v2-frontend/src/lib/api-client.ts:38-41`)
   `AllowJapanOnly` を運用できているため **JP と判定されている可能性が高い**が、
