@@ -102,13 +102,14 @@
 | **INF-M** | 運用アクセス手段 (コンテナ内調査) | **ECS Exec を dev で有効・prod で無効**にし、prod で必要になった場合は**その都度 Terraform で有効化して apply する** (有効化の履歴が残る)。**~~踏み台サーバーを作らない~~ → 2026-08-07 (Q-INF-5) で撤回。踏み台は INF-S として作る** (理由は INF-S 参照) | (a) 常時 prod でも有効: 本番コンテナへ入る経路が常に開く。(b) 踏み台サーバーを維持 (v2 の F-10 の前提): SSH 鍵の配布・パッチ適用・アクセスログの管理が増える。**マイグレーションは INF-H の RunTask で足りるため、踏み台の主用途 (スキーマ適用) は消える** — **ただし「人間が GUI クライアントで DB の中身を見る」用途は ECS Exec では代替できない** (ECS Exec はコンテナへのインタラクティブシェルのみを提供し、ローカルの GUI クライアントへのポートフォワード機能を持たない)。**この抜け漏れが Q-INF-5 で顕在化し、INF-M の「踏み台を作らない」判断を撤回する根拠になった** |
 | **INF-S** | 運用アクセス手段 (DB への GUI 接続。2026-08-07 追加。Q-INF-5) | **SSM ポートフォワード専用の踏み台 EC2 (`t4g.nano`) を dev / prod に 1 台ずつ置く**。キーペアなし・inbound ルール 0 本 (SSM Agent の outbound 443 のみで成立)。**常時 stopped、使う時だけ起動し 60 分で自動停止**。RDS への到達は `:5432` のみ、SG は踏み台からの通信のみ許可。`ssm:StartSession` は人間の IAM ロールにのみ付与し、CI の OIDC ロールには付けない (prod は dev と別ロール)。**承認は挟まない** — 誰がいつ繋いだかは CloudTrail の `StartSession` に残るが、ポートフォワードの通信内容自体は記録できない (Session Manager のセッションログはシェル用)。**人間が使う DB 認証情報はアプリ用と分離した read-only ロール** ([INF-Q](#) 参照。書込が要る調査は都度払い出しの別ロール)。**AMI とパッチ適用の方針 (2026-09-02 追記)**: 起動時に SSM パラメータ (`al2023-ami-kernel-default-arm64`) から最新 AMI を解決するが、`lifecycle.ignore_changes` で以降の AMI 更新を無視する (**起動のたびに作り直されるのを避けるため**)。**この結果、明示的に `terraform taint` / `-replace` で再作成しない限り、OS パッケージは初回作成時点のまま更新されない** — 常時 stopped で稼働時間が短いとはいえ、起動している間は攻撃対象になり得るため、**四半期ごと (または CVE 公表時) に `-replace` で再作成する運用手順を持つ** (自動化はせず、手順として明記するに留める。頻繁な自動再作成は「使う時だけ起動する」設計と衝突する) | (a) v2 と同じ SSH 踏み台 (F-10): 秘密鍵の配布・失効管理が要り、22 番ポートの inbound が「開いた入口」になる。監査は sshd のログ止まり。(b) ECS Exec だけで済ませる (INF-M の当初案): GUI クライアントへのポートフォワードができず、SQL を使った調査手段として現実的でない。(c) RDS をパブリックアクセス可にする: DB を直接インターネットに晒す。(d) 常時起動の踏み台: 攻撃対象時間が常に開き、EC2 のパッチ運用も継続的に発生する。**常時 stopped + 使う時だけ起動 + 自動停止**なら、稼働中のみが攻撃対象になり課金も EBS 8GB のみで済む |
 | **INF-N** | ログの保持期間 | **ロググループを Terraform で明示作成し、保持期間を dev 30 日 / prod 400 日に設定する** (`awslogs-create-group` による暗黙作成をやめる。**本書がロググループと保持期間の SSOT** — [observability.md](observability.md) §8 の残課題のうちインフラ側をここで確定する) | (a) v2 方式 (F-9): デプロイ時に暗黙作成されるため**保持期間が「無期限」になり、費用が単調増加する**。IaC の管理対象から外れ、削除・変更の履歴も残らない。(b) prod も 30 日: 監査ログ ([observability.md](observability.md) §4.5) の追跡可能期間が 1 か月になり、四半期単位の調査ができない |
-| **INF-O** | v2 インフラとの関係 | **v2 の稼働中リソースを Terraform に import せず、v3 のリソースを新規に作る** (C-14)。共有するのは**既存の Route53 ホストゾーン (参照のみ)** に限る | (a) v2 を import して同じ IaC で管理 (Q-7 の選択肢 C): 稼働中リソースの import に本番停止リスクがあり、全面切替 (C-11) で廃止予定のものに投資することになる。(b) ホストゾーンも新規作成: ドメインの委譲 (NS レコードの変更) が必要になり、v2 の名前解決に影響する |
+| **INF-O** | v2 インフラとの関係 | **v2 の稼働中リソースを Terraform に import せず、v3 のリソースを新規に作る** (C-14)。共有するのは**既存の Route53 ホストゾーン (参照のみ)** に限る。**2026-09-14 追記: RDS のみ例外** — staging / prod は v2 の既存 RDS インスタンスへ相乗りする (**INF-V**。VPC ピアリングで到達性を確保し、v2 RDS 自体は import せず手動管理のまま) | (a) v2 を import して同じ IaC で管理 (Q-7 の選択肢 C): 稼働中リソースの import に本番停止リスクがあり、全面切替 (C-11) で廃止予定のものに投資することになる。(b) ホストゾーンも新規作成: ドメインの委譲 (NS レコードの変更) が必要になり、v2 の名前解決に影響する |
 | **INF-Q** | **DB 運用アクセス (踏み台経由 GUI 接続) の権限分離** (2026-09-02 ユーザー決定) | **人間が DB に接続する際の認証情報を、アプリ用 (書込可) とは別の read-only 専用 DB ロール・別 Secrets Manager シークレットとして用意する**。踏み台経由の GUI 接続は既定でこの read-only シークレットを渡す。**書込を要する調査は都度払い出しの別ロールとし、人間用の常設アクセスに書込可を持たない**。RDS パラメータグループで `rds.force_ssl` を有効化し、踏み台↔RDS 間を含め TLS を必須にする | (a) アプリ用シークレットをそのまま人間の接続に流用: 誤って本番データを UPDATE/DELETE できる上、担当者交代時のローテーションがアプリの再デプロイを要求する (人間用とアプリ用が分離されていないため)。(b) 人間用ロールを都度払い出しのみにし常設を持たない: 障害調査で read だけ即座に確認したい場面まで払い出し待ちになる。**read-only は常設・write は都度払い出しという非対称構成**が両立する |
 | **INF-R** | **ECS タスクの outbound (egress) 制御** (2026-09-02 ユーザー決定) | **ECS タスクの SG egress を 443/tcp のみに制限する**。Managed Agent 側が `networking.type = limited` + `allowed_hosts` で接続先を明示列挙する (X-4) のと対称に、**ECS 側も NAT を経由する行き先を意識的に絞る対象として明記**する。3.1 節で「要確認」のままになっている Interface エンドポイント (ECR / Secrets Manager / CloudWatch Logs) の先出しは、コスト最適化だけでなく **NAT を通る通信を Anthropic API 相当に限定する**セキュリティ上の効果も持つため、要否の検討時にこの観点を含める | (a) 現行のまま (全ポート/全宛先許可): LLM を扱うアプリではプロンプトインジェクション等でコンテナが乗っ取られた場合、任意の外部サーバーへのデータ持ち出し (exfiltration) を防げない。Managed Agent 側だけ `allowed_hosts` で絞り、ECS 側は無制限という非対称な状態を放置することになる。(b) AWS Network Firewall でドメイン単位に絞る: 確実だが導入・運用コストが増える。**まず SG での 443 限定を採用し**、ドメイン単位の制御は Interface エンドポイントの前倒し導入や必要性が具体的に出た時点で追加検討する |
 | **INF-T** | **監査証跡 (CloudTrail)** (2026-09-02 ユーザー決定) | **アカウント全体の管理イベントを記録する Trail を Terraform で作成し、専用 S3 バケット (ログファイル検証を有効化) へ保存する**。保持期間は INF-N のロググループとは独立に、**Trail のイベント履歴自体は CloudTrail の既定 90 日保持に加え、S3 側でライフサイクルを設定して長期保存する** (期間は運用開始後に確定。§5.1 の規則 3 に準じ dev/prod で差を付けない — 監査証跡を dev だけ薄くする理由が無い)。**データイベント (S3 の `GetObject` 等) は最初は有効化しない** — 対象を絞る必要が具体的に出た時点で追加する。**踏み台の `StartSession` (INF-S) を含む全操作の記録の起点**になる | (a) 現行のまま作らない: CloudTrail の既定保持 (90 日) すら Trail が無ければ有効にならず、**同一アカウントに同居する v2 (コンソール手作業構築。F-1) を含め、いつ・誰が何を変更したかを追跡する手段が無い**。踏み台経由の DB アクセス (INF-S) が「誰がいつ繋いだかは CloudTrail に残る」と前提にしている以上、Trail 自体が資源として存在しないとその前提が成立しない。(b) AWS Organizations 全体の Trail: マルチアカウント化していない (Q-INF-2 で単一アカウント確定) ため、組織単位の集約は過剰な複雑さになる。(c) データイベントも最初から全種有効化: S3 の読み取りアクセスまで全記録するとログ量とコストが跳ね上がる。**必要になったら対象バケットを絞って追加する**方が費用対効果に合う |
 | **INF-P** | **信頼プロキシ CIDR のアプリへの受け渡し** (2026-08-29 追加。[auth.md](auth.md) §6.11-3 の R-13 / 実装リポ `aillio-dev-org/hassan-v3` の issue #37) | **Terraform が VPC の CIDR と ALB を収容する subnet の CIDR を `output` として公開し、ecspresso のタスク定義テンプレートが tfstate 経由でそれを ECS タスク定義の `environment` に渡す** (§4.2 の一方向連携に乗せる。値は**非秘密**なので Secrets Manager / SSM を使わない = [operations.md](operations.md) §3.3 の**分類② のインフラ由来**)。**アプリは受け取った CIDR を `gin.SetTrustedProxies` に設定し、`c.ClientIP()` をレート制限の IP キーに使う** ([auth.md](auth.md) §6.11-3 が SSOT。**この値が渡らないと、`X-Forwarded-For` ヘッダを偽装するだけで未認証レート制限を回避できる**)。**dev / prod で値が空ならアプリを起動させない** (同節)。**local は空値 = プロキシを 1 つも信頼しない** | (a) **CIDR を infra リポの README に書き、backend の env ファイルへ人が書き写す**: §4.2 が却下済みの「出力値を手で書き写す」と同型で、VPC の作り直し・subnet 追加が backend 側に反映されず**制限が静かに無効化される** (F-3 と同種の乖離)。(b) **`0.0.0.0/0` を渡して全プロキシを信頼する**: `SetTrustedProxies` を設定しないのと等価で、issue #37 が塞ごうとしている穴がそのまま残る。(c) **SSM Parameter Store に置いて実行中に読み替える (分類④)**: 信頼境界はネットワーク構成と一体で変わる値であり、**タスク置換と同時に切り替わる方が安全**。再デプロイなしで変えたい要求も無い。(d) **ALB の固定 IP を渡す**: ALB のノード IP は AWS 側の都合で変動するため、固定値として扱えない |
 
 | **INF-U** | **環境モデルの改訂 — staging の追加と dev のブランチ単位プレビュー化** (2026-09-07 ユーザー決定。Q-INF-6) | **local / dev / staging / prod の 4 環境**。**staging** = 従来の dev (`main` の継続デプロイ・受入確認 = C-15 の先行構築対象。FE = Vercel の Preview / BE = `envs/staging`)。**dev** = **PR 単位の使い捨てプレビュー**: FE (Next.js `output: standalone`) と BE を同じ ECS クラスタで動かし、`pr-<N>.dev.<domain>` (FE) / `pr-<N>-api.dev.<domain>` (BE) を自動発行する。**共有基盤 (VPC / クラスタ / ALB / RDS 1 本 / ワイルドカード ACM・Route53 / ECR / OIDC ロール / Fargate Spot キャパシティプロバイダ) は Terraform `envs/dev` が持ち、PR 単位のリソース (ECS サービス・TG・ALB リスナールール・DB スキーマ・Managed Agent) は app リポの `deploy-preview.yml` + ecspresso が作成・破棄する** (X-11)。契機は PR の `preview` ラベル (付与 = 構築 / 除去・close = 破棄 / 付いた状態での push = 再デプロイ。[operations.md](operations.md) §5.1.2)。DB は RDS 1 本を **PR 単位のスキーマ** (`br_pr_<N>`。`search_path` で切替) で分離し、マイグレーションは承認なしで自動適用 (使い捨てのため H-2 の対象外)。**FE ホストのリスナールールに ALB の OIDC 認証** (IdP は Google Workspace を暫定既定) を付けて社内に閉じる。BE ホストは OIDC を付けない (ブラウザの XHR が IdP リダイレクトを辿れないため。アプリの JWT 認証 + WAF で staging / prod と同じ扱い)。**preview のみ Fargate Spot**。同時数の上限は 10 (超過時は新規の構築を失敗させ PR にコメント。上限値は暫定)。**旧記述で「dev」が「`main` の継続デプロイ先」を意味する箇所は staging に読み替える** (本書 §4.5 / §5 / §6 と [operations.md](operations.md) §3 / §5 / §7、rule 04 の環境表は本決定で書き換えた) | (a) 環境を増やさず feature ブランチの Vercel Preview + 共有 dev BE で検証する (旧方針): BE の変更をマージ前に検証できず、prompt / tool schema を変える PR は `main` に入れて初めて動く。(b) PR 単位のリソースも Terraform で管理する: 個数が動的で state が肥大し、`plan` の差分が読めなくなる (infra リポの絶対ルール 2 と衝突)。(c) PR ごとに `CREATE DATABASE`: 接続文字列が PR ごとに変わり Secrets の払い出しが要る。スキーマなら接続情報は共有 1 本で足りる。(d) Managed Agent を dev で 1 本共有: D-6 が検証したい変更 (prompt / tool schema) を preview で見られない。(e) IP 許可リストで閉じる: リモートワークの IP 変動に弱い。(f) FE / BE を同一ホストに置きパスで振り分ける: BE にパス接頭辞を要求するか FE でプロキシする必要があり、staging / prod と実行形が変わる (段階1 はブラウザが BE を直接叩く — [frontend.md](frontend.md) §12.2) |
+| **INF-V** | **staging / prod の RDS を v2 の既存インスタンスへ相乗りさせる** (2026-09-14 ユーザー決定。`hassan-v3-infra` issue [#14](https://github.com/yumori59/hassan_v3_design/issues/14) / `aidlc-docs/inception/productionization/questions.md` Q-1 `[Answer 4]`)。**INF-O の「v3 のリソースは新規に作る」の RDS に関する例外**: **staging / prod は v3 専用の Aurora クラスタを新規作成せず、v2 の既存 RDS インスタンスに v3 用のスキーマ/DB を追加する**。**dev (preview) は対象外** — 引き続き `envs/dev` が持つ独自 Aurora (使い捨てスキーマ `br_pr_<N>`) のまま。①**到達性**: v2 VPC (`172.16.0.0/16`) と v3 VPC (INF-O) を **VPC ピアリング**で接続する (v3 の VPC は新規のまま。CIDR を重ねない方針は本決定のために設けられていたものであり、そのまま活きる)。②**管理境界**: v2 RDS 自体は**引き続き Terraform 管理外** (X-8。手動)。v3 の infra リポは、ピアリング・SG・接続情報 (エンドポイント・認証情報) の受け渡しの器のみを持ち、**v2 RDS へのスキーマ追加・パラメータ変更・IAM 発行は人間が手動で行う**。③**コスト配賦**: 同一インスタンスに hassan_v2 / hassan_v3 の按分は行わない (`ChorusCost_Tag1` は既存の `hassan_v2` のまま。按分の仕組みは作らない)。④**安全策**: v2 RDS への変更 (スキーマ追加・パラメータ変更) は**事前に手動スナップショットを取得し、人間承認を必須**とする (§11 の「RDS の作り直しを伴う変更」と同じ規約をスキーマ追加にも適用する。承認コメントにスナップショット ID を残す)。**目的**: v2→v3 のデータ移行の容易化 (同一インスタンス内の移行になりダンプ/リストアが不要)、運用 (バックアップ・監視・パッチ) の一元化 | (a) [Answer 3] のまま v3 専用に新規 Aurora クラスタを作る (旧方針): 移行時に v2→v3 の一方向データ転送 (RunTask 経由 or スナップショット復元) が別途必要になり、運用対象の RDS も 2 系統に増える。(b) v2 RDS を Terraform に import して管理下に置く: INF-O が却下済み (稼働中リソースの import は本番停止リスクを伴い、全面切替 (C-11) で v2 自体が廃止予定)。(c) v3 の VPC を作らず v2 VPC に同居させる: ネットワーク分離が薄まり、v2 廃止時に v3 のネットワーク構成ごと巻き込まれる。**VPC ピアリングなら v2 廃止時にピアリングを切るだけで v3 側は影響を受けない** |
 
 ---
 
@@ -129,7 +130,7 @@
 
 | 要素 | 用途 | dev / prod の差 | 管理主体 | 確認 |
 |---|---|---|---|---|
-| VPC | v3 専用の VPC を新規作成 (v2 と分離。INF-O) | CIDR が異なるだけ | TF | 前提 |
+| VPC | v3 専用の VPC を新規作成 (v2 と分離。INF-O)。**staging/prod は v2 VPC と VPC ピアリングで接続する** (RDS 到達用。INF-V) | CIDR が異なるだけ | TF | 前提 |
 | public subnet × 2 AZ | ALB / NAT Gateway の配置 | 同一構成 | TF | 前提 |
 | private subnet × 2 AZ | ECS タスク / RDS の配置 (INF-F) | 同一構成 | TF | 前提 |
 | NAT Gateway | タスクの外向き通信 (Anthropic API・ECR・Secrets Manager) | **dev (preview) 1 個 / staging 1 個 / prod 2 個 (AZ 冗長)** | TF | 前提 (2026-09-09 ユーザー回答。B-1: dev/staging はコスト優先で 1 個、prod のみ AZ 冗長) |
@@ -162,7 +163,7 @@
 
 | 要素 | 用途 | dev / prod の差 | 管理主体 | 確認 |
 |---|---|---|---|---|
-| **Aurora PostgreSQL (Provisioned)** | アプリの DB (C-6) | **dev(preview)・staging: Single-AZ 相当 (1 ライター) / prod: Multi-AZ (ライター + リーダー)**。インスタンスクラスは §5 | TF | 前提 (2026-09-09 ユーザー回答。B-6: **Aurora PostgreSQL (Provisioned) に確定** — RDS for PostgreSQL ではない。F-12 により v2 の実クラスは未調査のままだが、種別自体は Serverless v2 ではなく Provisioned を採る。**`modules/rds` は既にこの構成で実装済み** — 本行はその実装に設計側を追随させたもの) |
+| **Aurora PostgreSQL (Provisioned)** | **dev (preview) 専用の DB** (C-6)。**staging/prod は対象外 — v2 の既存 RDS インスタンスへ相乗りする (INF-V)** | **dev(preview): Single-AZ 相当 (1 ライター)**。インスタンスクラスは §5 | TF (`modules/rds`。dev のみ使用) | 前提 (2026-09-09 ユーザー回答。B-6: **Aurora PostgreSQL (Provisioned) に確定** — RDS for PostgreSQL ではない。F-12 により v2 の実クラスは未調査のままだが、種別自体は Serverless v2 ではなく Provisioned を採る。**`modules/rds` は既にこの構成で実装済み**。**2026-09-14: staging/prod への適用は INF-V により対象外になった** — `modules/rds` は dev (preview) の共有基盤としてのみ使う) |
 | 自動バックアップ + PITR | 復旧手段 | **dev(preview)・staging 7 日 / prod 30 日** | TF | 前提 (2026-09-09 ユーザー回答。B-7: prod 30 日で確定) |
 | ストレージ暗号化 (KMS) | 保管時の暗号化 | 両環境で有効 | TF | 前提 |
 | 削除保護 (`deletion_protection`) | 誤削除防止 | **dev 無効 / prod 有効** | TF | 前提 |
@@ -333,6 +334,7 @@ backend 用ロールしか引き受けられず、frontend リポからは AWS �
 
 > 本節が回答する ID: **D-1** (AWS 側の環境分離。FE との対応は §5.3) / **D-8**。
 > **2026-09-07 (INF-U)**: staging を追加し、dev を PR 単位のプレビュー基盤にした。**staging 列の値は従来の dev 列の値**である。
+> **2026-09-14 (INF-V)**: **RDS 関連の行 (構成・インスタンスクラス・バックアップ保持・削除保護) のみ例外** — staging/prod は v2 の既存インスタンスへ相乗りするため、値は本書ではなく v2 側の設定に従う。
 
 ### 5.1 差分の付け方 (規則)
 
@@ -357,10 +359,10 @@ backend 用ロールしか引き受けられず、frontend リポからは AWS �
 | ALB アイドルタイムアウト | 300 秒 | 300 秒 | 300 秒 | INF-C |
 | ECS Exec | 有効 | 有効 | **無効** | INF-M |
 | 踏み台 (DB への GUI 接続用) | 1 台 (常時 stopped。全 PR のスキーマを同じ RDS で見る) | 1 台 (常時 stopped) | **1 台 (常時 stopped・IAM ロールは dev と別)** | INF-S |
-| RDS 構成 | Single-AZ **1 本を全 PR で共有 (スキーマ分離)** | Single-AZ | **Multi-AZ** | prod の可用性 |
-| RDS インスタンスクラス | 小 (`db.t4g` 系) | 小 (`db.t4g` 系) | 中 (`db.m7g` 系) | **暫定**。v2 の実クラスは未調査 (F-12)。**この 2 つは RDS for PostgreSQL 前提の値である** — §3.3 の確認で **Aurora PostgreSQL** に決まった場合、`db.t4g`/`db.m7g` ではなく Aurora が対応するクラス (`db.t4g.medium` 以上 / `db.r7g` 系) に置き換わり、**Multi-AZ の表現も「クラスタ + リーダーインスタンス」に変わる** (Single-AZ / Multi-AZ の行も同時に読み替える) |
-| RDS バックアップ保持 | 7 日 | 7 日 | **30 日** | §3.3 の確認対象 |
-| RDS 削除保護 | 無効 | 無効 | **有効** | §5.1 の規則 3 |
+| RDS 構成 | Single-AZ **1 本を全 PR で共有 (スキーマ分離)。v3 専用の Aurora クラスタ (`modules/rds`)** | **v2 の既存インスタンスへ相乗り (INF-V)** | **v2 の既存インスタンスへ相乗り (INF-V)** | dev のみ v3 専用。staging/prod は v2 の構成 (種別・クラス・Multi-AZ の有無・バックアップ・削除保護) にそのまま従う — **v2 側の値は本書の管理対象外** (X-8) |
+| RDS インスタンスクラス | 小 (`db.t4g` 系。Aurora `db.t4g.medium` 相当) | v2 に従う (未調査。F-12) | v2 に従う (未調査。F-12) | dev のみ**暫定値**。staging/prod は INF-V により v2 の実クラスをそのまま使う (変更する場合は v2 側の運用判断) |
+| RDS バックアップ保持 | 7 日 | v2 に従う | v2 に従う | dev のみ本書の管理対象。staging/prod は INF-V により v2 の設定を継承 |
+| RDS 削除保護 | 無効 | v2 に従う | v2 に従う | dev のみ本書の管理対象。staging/prod は INF-V により v2 の設定を継承 (§5.1 の規則 3 は dev のみ適用) |
 | NAT Gateway | 1 | 1 | **2** | AZ 障害時に prod が全断しない |
 | WAF | `count` モード | `count` モード | **block モード** | INF-L |
 | ログ保持期間 | 30 日 | 30 日 | **400 日** | INF-N |
@@ -376,8 +378,8 @@ backend 用ロールしか引き受けられず、frontend リポからは AWS �
 |---|---|---|---|---|---|
 | local | 開発者のマシン (docker compose 等) | `next dev` | ローカル PostgreSQL | — | — |
 | **dev (preview)** | `envs/dev` のクラスタ上に **PR ごとの ECS サービス** | **ECS** (Next.js standalone。Vercel を使わない) | dev の RDS 1 本を **PR 単位のスキーマ**で分離 | PR の `preview` ラベル ([operations.md](operations.md) §5.1.2) | なし (マイグレーション・Agent 発行も自動。使い捨て) |
-| **staging** | `envs/staging` の ECS / RDS | **`main` ブランチの Preview** | staging の RDS | `main` への push | なし (継続デプロイ。非破壊マイグレーションのみ自動) |
-| **prod** | `envs/prod` の ECS / RDS | **`production` ブランチ = Production** | prod の RDS | 手動起動 | H-2 / H-3 / H-4 |
+| **staging** | `envs/staging` の ECS | **`main` ブランチの Preview** | **v2 の既存 RDS インスタンス (スキーマ追加。INF-V)** | `main` への push | なし (継続デプロイ。非破壊マイグレーションのみ自動) |
+| **prod** | `envs/prod` の ECS | **`production` ブランチ = Production** | **v2 の既存 RDS インスタンス (スキーマ追加。INF-V)** | 手動起動 | H-2 / H-3 / H-4 |
 
 - **FE の Production Branch を `main` にしない**のは既定値からの意図的な変更である
   ([../../templates/shared/.claude/rules/04-human-checkpoints.md](../../templates/shared/.claude/rules/04-human-checkpoints.md) §2.4 / §4.4)
@@ -416,7 +418,7 @@ backend 用ロールしか引き受けられず、frontend リポからは AWS �
 | **1** | **tfstate の置き場を作る** — S3 バケット (バージョニング + SSE-KMS + パブリックブロック) を **CLI で 1 回だけ手作業で作成** (§7 の例外) | `terraform init` が S3 backend で成功する |
 | **2** | **OIDC プロバイダ + [§4.5](#45-oidc-の信頼条件-sub-クレーム--モノレポでは-environment-で分ける) の表のロール一式** (INF-I) を apply。**表の行を 1 つでも落とさない** — 落とした分は「その機能を初めて動かしたとき」まで気付けない | ①CI の `plan` ジョブが PR にコメントできる (キーを一切置いていないこと) ②**§4.5 の表の各ロールについて `aws iam get-role` が成功する** (`plan` だけの確認では `staging-e2e` / `prod-agent` / `prod-db` の欠落を見逃す) |
 | **3** | **network** — VPC / subnet / SG / NAT / S3 エンドポイント | `plan` の差分ゼロ。private subnet からの外向き通信が確認できる |
-| **4** | **RDS + Secrets の器** — RDS を private subnet に作り、DB 接続情報のシークレットを作成 | シークレットに**値を投入済み** (INF-G の手順①)。tfstate に平文が無いこと |
+| **4** | **VPC ピアリング + Secrets の器** (2026-09-14。INF-V) — v2 VPC とのピアリング接続・ルートテーブル・SG を作り、**v2 の既存 RDS インスタンスへの接続情報**（人間が手動で確認・投入）を格納するシークレットを作成する。**新規 RDS は作らない** (dev (preview) のみ `modules/rds` で新規作成する。P-2 相当の手順は dev に残る) | ピアリング接続が `active`。v3 の private subnet から v2 RDS の `:5432` へ到達できる。シークレットに**値を投入済み** (INF-G の手順①)。tfstate に平文が無いこと |
 | **5** | **ECR + ECS クラスタ + ALB / TG / ACM / Route53** | ホスト名で ALB に HTTPS 接続でき、TG がまだ unhealthy であること |
 | **6** | **CloudWatch (ロググループ / フィルタ / アラーム) + SNS + Chatbot** | **staging のトピック 1 本へのテスト通知が Slack に届く** (prod は 2 トピック + メール購読の到達確認が RL-2 の完了条件 — [operations.md](operations.md) §6.1) |
 | **7** | **backend: ecspresso 設定 + 初回 `deploy`** — サービス定義に `loadBalancers` を含める (§4.3) | TG が healthy になり、`/alive` が ALB 経由で 200 |
@@ -427,7 +429,8 @@ backend 用ロールしか引き受けられず、frontend リポからは AWS �
 
 ### 6.1.1 dev (preview 基盤) の構築手順 (INF-U)
 
-staging の段 1〜6 と同じ手順を `envs/dev` に対して行い、次を加える。**PR 単位のサービスは作らない** (X-11):
+staging の段 1〜6 と同じ手順を `envs/dev` に対して行い、次を加える。**PR 単位のサービスは作らない** (X-11)。
+**段 4 のみ staging と異なる** (2026-09-14。INF-V) — **dev (preview) は v2 に相乗りせず、`modules/rds` で v3 専用の新規 Aurora クラスタを作る** (staging/prod だけが VPC ピアリング + v2 既存インスタンスへの相乗りに変わった。理由は §5.2 の「RDS 構成」行):
 
 | 段 | 内容 | 完了条件 (観測可能な形) |
 |---|---|---|
@@ -448,7 +451,7 @@ staging の段 1〜6 と同じ手順を `envs/dev` に対して行い、次を�
    AWS 側の `sub` 固定と**二重化**する (§4.5 要点 3)
 3. 段 7〜9 は **`workflow_dispatch` + environment 承認**を通る (H-2 / H-3 / H-4)
 
-**全面切替 (C-11 / AC-3.5) の DNS 手順は §9.2** (データ移行そのものは Q-1 の回答待ちで本書の対象外)。
+**全面切替 (C-11 / AC-3.5) の DNS 手順は §9.2**。**RDS は staging/prod 構築時点で v2 の既存インスタンスへ相乗りする** (INF-V) ため、全面切替時の「v2 RDS → v3 RDS へのデータ移行」という工程自体が無くなった (§9.1)。
 
 ### 6.3 リポジトリ間の依存
 
@@ -485,7 +488,7 @@ app モノレポ
 | X-5 | **Vercel の設定** (Production Branch・環境変数・独自ドメイン) | AWS 外。**H-4 の承認機構が Vercel 側の Promote 権限とブランチ保護で担保されており**、Terraform provider で二重管理すると承認の所在が分かれる | 人手チェックリスト ([../../templates/shared/.claude/rules/04-human-checkpoints.md](../../templates/shared/.claude/rules/04-human-checkpoints.md) §4.4) |
 | X-6 | **GitHub の設定** (ブランチ保護・environment・承認者・ラベル) | **承認者設定を IaC 化すると、承認機構そのものをコードの変更で外せる** (自己参照的な穴になる)。承認は人がリポジトリ設定として持つべきもの | 同 §4.1〜§4.3 の人手チェックリスト |
 | X-7 | **Slack ワークスペース側の Chatbot 連携承認** | OAuth の承認操作であり、コードで表現できない | 構築時に人が 1 回実施 (AWS 側の Chatbot 設定は Terraform 管理) |
-| X-8 | **v2 の稼働中リソース** (VPC / ALB / RDS / ECS / S3) | C-14 により import しない。全面切替で廃止予定 (C-11) | v2 のまま (コンソール手作業)。**v3 から参照しない** |
+| X-8 | **v2 の稼働中リソース** (VPC / ALB / RDS / ECS / S3) | C-14 により import しない。全面切替で廃止予定 (C-11)。**RDS のみ例外 (2026-09-14)**: import はしないが、**staging / prod は VPC ピアリング経由で v3 から接続し、既存インスタンスにスキーマ/DB を追加する** (INF-V)。ピアリングと接続情報の器だけを Terraform で持ち、v2 RDS 自体への変更は人間が手動で行う | v2 のまま (コンソール手作業)。**v3 から参照しない (RDS は INF-V により staging/prod がピアリング経由で参照する例外あり)** |
 | X-9 | **既存の Route53 ホストゾーン** | v2 の名前解決に影響するため作り直さない (INF-O)。**レコードのみ Terraform 管理** | data source で参照 |
 | **X-11** | **dev (preview) の PR 単位リソース** (ECS サービス・タスク定義・TG・ALB リスナールール・DB スキーマ・Managed Agent) | 個数が PR 数に応じて動的に変わり、Terraform state に載せると `plan` の差分が読めなくなる (INF-U の却下案 b) | app リポの `deploy-preview.yml` が作成・破棄する。放置分は日次の掃除ジョブが削除 ([operations.md](operations.md) §5.1.2) |
 | X-10 | ~~**踏み台サーバー**~~ (2026-08-07 撤回。Q-INF-5) | ~~v3 では作らない (INF-M)。RunTask と ECS Exec で用途を満たす~~ → **RunTask (INF-H) はスキーマ適用を、ECS Exec (INF-M) はコンテナ内調査を満たすが、人間が GUI で DB を見る用途は満たさない。踏み台を INF-S として作る**ことにした | 該当なし (X から除外) |
@@ -527,12 +530,15 @@ app モノレポ
 
 ### 9.1 既存 v2 との共存 (D-3 / D-7 / DR-3)
 
-- **v3 は v2 の稼働中リソースに一切触らない** (X-8)。v3 の VPC・RDS・ALB・S3 はすべて新規
-- 共有するのは **Route53 のホストゾーン (レコード追加のみ)** に限る (X-9)。
-  v2 のレコードを変更・削除しない
-- **v2 の DB データの移行そのものは本書の対象外** (Q-1 の回答待ち)。
-  インフラ側で必要になる手段は「v2 RDS から v3 RDS への一方向のデータ転送経路」であり、
-  経路の候補 (RunTask から両 DB に接続 / スナップショット復元 + 変換) は Q-1 確定後に本書へ追記する
+- **v3 は v2 の稼働中リソースに、RDS を除き一切触らない** (X-8)。v3 の VPC・ALB・S3 はすべて新規。
+  **RDS のみ例外** (2026-09-14。INF-V) — staging / prod は VPC ピアリング経由で v2 の既存 RDS
+  インスタンスにスキーマ/DB を追加し、v3 専用の Aurora クラスタは作らない。**dev (preview) は対象外**
+  で、引き続き `envs/dev` の独自 Aurora を使う
+- 共有するのは **Route53 のホストゾーン (レコード追加のみ)** と **RDS (staging/prod。INF-V)** に限る (X-9)。
+  v2 のレコードを変更・削除しない。v2 RDS への変更 (スキーマ追加等) は事前スナップショット + 人間承認必須 (INF-V)
+- **v2 の DB データの移行方針は Q-1 [Answer 4] で確定** (2026-09-14)。staging / prod は同一 RDS
+  インスタンスに同居するため、**「v2 RDS → v3 RDS への転送」は不要になる** — 新テーブル/新スキーマを
+  追加するだけで、既存 v2 データへの参照 (account_id 等) も同一インスタンス内で完結する
 - **v2 廃止時のリソース削除順序**: Route53 レコード → ECS サービス → ALB → RDS (最終スナップショット取得後) →
   S3 (データ移行完了の確認後)。**RDS と S3 は最後**に残す (復旧可能性を最後まで保つ)
 
@@ -594,7 +600,8 @@ prod にも一般化した推測。F-13: **v2 prod は `api.hassan.jp` の Route
 | `modules/iam-oidc` | OIDC プロバイダ / CI 用ロール (一覧と信頼条件は §4.5) | — |
 | `modules/alb` | ALB / リスナー / TG / ACM / Route53 レコード / WAF / アクセスログ用 S3 | network |
 | `modules/ecs-cluster` | ECS クラスタ / ECR / タスク実行ロール / タスクロール | network |
-| `modules/rds` | RDS / パラメータグループ / サブネットグループ / 接続情報シークレットの器 | network |
+| `modules/rds` | RDS / パラメータグループ / サブネットグループ / 接続情報シークレットの器。**2026-09-14 (INF-V): dev (preview) のみで使用** | network |
+| `modules/vpc-peering` | **v2 VPC とのピアリング接続 + ルートテーブル + SG + v2 RDS 接続情報シークレットの器** (2026-09-14 追加。INF-V)。**staging/prod のみで使用** — v2 RDS 自体は作らず、到達性と接続情報の受け渡しのみ持つ | network |
 | `modules/storage` | アセット用 S3 (非公開 + CORS + ライフサイクル) | — |
 | `modules/observability` | ロググループ / メトリクスフィルタ / アラーム / SNS / Chatbot / ダッシュボード / Budgets | ecs-cluster, alb, rds |
 | `envs/dev` · `envs/prod` | 上記の呼び出しと変数値のみ (リソース定義を書かない) | 全モジュール |
@@ -735,16 +742,20 @@ nightly E2E ([testing.md](testing.md) §7.4) との干渉が無く運用が単�
 | 項目 | 待っているもの | 決まると本書のどこが変わるか |
 |---|---|---|
 | マイグレーションの方式 | [architecture.md](architecture.md) D-4 (psqldef / golang-migrate) | INF-H の RunTask が実行するコマンド。**経路 (RunTask) は方式に依存しない** |
-| データ移行の方式 | Q-1 (データ引き継ぎの要否) | §9.1 の転送経路のみ。**§9.2 の切り戻し可能期間は Q-1 に依存せず確定済み** (公開後 7 日。[operations.md](operations.md) §6.4 が SSOT) |
+| データ移行の方式 | ~~Q-1 (データ引き継ぎの要否)~~ — **解消 (2026-09-14。Q-1 [Answer 4] / INF-V)**。staging/prod は v2 の既存 RDS へ相乗りするため「転送」自体が不要になった (§9.1) | §9.1。**§9.2 の切り戻し可能期間は変わらず確定済み** (公開後 7 日。[operations.md](operations.md) §6.4 が SSOT) |
 | 公開方式 (ケース A / B) | **v2 の FE がどの Route53 レコードで公開されているかの確認** (§11.3。**v3 のホスト名は Q-INF-3 で確定済み**) | §9.2 の手順 2〜4 (ケース A のみ DNS 操作がある) |
 | ~~Vercel の Preview URL の扱い~~ | **回答済み (2026-08-29)** — [frontend.md](frontend.md) §12.3 の決定 2 | §5.3 の CORS 許可オリジン: **可変 URL を許可せず、dev の固定ホスト名 1 件 + `localhost:3000` に限る**。**Preview から BE を叩く必要が生じたら Vercel の branch alias を 1 件足す** |
 | dev のホスト名 | §11.1 の Q-INF-3 派生① | §5.3 の対応表・ACM の SAN・BE の CORS 許可オリジン |
 
 ### 11.3 未調査の事実 (推測で埋めていない項目)
 
-- ~~v2 の RDS のエンジン種別・バージョン・インスタンスクラス・Multi-AZ の有無~~ — **解消 (2026-09-09)**。
-  v3 の RDS 種別は v2 の実態を待たずに **Aurora PostgreSQL (Provisioned) に確定した** (§3.3 B-6)。
-  v2 の実クラスタ種別 (F-12) は引き続き未調査のままだが、v3 の判断はそれに依存しない
+- ~~v2 の RDS のエンジン種別・バージョン・インスタンスクラス・Multi-AZ の有無~~ — **dev (preview) については解消 (2026-09-09)**。
+  dev 専用の RDS 種別は v2 の実態を待たずに **Aurora PostgreSQL (Provisioned) に確定した** (§3.3 B-6)。
+  **ただし staging/prod は 2026-09-14 (INF-V) の決定により v2 の既存インスタンスへ相乗りするため、
+  v2 の実クラスタ種別・エンジンバージョン・インスタンスクラス・Multi-AZ の有無・VPC の subnet 構成
+  (ピアリング可否・CIDR) は改めて未調査事項として再浮上する** — INF-V の実装 (staging 先行。§6.2) に
+  着手する前に確認が必要 (F-12 のまま。踏み台 (INF-S) 経由での確認、または v2 の AWS コンソールでの
+  直接確認を想定)
 - **v2 の ALB のリスナー・ターゲットグループ・ヘルスチェック設定** — IaC が無いためリポジトリから
   確認できない (F-1)。INF-D の `/alive` は v2 のコードにエンドポイントが存在する事実
   ([../analysis/v2-deploy-observability.md](../analysis/v2-deploy-observability.md) の推測節) に基づく提案であり、
