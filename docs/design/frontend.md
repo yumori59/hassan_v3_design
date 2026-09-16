@@ -1229,7 +1229,7 @@ ALB が見る送信元 IP は**運用者のオフィスの IP ではなく Verce
 | **Vercel 固有機能を使わない** | Image Optimization (`next/image` は `unoptimized: true` か自前 loader) / ISR・On-Demand Revalidation / Edge Runtime / Vercel KV・Blob / Vercel Analytics。**使うと dev で検証できない挙動が staging で初めて現れる** |
 | 環境変数 | Vercel の環境変数と同じ名前をタスク定義の `environment` で渡す (§12.2)。**`NEXT_PUBLIC_*` はビルド時に埋め込まれる**ため、preview イメージは PR ごとにビルドする (staging / prod のイメージを流用しない) |
 | ヘルスチェック | `GET /api/health` (Route Handler。認証なし・200 固定) を ALB の TG ヘルスチェックに使う |
-| 認証 (ALB) | FE ホストは ALB の OIDC 認証を通る。**アプリの認証 (next-auth) はその内側で従来どおり動く** (二重ログインになるが、社内限定のための代償として受容) |
+| 認証 (ALB) | **ALB 側の認証は無い** (2026-09-16。[infrastructure.md](infrastructure.md) **INF-W** で ALB OIDC を撤廃)。**FE の認証はアプリの認証だけで成立する** — staging / prod と同じ経路になり、**二重ログインという代償自体が消えた**。**代わりに preview は URL を知る誰でも到達できる**ため、FE 側で「未認証で見える画面」を preview 前提で緩めないこと (サインイン前に出す情報の範囲は staging / prod と同一に保つ)。~~旧: FE ホストは ALB の OIDC 認証を通る (二重ログインは社内限定のための代償として受容)~~ |
 | リスク | Vercel と Node コンテナで `headers()` / `cookies()` / ミドルウェアの挙動が一致しない箇所が出たら、**dev ではなく Vercel 側 (staging) の挙動を正**とし、差分を §16 の残課題に起票する |
 
 **却下案**: dev の FE も Vercel の Preview で出し BE だけ ECS にする — 旧方針。FE / BE を同時に変える PR の検証が
