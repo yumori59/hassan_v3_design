@@ -533,6 +533,8 @@ const SEED = [
   t("design", "設計", "増分 2: 評価基準の契約ごと編集 + 変更履歴 + settings の評価基準 CRUD (proto-v4 で先送り。受け皿は ideas.md §6.8 / settings.md §2)"),
   t("design", "設計", "PV-D5: 評価基準の設定 API を増分 1 へ前倒し (eval_criteria_settings + GET/PUT /settings/eval-criteria。AC-PV-8.1〜8.4 採番・requirements/plan/settings/data-model/ideas/README/frontend/schedule へ反映・make check 全緑。変更履歴は増分 2 のまま。実装リポ #110)", 2),
   t("design", "設計", "v4 プロトタイプの未採用差分の採否判断 (メール一括招待フロー / ナレッジの添付・フォローアップ / 設定画面の他セクション / テーマウィザード変更はテーマ担当へ連携)"),
+  t("design", "設計", "Q-12: preview の FE/BE 接続先 PR 任意指定を認める (B。入力は PR 本文 HTML コメント / 変えるのは FE の BACKEND_ORIGIN のみ / 破棄時は自動復帰せず fail-closed)。operations.md §5.1.2 に本文追加。実装リポ hassan-v3 #420", 2),
+  t("design", "レビュー", "Q-12 (preview 接続先 PR 上書き) の design-reviewer レビュー (別セッション・push 前)"),
 
   // ── インフラ (構築すべき要素の一覧) ──
   t("infra", "設計", "環境分離方針 (local / dev / prod) と FE(Vercel)⇔BE(AWS) の環境対応表", 2),
