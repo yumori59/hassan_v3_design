@@ -55,6 +55,20 @@ PoC と v2 の双方に themes / assets / ideas / 企画書 が存在する (ギ
 
 **影響**: `docs/design/infrastructure.md` の X-8 / INF-O / INF-F 関連記述、§3 構成要素一覧 (VPC・Aurora PostgreSQL の行)、§5.2 環境差表 (RDS 構成・クラス・バックアップ・削除保護)、§5.3 環境対応表、§6.1/6.1.1 構築手順 (段4)、§9.1 (v2 との共存)、§10.1 モジュール構成、§11.3 未調査事実は本回答を受けて改訂済み。**残作業**: v2 の実 RDS インスタンス種別・エンジンバージョン・インスタンスクラス・Multi-AZ の有無・VPC subnet 構成 (ピアリング可否・CIDR) の調査 (§11.3)。`hassan-v3-infra` 側の Terraform 実装は、この調査結果を踏まえて通常の issue 起票 (H-5 相当の着手前計画承認) から着手する
 
+[Answer 5]:(2026-09-20) **方針転換 — [Answer 4] の「v3 用のスキーマ/DB を追加する」をさらに踏み込み、v2 の既存 `public` スキーマをそのまま拡張する**。staging / prod のみ対象 (dev (preview) は引き続き対象外 — INF-U / INF-V のまま `br_pr_<N>` の使い捨てスキーマ)。
+
+- **identity・tenant 系テーブル** (`contracts` / `accounts` / `auth_roles` / `companies` / `admin_accounts` / `admin_auth_roles` / `account_mfa_configs` / `signup_links` / `reset_password_requests` 等): **v2 の実テーブルをそのまま使う。v3 側にコピーを作らない**
+- **v3 の新規テーブル** (`themes` / `ideas` / `knowledge_*` / `assets` / `plans` / `activity_logs` 等): **同じ `public` スキーマに追加する**
+- **結果**: v2 → v3 のデータ移行は不要になる (二重化も起きない)。[Answer 4] の目的 (①データ移行の容易化 ②運用一元化) は「移行そのものが無くなる」形でさらに強く成立する
+- **[Answer 4] からの継続**: VPC ピアリング・v2 RDS の Terraform 管理外 (手動)・スキーマ追加前の手動スナップショット + 人間承認、の 3 点は変更しない
+
+**影響 (2026-09-20 に本回答へ grep で洗い出し。ヒット全件を確認した上での確定範囲)**:
+
+- `docs/design/infrastructure.md` **INF-V** (`:112`) — 「v3 専用のスキーマ/DB を追加する」が本回答と正面から食い違うため、新設 ID **INF-X** による上書きとして改訂
+- `docs/design/data-model.md` — **P-1** (`:40`)・**P-3 / P-4** (`:42`〜`:43`)・**§1.4 概念対応表の該当行** (`:94`)・**§4.2 アイデンティティ・テナント基盤** (`:436`〜)・**§6.4 既存データの移行** (`:1143`〜)・**§6.5 アカウント基盤の二重化** (`:1199`〜) が旧方針 (v2 相乗りしない / v2→v3 コピー / 二重化して RL-3 で一本化) のまま。改訂は本回答を受けて実施中 (担当: 同ファイル)
+- **未反映のまま残す (本回答の範囲外。別途 grep で検出したが今回は改訂しない)**: `docs/design/operations.md:589` (§6.2 冒頭。P-1 と同文言の「全て新規で相乗りしない」) / `docs/design/architecture.md:1054` (P-1 を前提にした記述)。**data-model.md 側の改訂が確定した後、この 2 箇所は data-model.md 担当または architecture/operations 担当セッションへの是正要求として別途起票が必要** (DR-8 の受信欄参照)
+- **新たに顕在化した設計論点 (実装リポからの報告)**: v3 の `backend/db/schema.sql` は psqldef で宣言的に適用される。v2 の `public` に対して適用すると、`schema.sql` に定義の無い v2 専用テーブル (v2 36 テーブル / v3 定義 35 テーブル。`business_plans` 系など) が **psqldef の drop 差分の対象になり得る** (`--enable-drop` 等の抑止設定は実装リポ全体を grep しても 0 件で未検証)。**この問題は data-model.md 側で選択肢と代償を整理し、[Answer] 空欄の Q として置く** (本回答では決定しない)
+
 ---
 
 ## Q-2. リポジトリ構成
