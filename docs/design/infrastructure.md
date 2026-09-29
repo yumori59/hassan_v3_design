@@ -96,27 +96,31 @@
 | **INF-G** | 秘密の「器」と「値」 | **器 (シークレット名・KMS キー・IAM 権限・task 定義からの参照) を Terraform で管理し、値は Terraform で管理しない**。値の投入は ①人が AWS コンソール / CLI で 1 回入れる ②アプリ・CI が書き込む (Agent ID など) のいずれか。**非秘密の環境依存値 (Agent ID・エンドポイント URL) は SSM Parameter Store**、**秘密 (DB 接続情報・`ANTHROPIC_API_KEY`・JWT 署名鍵) は Secrets Manager** | (a) 値も Terraform で管理 (`aws_secretsmanager_secret_version` に平文): **tfstate に平文で残る**。tfstate は S3 上の 1 ファイルであり、これを読める範囲すべてに秘密が渡る (v2 が `.env` をイメージに焼き込んでいるのと同じ失敗の再演 — F-6)。(b) すべて Secrets Manager に統一: Agent ID のような非秘密値まで従量課金対象になり、**切り戻し用の版管理は SSM の parameter version でも足りる** ([../../templates/app-monorepo/.github/workflows/deploy-backend.yml](../../templates/app-monorepo/.github/workflows/deploy-backend.yml) の `apply_agent` が「旧 Agent ID を前バージョンとして保持する」ことを要求している) |
 | **INF-H** | マイグレーションの実行経路 | **CI (GitHub Actions) から ECS RunTask で「マイグレーション実行専用タスク」を起動し、VPC 内から RDS に接続する**。CI ランナー自身は RDS に到達しない。ログは CloudWatch Logs で読む。**差分検査 (`plan_migration`) が DB 接続を要する方式でも同じ経路を使う**。**この採用案は `deploy-backend.yml` の書き換えを前提とする** — 雛形は当初ランナーから `secrets.DATABASE_URL` で直接接続する形だったため、2026-07-30 に RunTask 方式へ是正済み ([operations.md](operations.md) §5.1 の実行場所表 / 同 §9 の雛形是正表)。**待ち合わせとログ取得の構造 (起動 → 完了待ち → 終了コード判定 → CloudWatch Logs の取得) も同節が SSOT** | (a) 踏み台 + SSH トンネル (v2 の F-10): 鍵の配布と保管が必要で、CI に置くと鍵が長期シークレットになる。**人手前提の手順であり `deploy-backend.yml` の `apply_migration` ジョブに載らない**。(b) RDS をパブリックアクセス可にして CI から直接接続: DB を露出させる。(c) SSM セッションマネージャのポートフォワード: 踏み台インスタンスを維持し続ける必要がある。(d) VPC 内のセルフホストランナー: ランナーの維持管理 (パッチ・スケール) が増える。**RunTask はデプロイ用イメージをそのまま使えるため追加の実行基盤が不要** |
 | **INF-I** | CI の AWS 認証 | **GitHub OIDC + 用途別 IAM ロール** (`plan` 用 read-only / `deploy` 用 (ECR push + ecspresso) / `migration` 用 (**`ecs:RunTask` + `ecs:DescribeTasks` + `iam:PassRole` + `logs:GetLogEvents`**) / Agent 再発行用 / E2E 用)。**ロールの一覧・環境ごとの分割・許す `sub` は [§4.5](#45-oidc-の信頼条件-sub-クレーム--モノレポでは-environment-で分ける) の表が SSOT**。本行は用途と権限の内容だけを定め、**本数はここで数えない** (DR-9。2026-08-05 に「3 本」を落とした — §4.5 の新設で 3 リポ時代の本数が実態とずれたため)。**`deploy` ロールには `apply_agent` 用に `secretsmanager:GetSecretValue` (`/hassan-v3/<env>/anthropic/api-key` のみ) と `ssm:PutParameter` (`/hassan-v3/<env>/agent/*` と `.../anthropic/environment-id` のみ) を与える** ([operations.md](operations.md) §4.1 により CI は API キー・Agent ID を GitHub 側に持たない)。長期アクセスキーを作らない / **`ssm:GetParameter` + `ssm:GetParameterHistory` (同じパス。`rollback-backend.yml` の切り戻しが版履歴を読むため。無いと ① が `AccessDenied` で失敗する)**。**信頼条件 (`sub` クレーム) の設計は §4.5** — モノレポ化で `repo:` による分離が使えなくなったため必須 (2026-08-05 追加) | (a) v2 方式の長期アクセスキー (F-7): 失効期限が無く、漏洩時の影響範囲が全操作に及ぶ。v2 自身のドキュメントが「OIDC 未使用・失効なし」をリスクとして記録している。(b) OIDC でロール 1 本に集約: `plan` しかしない CI ジョブが `apply` 相当の権限を持つ。**用途別に分けることで、`plan` を PR にコメントするジョブが書き込み権限を持たない状態を作れる** |
-| **INF-J** | v3 のホスト名 | **v2 とは別ホスト名 (別 ALB) を割り当てる**。**ホスト名は `hassan.jp` を親ドメインとし、prod は FE = `app.hassan.jp` (Vercel) / BE = `api.hassan.jp` (ALB) とする** (**2026-08-29 のユーザー決定。§9.3 の Q-INF-3**。dev の 2 件は未確定 = 同項の派生①)。ACM 証明書は Terraform で DNS 検証により発行し、Route53 のレコードのみ管理する (**ホストゾーン自体は既存のものを data source で参照し、Terraform の管理対象にしない**)。**FE と BE を同一親ドメイン配下に置くのは、[frontend.md](frontend.md) の段階2 (HttpOnly Cookie 化) で `Domain=hassan.jp` の Cookie を共有できるようにするため**である (同書 §12.1)。**段階1 の時点では両者は別オリジンであり CORS が必要** (同書 §12.3) | (a) v2 と同一ドメイン・同一 ALB に相乗り: `/themes` などのパスが v2 と衝突し、v3 側にパスプレフィックスが必要になる ([API/README.md](API/README.md) の API-Q1 が**別ドメイン前提でプレフィックス無しの API 設計を確定済み**。相乗りにすると API 設計全体が変わる)。(b) v2 の ALB を Terraform に import して共用: C-14 で import しない方針が確定している。(c) ALB の生 DNS 名を公開エンドポイントにする (v2 の F-11): 全面切替 (C-11) 時に**クライアント側の URL 変更が必須**になり、切り戻しも DNS で行えない。(d) **FE と BE を別の親ドメインに置く** (例: FE = Vercel の既定ドメイン / BE = `hassan.jp` 配下): 段階1 は成立するが、**段階2 で Cookie を共有できず、移行時にドメイン変更 (DNS + ACM + Vercel の独自ドメイン + BE の CORS 許可リスト) を同時に行うことになる**。**段階1 の時点で揃えておけば移行時にドメインを触らずに済む** ([frontend.md](frontend.md) §12.1) |
+| **INF-J** | v3 のホスト名 | **v2 とは別ホスト名 (別 ALB) を割り当てる**。**ホスト名は `hassan.jp` を親ドメインとし、prod は FE = `app-v3.hassan.jp` (Vercel) / BE = `api-v3.hassan.jp` (ALB) とする** (**2026-09-16 方針転換。§9.3 の Q-INF-3 追記** — 当初 2026-08-29 に `app.hassan.jp` / `api.hassan.jp` で確定していたが、**v2/v3 の併用期間が長期化する前提に立ち、併用期間中の v3 の URL を安定させるため v3 専用の別名に変更した**。全面切替 (C-11) 自体は撤回しない — 切替時の扱いは §9.2 で回答する。dev の 2 件は未確定 = 同項の派生①)。ACM 証明書は Terraform で DNS 検証により発行し、Route53 のレコードのみ管理する (**ホストゾーン自体は既存のものを data source で参照し、Terraform の管理対象にしない**)。**FE と BE を同一親ドメイン配下に置くのは、[frontend.md](frontend.md) の段階2 (HttpOnly Cookie 化) で `Domain=hassan.jp` の Cookie を共有できるようにするため**である (同書 §12.1)。**段階1 の時点では両者は別オリジンであり CORS が必要** (同書 §12.3) | (a) v2 と同一ドメイン・同一 ALB に相乗り: `/themes` などのパスが v2 と衝突し、v3 側にパスプレフィックスが必要になる ([API/README.md](API/README.md) の API-Q1 が**別ドメイン前提でプレフィックス無しの API 設計を確定済み**。相乗りにすると API 設計全体が変わる)。(b) v2 の ALB を Terraform に import して共用: C-14 で import しない方針が確定している。(c) ALB の生 DNS 名を公開エンドポイントにする (v2 の F-11): 全面切替 (C-11) 時に**クライアント側の URL 変更が必須**になり、切り戻しも DNS で行えない。(d) **FE と BE を別の親ドメインに置く** (例: FE = Vercel の既定ドメイン / BE = `hassan.jp` 配下): 段階1 は成立するが、**段階2 で Cookie を共有できず、移行時にドメイン変更 (DNS + ACM + Vercel の独自ドメイン + BE の CORS 許可リスト) を同時に行うことになる**。**段階1 の時点で揃えておけば移行時にドメインを触らずに済む** ([frontend.md](frontend.md) §12.1) |
 | **INF-K** | 通知経路 | **CloudWatch アラーム → SNS トピック → AWS Chatbot (Slack)**。**prod は critical に限り SNS の email 購読も併設する** (Slack が使えない間の経路。束ね方と環境差は [operations.md](operations.md) §7.5 が SSOT)。SNS トピックとアラームを Terraform で管理し、**Slack ワークスペース側の連携承認は範囲外** (§7) | (a) Lambda を自作して Slack へ POST: 運用対象のコードが増え、通知経路自身の監視が必要になる。(b) メール (SNS の email サブスクリプション) **のみ**: [observability.md](observability.md) §4.6 が通知先を「開発チーム (Slack)」と定めているため、経路が一致しない。**Slack + メールの併用は採用側**であり、この却下は「メール単独」に対するものである。(c) 環境ごとに 1 トピックへ集約する: prod で「今すぐ見るべきか」が判断できない ([operations.md](operations.md) §7.5 の重大度 2 分類) |
-| **INF-L** | WAF | **prod の ALB に AWS WAF をアタッチし、マネージドルール (共通脅威 / 既知の不正入力 / IP レピュテーション) + レートベースルールを入れる。dev には同じルールを `count` モードで入れる** (誤検知を dev で先に観測するため)。**アプリ層のレート制限を WAF に置き換えない** ([auth.md](auth.md) §6.11-3 の決定) | (a) WAF を入れない: 未認証エンドポイントへのボリューム型攻撃がアプリのミドルウェアだけで受け止められる。auth.md が「WAF はアプリ側制限の上位防御として検討する」と本書へ委ねている。(b) dev には一切入れない: prod 固有の誤検知が本番で初めて出る。`count` モードなら **dev の自動テストをブロックせずにルールの当たりを観測できる**。(c) WAF でレート制限を代替してアプリ側を持たない: local / dev で WAF が無い環境の挙動が prod と変わり、**制限の単体テストが書けない** (auth.md の決定に反する) **2026-08-10 (ユーザー決定)**: **管理者経路 (`/admin/*`) の IP 許可リストは本増分では入れない** — [auth.md](auth.md) §6.2 の「追加の層」③ が要求していたが、FE を Vercel に置くと ALB が見る送信元 IP が Vercel の Function になり成立しない ([frontend.md](frontend.md) FE-Q7 = ③ で確定)。**マネージドルールとレートベースルールは本決定の対象外** (引き続き入れる)。**2026-08-29 の追記 (Geo Match)**: **v2 は `AllowJapanOnly` (Geo Match Statement) を運用している** (オーナー確認済み。**IaC が無いため v2 の WAF 設定はリポジトリから確認できない** — §11.3)。**v3 も prod で Geo Match (JP のみ許可) を入れる**。**この判断は [frontend.md](frontend.md) の FE-D 段階移行と対で成立する** — 同書が段階1 で「ブラウザから BE を直接叩く」を採ったため、**ALB に届く送信元 IP はエンドユーザーのもの**であり、Geo ルールが意図どおりに機能する。**段階2 (BE 呼び出しを Vercel のサーバ側へ寄せる) に移ると、送信元は常に Vercel の Function になり、Geo ルールは「全通し」か「全断」のどちらかにしかならない** — したがって**段階2 へ移る増分で Geo ルールの扱いを必ず再設計する** (同書 §2.0 の段階2 作業 5)。**dev は他のルールと同じく `count` モード**にする (E2E や開発者の接続元を先に観測するため)。**2026-08-10 の管理者 IP 許可リストの決定 (入れない) は変えない** — 段階1 では技術的に成立するようになったが、入れるかどうかは別の判断であり FE-Q7 のままである。**2026-09-02 の追記 (レートベースルールのみ dev も block)**: **ルールの性質によって dev の扱いを分ける** — マネージドルール (共通脅威/不正入力パターン/IPレピュテーション) と Geo Match は引き続き `count` (誤検知の観測・E2E/開発者の海外接続元を許容するため)。**レートベースルールだけは dev でも `block` にする** — 単位時間あたりのリクエスト数という単純な閾値であり誤検知がほぼ発生しないため、dev を count のままにして得られるものが無い一方、dev の ALB は公開されているためボリューム型攻撃・スクレイピング・ブルートフォースに対する保護を欠く。**却下**: dev のレートベースルールも `count` のまま (現行) にする案 — dev の ALB が実質無防御になり、レートベースルールは誤検知リスクが低いため block にして失うものがない |
+| **INF-L** | WAF | **prod の ALB に AWS WAF をアタッチし、マネージドルール (共通脅威 / 既知の不正入力 / IP レピュテーション) + レートベースルールを入れる。dev には同じルールを `count` モードで入れる** (誤検知を dev で先に観測するため)。**アプリ層のレート制限を WAF に置き換えない** ([auth.md](auth.md) §6.11-3 の決定) | (a) WAF を入れない: 未認証エンドポイントへのボリューム型攻撃がアプリのミドルウェアだけで受け止められる。auth.md が「WAF はアプリ側制限の上位防御として検討する」と本書へ委ねている。(b) dev には一切入れない: prod 固有の誤検知が本番で初めて出る。`count` モードなら **dev の自動テストをブロックせずにルールの当たりを観測できる**。(c) WAF でレート制限を代替してアプリ側を持たない: local / dev で WAF が無い環境の挙動が prod と変わり、**制限の単体テストが書けない** (auth.md の決定に反する) **2026-08-10 (ユーザー決定)**: **管理者経路 (`/admin/*`) の IP 許可リストは本増分では入れない** — [auth.md](auth.md) §6.2 の「追加の層」③ が要求していたが、FE を Vercel に置くと ALB が見る送信元 IP が Vercel の Function になり成立しない ([frontend.md](frontend.md) FE-Q7 = ③ で確定)。**マネージドルールとレートベースルールは本決定の対象外** (引き続き入れる)。**2026-08-29 の追記 (Geo Match)**: **v2 は `AllowJapanOnly` (Geo Match Statement) を運用している** (オーナー確認済み。**IaC が無いため v2 の WAF 設定はリポジトリから確認できない** — §11.3)。**v3 も prod で Geo Match (JP のみ許可) を入れる**。**この判断は [frontend.md](frontend.md) の FE-D 段階移行と対で成立する** — 同書が段階1 で「ブラウザから BE を直接叩く」を採ったため、**ALB に届く送信元 IP はエンドユーザーのもの**であり、Geo ルールが意図どおりに機能する。**段階2 (BE 呼び出しを Vercel のサーバ側へ寄せる) に移ると、送信元は常に Vercel の Function になり、Geo ルールは「全通し」か「全断」のどちらかにしかならない** — したがって**段階2 へ移る増分で Geo ルールの扱いを必ず再設計する** (同書 §2.0 の段階2 作業 5)。**dev は他のルールと同じく `count` モード**にする (E2E や開発者の接続元を先に観測するため)。**2026-08-10 の管理者 IP 許可リストの決定 (入れない) は変えない** — 段階1 では技術的に成立するようになったが、入れるかどうかは別の判断であり FE-Q7 のままである。**2026-09-02 の追記 (レートベースルールのみ dev も block)**: **ルールの性質によって dev の扱いを分ける** — マネージドルール (共通脅威/不正入力パターン/IPレピュテーション) と Geo Match は引き続き `count` (誤検知の観測・E2E/開発者の海外接続元を許容するため)。**レートベースルールだけは dev でも `block` にする** — 単位時間あたりのリクエスト数という単純な閾値であり誤検知がほぼ発生しないため、dev を count のままにして得られるものが無い一方、dev の ALB は公開されているためボリューム型攻撃・スクレイピング・ブルートフォースに対する保護を欠く。**却下**: dev のレートベースルールも `count` のまま (現行) にする案 — dev の ALB が実質無防御になり、レートベースルールは誤検知リスクが低いため block にして失うものがない。**2026-09-16 追記 (INF-W を受けて。IP レピュテーションのみ dev / staging も `block`)**: **IPレピュテーションルール (`AWSManagedRulesAmazonIpReputationList`) だけは、共通脅威・既知の不正入力の 2 ルールと切り離し dev / staging でも `block` にする** — このルールは「ボットネット・スキャナ・既知の C2 サーバー等、AWS が悪性と判定した送信元 IP」を対象とする拒否リストであり、**正規の顧客・開発者・CI の IP を誤って弾く可能性はレートベースルールと同程度に低い** (顧客の IP を把握・固定する必要は無い — INF-U 却下案 e / INF-W 却下案 d の「IP 許可リスト」とは無関係)。**共通脅威・既知の不正入力の 2 ルールと Geo Match は引き続き `count`** — これらは正規リクエストの形状に誤検知し得るため、dev / staging で先に観測する INF-L の目的を維持する。**あわせて dev の WAF ログ配信を有効化する** (2026-09-16 ユーザー決定。INF-W の「dev は WAF ログが無効で事後にも見えない」という代償への対処) — **ALB アクセスログは対象外のまま** (B-3 の判断は変えない。WAF ログのみ)。ログの送信先・保持期間は prod 分と同じ構成を dev にも適用する (§3.5 / INF-N の器を流用)。**却下**: 3 ルールすべてを dev / staging で block にする (旧却下案 f のまま) — 共通脅威・既知の不正入力は正規リクエストの形状的な誤検知が実運用で起き得り、dev での観測という INF-L の目的そのものを失う |
 | **INF-M** | 運用アクセス手段 (コンテナ内調査) | **ECS Exec を dev で有効・prod で無効**にし、prod で必要になった場合は**その都度 Terraform で有効化して apply する** (有効化の履歴が残る)。**~~踏み台サーバーを作らない~~ → 2026-08-07 (Q-INF-5) で撤回。踏み台は INF-S として作る** (理由は INF-S 参照) | (a) 常時 prod でも有効: 本番コンテナへ入る経路が常に開く。(b) 踏み台サーバーを維持 (v2 の F-10 の前提): SSH 鍵の配布・パッチ適用・アクセスログの管理が増える。**マイグレーションは INF-H の RunTask で足りるため、踏み台の主用途 (スキーマ適用) は消える** — **ただし「人間が GUI クライアントで DB の中身を見る」用途は ECS Exec では代替できない** (ECS Exec はコンテナへのインタラクティブシェルのみを提供し、ローカルの GUI クライアントへのポートフォワード機能を持たない)。**この抜け漏れが Q-INF-5 で顕在化し、INF-M の「踏み台を作らない」判断を撤回する根拠になった** |
 | **INF-S** | 運用アクセス手段 (DB への GUI 接続。2026-08-07 追加。Q-INF-5) | **SSM ポートフォワード専用の踏み台 EC2 (`t4g.nano`) を dev / prod に 1 台ずつ置く**。キーペアなし・inbound ルール 0 本 (SSM Agent の outbound 443 のみで成立)。**常時 stopped、使う時だけ起動し 60 分で自動停止**。RDS への到達は `:5432` のみ、SG は踏み台からの通信のみ許可。`ssm:StartSession` は人間の IAM ロールにのみ付与し、CI の OIDC ロールには付けない (prod は dev と別ロール)。**承認は挟まない** — 誰がいつ繋いだかは CloudTrail の `StartSession` に残るが、ポートフォワードの通信内容自体は記録できない (Session Manager のセッションログはシェル用)。**人間が使う DB 認証情報はアプリ用と分離した read-only ロール** ([INF-Q](#) 参照。書込が要る調査は都度払い出しの別ロール)。**AMI とパッチ適用の方針 (2026-09-02 追記)**: 起動時に SSM パラメータ (`al2023-ami-kernel-default-arm64`) から最新 AMI を解決するが、`lifecycle.ignore_changes` で以降の AMI 更新を無視する (**起動のたびに作り直されるのを避けるため**)。**この結果、明示的に `terraform taint` / `-replace` で再作成しない限り、OS パッケージは初回作成時点のまま更新されない** — 常時 stopped で稼働時間が短いとはいえ、起動している間は攻撃対象になり得るため、**四半期ごと (または CVE 公表時) に `-replace` で再作成する運用手順を持つ** (自動化はせず、手順として明記するに留める。頻繁な自動再作成は「使う時だけ起動する」設計と衝突する) | (a) v2 と同じ SSH 踏み台 (F-10): 秘密鍵の配布・失効管理が要り、22 番ポートの inbound が「開いた入口」になる。監査は sshd のログ止まり。(b) ECS Exec だけで済ませる (INF-M の当初案): GUI クライアントへのポートフォワードができず、SQL を使った調査手段として現実的でない。(c) RDS をパブリックアクセス可にする: DB を直接インターネットに晒す。(d) 常時起動の踏み台: 攻撃対象時間が常に開き、EC2 のパッチ運用も継続的に発生する。**常時 stopped + 使う時だけ起動 + 自動停止**なら、稼働中のみが攻撃対象になり課金も EBS 8GB のみで済む |
 | **INF-N** | ログの保持期間 | **ロググループを Terraform で明示作成し、保持期間を dev 30 日 / prod 400 日に設定する** (`awslogs-create-group` による暗黙作成をやめる。**本書がロググループと保持期間の SSOT** — [observability.md](observability.md) §8 の残課題のうちインフラ側をここで確定する) | (a) v2 方式 (F-9): デプロイ時に暗黙作成されるため**保持期間が「無期限」になり、費用が単調増加する**。IaC の管理対象から外れ、削除・変更の履歴も残らない。(b) prod も 30 日: 監査ログ ([observability.md](observability.md) §4.5) の追跡可能期間が 1 か月になり、四半期単位の調査ができない |
-| **INF-O** | v2 インフラとの関係 | **v2 の稼働中リソースを Terraform に import せず、v3 のリソースを新規に作る** (C-14)。共有するのは**既存の Route53 ホストゾーン (参照のみ)** に限る。**2026-09-14 追記: RDS のみ例外** — staging / prod は v2 の既存 RDS インスタンスへ相乗りする (**INF-V**。VPC ピアリングで到達性を確保し、v2 RDS 自体は import せず手動管理のまま) | (a) v2 を import して同じ IaC で管理 (Q-7 の選択肢 C): 稼働中リソースの import に本番停止リスクがあり、全面切替 (C-11) で廃止予定のものに投資することになる。(b) ホストゾーンも新規作成: ドメインの委譲 (NS レコードの変更) が必要になり、v2 の名前解決に影響する |
+| **INF-O** | v2 インフラとの関係 | **v2 の稼働中リソースを Terraform に import せず、v3 のリソースを新規に作る** (C-14)。共有するのは**既存の Route53 ホストゾーン (参照のみ)** に限る。**2026-09-14 追記: RDS のみ例外** — staging / prod は v2 の既存 RDS インスタンスへ相乗りする (**INF-V**。VPC ピアリングで到達性を確保し、v2 RDS 自体は import せず手動管理のまま)。**2026-09-20 追記**: 相乗り先は v2 の既存 `public` スキーマそのもの — v3 専用のスキーマ/DB は作らない (**INF-X**。INF-V の該当部分を上書き) | (a) v2 を import して同じ IaC で管理 (Q-7 の選択肢 C): 稼働中リソースの import に本番停止リスクがあり、全面切替 (C-11) で廃止予定のものに投資することになる。(b) ホストゾーンも新規作成: ドメインの委譲 (NS レコードの変更) が必要になり、v2 の名前解決に影響する |
 | **INF-Q** | **DB 運用アクセス (踏み台経由 GUI 接続) の権限分離** (2026-09-02 ユーザー決定) | **人間が DB に接続する際の認証情報を、アプリ用 (書込可) とは別の read-only 専用 DB ロール・別 Secrets Manager シークレットとして用意する**。踏み台経由の GUI 接続は既定でこの read-only シークレットを渡す。**書込を要する調査は都度払い出しの別ロールとし、人間用の常設アクセスに書込可を持たない**。RDS パラメータグループで `rds.force_ssl` を有効化し、踏み台↔RDS 間を含め TLS を必須にする | (a) アプリ用シークレットをそのまま人間の接続に流用: 誤って本番データを UPDATE/DELETE できる上、担当者交代時のローテーションがアプリの再デプロイを要求する (人間用とアプリ用が分離されていないため)。(b) 人間用ロールを都度払い出しのみにし常設を持たない: 障害調査で read だけ即座に確認したい場面まで払い出し待ちになる。**read-only は常設・write は都度払い出しという非対称構成**が両立する |
 | **INF-R** | **ECS タスクの outbound (egress) 制御** (2026-09-02 ユーザー決定) | **ECS タスクの SG egress を 443/tcp のみに制限する**。Managed Agent 側が `networking.type = limited` + `allowed_hosts` で接続先を明示列挙する (X-4) のと対称に、**ECS 側も NAT を経由する行き先を意識的に絞る対象として明記**する。3.1 節で「要確認」のままになっている Interface エンドポイント (ECR / Secrets Manager / CloudWatch Logs) の先出しは、コスト最適化だけでなく **NAT を通る通信を Anthropic API 相当に限定する**セキュリティ上の効果も持つため、要否の検討時にこの観点を含める | (a) 現行のまま (全ポート/全宛先許可): LLM を扱うアプリではプロンプトインジェクション等でコンテナが乗っ取られた場合、任意の外部サーバーへのデータ持ち出し (exfiltration) を防げない。Managed Agent 側だけ `allowed_hosts` で絞り、ECS 側は無制限という非対称な状態を放置することになる。(b) AWS Network Firewall でドメイン単位に絞る: 確実だが導入・運用コストが増える。**まず SG での 443 限定を採用し**、ドメイン単位の制御は Interface エンドポイントの前倒し導入や必要性が具体的に出た時点で追加検討する |
 | **INF-T** | **監査証跡 (CloudTrail)** (2026-09-02 ユーザー決定) | **アカウント全体の管理イベントを記録する Trail を Terraform で作成し、専用 S3 バケット (ログファイル検証を有効化) へ保存する**。保持期間は INF-N のロググループとは独立に、**Trail のイベント履歴自体は CloudTrail の既定 90 日保持に加え、S3 側でライフサイクルを設定して長期保存する** (期間は運用開始後に確定。§5.1 の規則 3 に準じ dev/prod で差を付けない — 監査証跡を dev だけ薄くする理由が無い)。**データイベント (S3 の `GetObject` 等) は最初は有効化しない** — 対象を絞る必要が具体的に出た時点で追加する。**踏み台の `StartSession` (INF-S) を含む全操作の記録の起点**になる | (a) 現行のまま作らない: CloudTrail の既定保持 (90 日) すら Trail が無ければ有効にならず、**同一アカウントに同居する v2 (コンソール手作業構築。F-1) を含め、いつ・誰が何を変更したかを追跡する手段が無い**。踏み台経由の DB アクセス (INF-S) が「誰がいつ繋いだかは CloudTrail に残る」と前提にしている以上、Trail 自体が資源として存在しないとその前提が成立しない。(b) AWS Organizations 全体の Trail: マルチアカウント化していない (Q-INF-2 で単一アカウント確定) ため、組織単位の集約は過剰な複雑さになる。(c) データイベントも最初から全種有効化: S3 の読み取りアクセスまで全記録するとログ量とコストが跳ね上がる。**必要になったら対象バケットを絞って追加する**方が費用対効果に合う |
 | **INF-P** | **信頼プロキシ CIDR のアプリへの受け渡し** (2026-08-29 追加。[auth.md](auth.md) §6.11-3 の R-13 / 実装リポ `aillio-dev-org/hassan-v3` の issue #37) | **Terraform が VPC の CIDR と ALB を収容する subnet の CIDR を `output` として公開し、ecspresso のタスク定義テンプレートが tfstate 経由でそれを ECS タスク定義の `environment` に渡す** (§4.2 の一方向連携に乗せる。値は**非秘密**なので Secrets Manager / SSM を使わない = [operations.md](operations.md) §3.3 の**分類② のインフラ由来**)。**アプリは受け取った CIDR を `gin.SetTrustedProxies` に設定し、`c.ClientIP()` をレート制限の IP キーに使う** ([auth.md](auth.md) §6.11-3 が SSOT。**この値が渡らないと、`X-Forwarded-For` ヘッダを偽装するだけで未認証レート制限を回避できる**)。**dev / prod で値が空ならアプリを起動させない** (同節)。**local は空値 = プロキシを 1 つも信頼しない** | (a) **CIDR を infra リポの README に書き、backend の env ファイルへ人が書き写す**: §4.2 が却下済みの「出力値を手で書き写す」と同型で、VPC の作り直し・subnet 追加が backend 側に反映されず**制限が静かに無効化される** (F-3 と同種の乖離)。(b) **`0.0.0.0/0` を渡して全プロキシを信頼する**: `SetTrustedProxies` を設定しないのと等価で、issue #37 が塞ごうとしている穴がそのまま残る。(c) **SSM Parameter Store に置いて実行中に読み替える (分類④)**: 信頼境界はネットワーク構成と一体で変わる値であり、**タスク置換と同時に切り替わる方が安全**。再デプロイなしで変えたい要求も無い。(d) **ALB の固定 IP を渡す**: ALB のノード IP は AWS 側の都合で変動するため、固定値として扱えない |
 
-| **INF-U** | **環境モデルの改訂 — staging の追加と dev のブランチ単位プレビュー化** (2026-09-07 ユーザー決定。Q-INF-6) | **local / dev / staging / prod の 4 環境**。**staging** = 従来の dev (`main` の継続デプロイ・受入確認 = C-15 の先行構築対象。FE = Vercel の Preview / BE = `envs/staging`)。**dev** = **PR 単位の使い捨てプレビュー**: FE (Next.js `output: standalone`) と BE を同じ ECS クラスタで動かし、`pr-<N>.dev.<domain>` (FE) / `pr-<N>-api.dev.<domain>` (BE) を自動発行する。**共有基盤 (VPC / クラスタ / ALB / RDS 1 本 / ワイルドカード ACM・Route53 / ECR / OIDC ロール / Fargate Spot キャパシティプロバイダ) は Terraform `envs/dev` が持ち、PR 単位のリソース (ECS サービス・TG・ALB リスナールール・DB スキーマ・Managed Agent) は app リポの `deploy-preview.yml` + ecspresso が作成・破棄する** (X-11)。契機は PR の `preview` ラベル (付与 = 構築 / 除去・close = 破棄 / 付いた状態での push = 再デプロイ。[operations.md](operations.md) §5.1.2)。DB は RDS 1 本を **PR 単位のスキーマ** (`br_pr_<N>`。`search_path` で切替) で分離し、マイグレーションは承認なしで自動適用 (使い捨てのため H-2 の対象外)。**FE ホストのリスナールールに ALB の OIDC 認証** (IdP は Google Workspace を暫定既定) を付けて社内に閉じる。BE ホストは OIDC を付けない (ブラウザの XHR が IdP リダイレクトを辿れないため。アプリの JWT 認証 + WAF で staging / prod と同じ扱い)。**preview のみ Fargate Spot**。同時数の上限は 10 (超過時は新規の構築を失敗させ PR にコメント。上限値は暫定)。**旧記述で「dev」が「`main` の継続デプロイ先」を意味する箇所は staging に読み替える** (本書 §4.5 / §5 / §6 と [operations.md](operations.md) §3 / §5 / §7、rule 04 の環境表は本決定で書き換えた) | (a) 環境を増やさず feature ブランチの Vercel Preview + 共有 dev BE で検証する (旧方針): BE の変更をマージ前に検証できず、prompt / tool schema を変える PR は `main` に入れて初めて動く。(b) PR 単位のリソースも Terraform で管理する: 個数が動的で state が肥大し、`plan` の差分が読めなくなる (infra リポの絶対ルール 2 と衝突)。(c) PR ごとに `CREATE DATABASE`: 接続文字列が PR ごとに変わり Secrets の払い出しが要る。スキーマなら接続情報は共有 1 本で足りる。(d) Managed Agent を dev で 1 本共有: D-6 が検証したい変更 (prompt / tool schema) を preview で見られない。(e) IP 許可リストで閉じる: リモートワークの IP 変動に弱い。(f) FE / BE を同一ホストに置きパスで振り分ける: BE にパス接頭辞を要求するか FE でプロキシする必要があり、staging / prod と実行形が変わる (段階1 はブラウザが BE を直接叩く — [frontend.md](frontend.md) §12.2) |
+| **INF-U** | **環境モデルの改訂 — staging の追加と dev のブランチ単位プレビュー化** (2026-09-07 ユーザー決定。Q-INF-6) | **local / dev / staging / prod の 4 環境**。**staging** = 従来の dev (`main` の継続デプロイ・受入確認 = C-15 の先行構築対象。FE = Vercel の Preview / BE = `envs/staging`)。**dev** = **PR 単位の使い捨てプレビュー**: FE (Next.js `output: standalone`) と BE を同じ ECS クラスタで動かし、`pr-<N>.dev.<domain>` (FE) / `pr-<N>-api.dev.<domain>` (BE) を自動発行する。**共有基盤 (VPC / クラスタ / ALB / RDS 1 本 / ワイルドカード ACM・Route53 / ECR / OIDC ロール / Fargate Spot キャパシティプロバイダ) は Terraform `envs/dev` が持ち、PR 単位のリソース (ECS サービス・TG・ALB リスナールール・DB スキーマ・Managed Agent) は app リポの `deploy-preview.yml` + ecspresso が作成・破棄する** (X-11)。契機は PR の `preview` ラベル (付与 = 構築 / 除去・close = 破棄 / 付いた状態での push = 再デプロイ。[operations.md](operations.md) §5.1.2)。DB は RDS 1 本を **PR 単位のスキーマ** (`br_pr_<N>`。`search_path` で切替) で分離し、マイグレーションは承認なしで自動適用 (使い捨てのため H-2 の対象外)。~~**FE ホストのリスナールールに ALB の OIDC 認証** (IdP は Google Workspace を暫定既定) を付けて社内に閉じる。~~ → **2026-09-16 (INF-W) で撤回。FE ホストにも OIDC を付けず、preview は URL を知る誰でも到達できる**。BE ホストは OIDC を付けない (ブラウザの XHR が IdP リダイレクトを辿れないため。アプリの JWT 認証 + WAF で staging / prod と同じ扱い)。**INF-W により FE も同じ扱いになった**。**preview のみ Fargate Spot**。同時数の上限は 10 (超過時は新規の構築を失敗させ PR にコメント。上限値は暫定)。**旧記述で「dev」が「`main` の継続デプロイ先」を意味する箇所は staging に読み替える** (本書 §4.5 / §5 / §6 と [operations.md](operations.md) §3 / §5 / §7、rule 04 の環境表は本決定で書き換えた) | (a) 環境を増やさず feature ブランチの Vercel Preview + 共有 dev BE で検証する (旧方針): BE の変更をマージ前に検証できず、prompt / tool schema を変える PR は `main` に入れて初めて動く。(b) PR 単位のリソースも Terraform で管理する: 個数が動的で state が肥大し、`plan` の差分が読めなくなる (infra リポの絶対ルール 2 と衝突)。(c) PR ごとに `CREATE DATABASE`: 接続文字列が PR ごとに変わり Secrets の払い出しが要る。スキーマなら接続情報は共有 1 本で足りる。(d) Managed Agent を dev で 1 本共有: D-6 が検証したい変更 (prompt / tool schema) を preview で見られない。(e) IP 許可リストで閉じる: リモートワークの IP 変動に弱い。(f) FE / BE を同一ホストに置きパスで振り分ける: BE にパス接頭辞を要求するか FE でプロキシする必要があり、staging / prod と実行形が変わる (段階1 はブラウザが BE を直接叩く — [frontend.md](frontend.md) §12.2) |
 | **INF-V** | **staging / prod の RDS を v2 の既存インスタンスへ相乗りさせる** (2026-09-14 ユーザー決定。`hassan-v3-infra` issue [#14](https://github.com/yumori59/hassan_v3_design/issues/14) / `aidlc-docs/inception/productionization/questions.md` Q-1 `[Answer 4]`)。**INF-O の「v3 のリソースは新規に作る」の RDS に関する例外**: **staging / prod は v3 専用の Aurora クラスタを新規作成せず、v2 の既存 RDS インスタンスに v3 用のスキーマ/DB を追加する**。**dev (preview) は対象外** — 引き続き `envs/dev` が持つ独自 Aurora (使い捨てスキーマ `br_pr_<N>`) のまま。①**到達性**: v2 VPC (`172.16.0.0/16`) と v3 VPC (INF-O) を **VPC ピアリング**で接続する (v3 の VPC は新規のまま。CIDR を重ねない方針は本決定のために設けられていたものであり、そのまま活きる)。②**管理境界**: v2 RDS 自体は**引き続き Terraform 管理外** (X-8。手動)。v3 の infra リポは、ピアリング・SG・接続情報 (エンドポイント・認証情報) の受け渡しの器のみを持ち、**v2 RDS へのスキーマ追加・パラメータ変更・IAM 発行は人間が手動で行う**。③**コスト配賦**: 同一インスタンスに hassan_v2 / hassan_v3 の按分は行わない (`ChorusCost_Tag1` は既存の `hassan_v2` のまま。按分の仕組みは作らない)。④**安全策**: v2 RDS への変更 (スキーマ追加・パラメータ変更) は**事前に手動スナップショットを取得し、人間承認を必須**とする (§11 の「RDS の作り直しを伴う変更」と同じ規約をスキーマ追加にも適用する。承認コメントにスナップショット ID を残す)。**目的**: v2→v3 のデータ移行の容易化 (同一インスタンス内の移行になりダンプ/リストアが不要)、運用 (バックアップ・監視・パッチ) の一元化 | (a) [Answer 3] のまま v3 専用に新規 Aurora クラスタを作る (旧方針): 移行時に v2→v3 の一方向データ転送 (RunTask 経由 or スナップショット復元) が別途必要になり、運用対象の RDS も 2 系統に増える。(b) v2 RDS を Terraform に import して管理下に置く: INF-O が却下済み (稼働中リソースの import は本番停止リスクを伴い、全面切替 (C-11) で v2 自体が廃止予定)。(c) v3 の VPC を作らず v2 VPC に同居させる: ネットワーク分離が薄まり、v2 廃止時に v3 のネットワーク構成ごと巻き込まれる。**VPC ピアリングなら v2 廃止時にピアリングを切るだけで v3 側は影響を受けない** |
+| **INF-W** | **dev (preview) の ALB OIDC 認証を撤廃する — 「社内限定」という前提の取り下げ** (2026-09-16 ユーザー決定。[../../aidlc-docs/inception/productionization/questions.md](../../aidlc-docs/inception/productionization/questions.md) Q-11 11-2 の `[Answer]:(2026-09-16) d`。実装リポ `hassan-v3` issue #387)。**INF-U の「FE ホストのリスナールールに ALB の OIDC 認証 (IdP: Google Workspace) を付けて社内に閉じる」の上書き**。①**撤廃対象**: preview の FE ホスト (`pr-<N>.dev.<domain>`) のリスナールールに付けていた `authenticate-oidc` アクションと、そのための IdP クライアント (クライアント ID / シークレットの Secrets Manager の器を含む)。**リスナールールは `forward` のみ**になる。②**BE ホストは変更なし** — 元から OIDC を付けていない (INF-U。アプリの JWT + WAF)。③**撤廃の理由**: 顧客にプレビューを触ってもらう運用が前提に加わり (2026-09-16 オーナー)、「社内限定」を維持したまま顧客に見せる手段 (Workspace への招待 / PR 単位の例外 / staging での代替) がいずれも却下されたため、**前提そのものを取り下げる**。④**撤廃後に preview に残る境界防御**: **WAF のみ** (INF-L)。**2026-09-16 追記で一部を強化** — レートベースルールは既に dev でも `block` (INF-L 2026-09-02) に加え、**IP レピュテーションルールも dev / staging で `block`** (INF-L 2026-09-16 追記。ボットネット・既知の C2 等の拒否リストで顧客 IP の把握は不要)。**共通脅威・既知の不正入力の 2 ルールと Geo Match は引き続き `count`** (誤検知観測という INF-L の目的を維持)。**あわせて dev の WAF ログ配信を有効化した** (2026-09-16。ALB アクセスログは対象外のまま)。⑤**残る実質的なアクセス制御はアプリ層の認証** (preview のユーザーは `public` スキーマの共有アカウント = Q-11 11-1 の `[Answer] A`)。**ただしログイン試行のレート制限は本回答の時点で未稼働** — 実装リポ `hassan-v3` の `backend/common/auth/ratelimit.go` はミドルウェアの土台のみで、**signin route への配線は別 issue 待ち**であり、未認証系 (IP 単位) の対象解決関数も「ALB 信頼プロキシの扱いが未確定」という理由で意図的に未実装 (同ファイルのコメント)。**preview 公開はこの配線の完了を待たない** — 実装リポ側の優先課題として申し送る (§11.3)。⑥**代償と見直し条件 (DR-10)**: **「preview の URL を知っていれば世界中の誰でも到達できる」状態を受容する**。共通脅威・既知の不正入力ルールと Geo Match が `count` である以上、**それらの攻撃パターンは検知されるだけで拒否されない** (IP レピュテーション該当のトラフィックは block される)。**dev の WAF ログは 2026-09-16 に有効化したため、count ヒットは事後に確認できるようになった** (ALB アクセスログは引き続き無効。§3.2 の B-3)。これを許容できる根拠は「preview は使い捨て・デモデータのみ (Q-11 11-3) で失うデータが無い」ことと「削除系 API (契約・アカウントとも) が実装リポに存在せず、共有 `public` テーブルへの破壊的操作の経路が現状無い」(2026-09-16 実測。実装リポ `hassan-v3` に `DeleteContract` 相当の API・物理削除経路は無い) ことに限られるため、**preview に顧客の実データ・本番相当データを入れる運用が始まる、削除系 API が追加される、またはログイン試行のレート制限配線が完了しないまま長期化する、のいずれかに至ったら、この判断を破棄して §10 の手順で改訂する** | (a) **OIDC を維持し Google Workspace に顧客を招待する** (Q-11 11-2 案 a): 顧客ごとにゲスト招待と失効の運用が発生し、PR 単位の使い捨て環境の軽さと釣り合わない。オーナー却下。(b) **顧客に見せる PR だけ OIDC を外す (ラベル分離)** (同案 b): **PR 単位で公開範囲が切り替わる経路**を新設することになり、ラベルの付け間違いが公開事故になる。「どの PR が公開か」を常時把握する運用が増える。オーナー却下。(c) **顧客テストは staging で行い preview は社内限定のまま** (同案 c。起草時の推奨案): **PR 単位の検証という preview の目的が顧客テストに使えず**、顧客のフィードバックがマージ後にしか得られない。オーナー却下。(d) **IP 許可リストで閉じる** (INF-U 却下案 e の再評価): 顧客側の接続元 IP は把握も固定もできず、リモートワークの IP 変動に弱いという INF-U の却下理由がそのまま当てはまる。(e) **ALB の前に Basic 認証を置く** (CloudFront + Lambda@Edge 等): preview のためだけに配信層を 1 段増やすことになり、staging / prod と実行形が変わる (INF-U 却下案 f と同型)。共有パスワードの配布・失効の運用も残る。(f) **撤廃に合わせて dev の WAF を全ルール `block` にする**: マネージドルールの誤検知が**プレビューの開発そのものを止める** (誤検知を dev で先に観測するために `count` にしたのが INF-L の趣旨)。Geo Match の `block` は、INF-L が dev を `count` に置いた理由 (**開発者・CI の接続元が非 JP になり得る**。GitHub ホストランナーは非 JP) がそのまま当てはまるうえ、**今回の撤廃の目的である「顧客に見せる」が海外からの接続で壊れる余地を残す**ため採れない。**レートベースルールだけは既に `block`** であり、ボリューム型攻撃・ブルートフォースという「公開によって増える脅威」には既に効いている。**2026-09-16 追記**: マネージドルール 3 種のうち **IP レピュテーションだけは block 化した** (INF-L 2026-09-16 追記。理由は同箇所)。共通脅威・既知の不正入力の 2 ルールは本却下理由 (誤検知がプレビュー開発を止める) がそのまま当てはまるため `count` のまま残す |
+| **INF-X** | **staging / prod の v3 テーブルを v2 の既存 `public` スキーマにそのまま追加する — 「v3 専用スキーマ/DB」方針の撤回** (2026-09-20 ユーザー決定。`aidlc-docs/inception/productionization/questions.md` Q-1 `[Answer 5]`)。**INF-V の「staging / prod は v3 専用の Aurora クラスタを新規作成せず、v2 の既存 RDS インスタンスに v3 用のスキーマ/DB を追加する」のうち、「v3 用のスキーマ/DB を追加する」の部分を上書きする**。①**対象**: identity・tenant 系テーブル (`contracts` / `accounts` / `auth_roles` / `companies` / `admin_accounts` / `admin_auth_roles` / `account_mfa_configs` / `signup_links` / `reset_password_requests` 等) は **v2 の実テーブルをそのまま使う。v3 側にコピーを作らない**。②v3 の新規テーブル (`themes` / `ideas` / `knowledge_*` / `assets` / `plans` 等。**2026-09-23 訂正: `activity_logs` / `event_logs` は v3 新規ではなく v2 の実テーブルを共用する** — [data-model.md](data-model.md) §6.4①(a)) も**同じ `public` に追加する**。③**結果**: v2 → v3 のデータ移行は不要になる (二重化も起きない) — INF-V が挙げていた目的 (データ移行の容易化・運用一元化) が「移行そのものが無くなる」形でさらに強く成立する。④**維持される INF-V の決定**: VPC ピアリング (到達性)・v2 RDS の Terraform 管理外 (手動)・スキーマ追加前の手動スナップショット + 人間承認、の 3 点は変更しない。⑤**dev (preview) は対象外のまま** — 引き続き `envs/dev` の独自 Aurora (使い捨てスキーマ `br_pr_<N>`。INF-U / INF-V)。⑥~~**残課題**: v3 の `backend/db/schema.sql` は psqldef で宣言的に適用されるため、`public` に対して適用すると schema.sql に定義の無い v2 専用テーブル (`business_plans` 系等) が **drop 差分の対象になり得る** (`--enable-drop` 等の抑止設定は未確認)。**この論点は本書では決めない** — [data-model.md](data-model.md) §6 の Q として置く~~ → **2026-09-22〜24 に [data-model.md](data-model.md) §6.4②で回答済み**: v3 の `schema.sql` を共有 DB の SSOT とし、v2 の `make psqldef` は共有 DB に対して実行しない。v3 の `schema.sql` は v2 の列・制約名・インデックス名・`EXTENSION`・enum 全値を含む superset でなければならない (2026-09-24 に対象を列だけでなく制約/インデックス/EXTENSION/enum全値に拡張) | (a) **INF-V のまま v3 専用のスキーマ/DB を新規作成する** (2026-09-14 の決定。今回撤回): 別スキーマ/DB なら v2 の稼働中テーブルに触れず drop 差分の懸念も生じないが、**identity・tenant 系の二重化 (v2/v3 双方に `accounts` 等が存在) と、[data-model.md](data-model.md) §6.5 が定めていた「RL-3 で 1 回コピーし以後 v3 を正とする」移行手順が残る**。今回の決定はこの二重化・移行コストの解消を優先した (決定の理由はオーナー回答そのものであり、本書はその内容のみを反映する) |
+| **INF-Y** | **アセット用オブジェクトストレージ — `local` は MinIO、`dev` 以降は実 AWS S3** (2026-09-21 ユーザー決定。実装リポ `aillio-dev-org/hassan-v3` issue [#377](https://github.com/aillio-dev-org/hassan-v3/issues/377) の H-5 承認 [コメント](https://github.com/aillio-dev-org/hassan-v3/issues/377#issuecomment-5754810199))。①**`local`**: **MinIO** (S3 API 互換) を docker compose で立てる。**AWS 認証情報なしで**アップロード・取得 (presigned URL) の経路を通す。②**`dev` (preview) / `staging` / `prod`**: **実 AWS S3** (`modules/storage`。§10.1。**非公開バケット + presigned URL 前提は変更しない**)。③**backend 側の対応**: S3 クライアントの初期化を**エンドポイント設定可能**にし、環境ごとの設定値 (env ファイル。§4.2 のパターンに準じる) で切り替える。**`local` のみ非空のエンドポイント URL を渡し、`dev` 以降は空 (AWS SDK の既定エンドポイントを使う)** | (a) `local` も実 S3 を使う (LocalStack 等の代替含む): **オーナー回答はこの案を採らず MinIO を明示した。却下の理由自体はオーナー回答に記載が無い** (推測で埋めない。DR-1) |
 
 ---
 
 ## 3. インフラ構成要素の提案一覧 (ユーザー確認用)
 
 > **2026-09-07 (INF-U)**: 本節の表の「dev」列の値は **staging (旧 dev) と dev (preview 基盤) の両方**に当てはまる。
-> 両者で異なる要素 (Fargate Spot / OIDC 認証 / FE 用 ECR / ワイルドカード証明書 / PR 単位リソース) だけを §3.2 に「dev のみ」として追記した。
+> 両者で異なる要素 (Fargate Spot / FE 用 ECR / ワイルドカード証明書 / PR 単位リソース) だけを §3.2 に「dev のみ」として追記した。
+> **2026-09-16 (INF-W)**: 当初この列挙に含めていた「OIDC 認証」は**撤廃されたため差分要素ではなくなった** (§3.2 の該当行を参照)。
 
 > 本節が回答する ID: **AC-3.6** (洗い出し) / **D-8** (管理範囲)。
 > **この一覧は提案であり確定ではない**。確定は §11.1 の `[Answer]:` で求める。
@@ -154,10 +158,10 @@
 | マイグレーション実行タスク定義 | INF-H の RunTask 用。**接続情報は `secrets` で Secrets Manager から注入する** (CI に DB 接続情報を渡さない — [operations.md](operations.md) §4.1) | 同一 (イメージは同じ) | **ECS** | 前提 |
 | **ECR リポジトリ (frontend)** | dev (preview) の FE イメージ (Next.js `output: standalone`) | **dev のみ** (staging / prod の FE は Vercel) | TF | 前提 (INF-U) |
 | **ACM ワイルドカード証明書 + Route53 ワイルドカードレコード** (`*.dev.<domain>` → ALB) | preview の URL 自動発行 | **dev のみ** | TF | 前提 (INF-U。ホスト名は Q-INF-3 派生①) |
-| **ALB リスナールール (PR 単位)** | ホストヘッダ `pr-<N>.dev.<domain>` → FE の TG (**`authenticate-oidc` 付き**) / `pr-<N>-api.dev.<domain>` → BE の TG。リスナーの既定アクションは 404 | **dev のみ** | **`deploy-preview.yml`** (Terraform 管理外。X-11) | 前提 (INF-U) |
+| **ALB リスナールール (PR 単位)** | ホストヘッダ `pr-<N>.dev.<domain>` → FE の TG / `pr-<N>-api.dev.<domain>` → BE の TG。**どちらも `forward` のみ** (2026-09-16。INF-W で `authenticate-oidc` を撤廃)。リスナーの既定アクションは 404 | **dev のみ** | **`deploy-preview.yml`** (Terraform 管理外。X-11) | 前提 (INF-U / **INF-W**) |
 | **Fargate Spot キャパシティプロバイダ** | preview のコスト削減。中断されても使い捨て環境なので再起動で足りる | **dev のみ** (staging / prod は通常 Fargate) | TF | 前提 (INF-U) |
-| **ALB の OIDC 認証用 IdP クライアント** | preview の FE ホストを社内に閉じる。クライアントシークレットは Secrets Manager (INF-G の器) | **dev のみ** | TF (器) / 値は人が投入 | 前提 (INF-U。IdP は Google Workspace を暫定既定) |
-| AWS WAF (ALB にアタッチ) | 未認証エンドポイントの上位防御 + **Geo Match (非 JP を block)** (INF-L) | **prod = block / dev,staging = count** | TF | 前提 (2026-09-09 ユーザー回答。B-5: マネージドルール (Common / KnownBadInputs / IPReputation) + レートベース + Geo Match を導入する。**v2 の `AllowJapanOnly` は `default_action allow` の no-op だったため引き継ぐ実体が無く、v3 は `not_statement` で「JP 以外」を block として新規定義する** (#9 の PR #41 で実装済み)。**prod へ block で適用する前に #49 (WAF ログ配信・`SizeRestrictions_BODY` の扱い・Geo Block の副作用確認) を解消すること** |
+| ~~**ALB の OIDC 認証用 IdP クライアント**~~ **撤廃 (2026-09-16。INF-W)** | ~~preview の FE ホストを社内に閉じる~~ → **作らない**。IdP クライアント (Google Workspace) もクライアントシークレット用の Secrets Manager の器も**構築対象から外す** | — | — | 前提 (INF-W。Q-11 11-2) |
+| AWS WAF (ALB にアタッチ) | 未認証エンドポイントの上位防御 + **Geo Match (非 JP を block)** (INF-L) | **prod = block / dev,staging = count (ただしレートベースと IP レピュテーションは dev,staging も block。2026-09-16 追記)** | TF | 前提 (2026-09-09 ユーザー回答。B-5: マネージドルール (Common / KnownBadInputs / IPReputation) + レートベース + Geo Match を導入する。**v2 の `AllowJapanOnly` は `default_action allow` の no-op だったため引き継ぐ実体が無く、v3 は `not_statement` で「JP 以外」を block として新規定義する** (#9 の PR #41 で実装済み)。**prod へ block で適用する前に #49 (WAF ログ配信・`SizeRestrictions_BODY` の扱い・Geo Block の副作用確認) を解消すること**。**dev の WAF ログ配信は 2026-09-16 に有効化を決定** (INF-W。ALB アクセスログは B-3 のまま対象外) |
 
 ### 3.3 データストア
 
@@ -169,7 +173,7 @@
 | 削除保護 (`deletion_protection`) | 誤削除防止 | **dev 無効 / prod 有効** | TF | 前提 |
 | パラメータグループ | ログ設定 (`log_min_duration_statement` 等) | 同一 (全環境) | TF | 前提 (2026-09-09 ユーザー回答。B-8: **`log_min_duration_statement = 1000` (ms) を全環境で有効化**。運用開始後の実測で調整する) |
 | S3 バケット (アセット・ナレッジのファイル) | 添付ファイルの保管。**非公開 + ACL を付けない + presigned URL のみ** ([API/README.md](API/README.md) D-API-14') | バケットを環境ごとに分離 | TF | 前提 |
-| 同バケットの CORS | ブラウザから presigned URL で GET する場合に必要 | **許可オリジン = FE のホスト名** (prod は `https://app.hassan.jp`。dev は Q-INF-3 の派生①) | TF | **前提** — [frontend.md](frontend.md) §12.3 の末尾が「FE はダウンロード URL をブラウザで直接開く」と回答済み |
+| 同バケットの CORS | ブラウザから presigned URL で GET する場合に必要 | **許可オリジン = FE のホスト名** (prod は `https://app-v3.hassan.jp`。dev は Q-INF-3 の派生①) | TF | **前提** — [frontend.md](frontend.md) §12.3 の末尾が「FE はダウンロード URL をブラウザで直接開く」と回答済み |
 | 同バケットのライフサイクル | 不完全マルチパートの削除・世代管理 | 同一 | TF | 前提 (2026-09-09 ユーザー回答。B-9: **不完全マルチパートを 7 日で削除、世代管理 (バージョニング) は導入しない** — 添付ファイルは削除 API で消す前提であり、S3 側の世代保持は要求されていない) |
 | S3 バケット (ALB アクセスログ用) | 3.2 のログ出力先 | prod のみ | TF | 前提 (§3.2 の ALB アクセスログと同じ判断。B-3) |
 
@@ -205,7 +209,7 @@
 |---|---|---|---|---|
 | GitHub OIDC プロバイダ | CI からのロール引き受け (INF-I) | アカウントに 1 個 | TF | 前提 |
 | IAM ロール (用途別。一覧は §4.5) | 用途別権限。**信頼条件は `environment` で絞る** (モノレポでは `repo:` で分離できない — §4.5) | 環境ごとに別ロール | TF | 前提 |
-| Route53 レコード (API のホスト名 / **FE のホスト名**) | v3 API と FE の公開名 (INF-J) | dev / prod で別ホスト名 | TF (**ホストゾーンは参照のみ**) | **前提 (prod は確定)** — `api.hassan.jp` / `app.hassan.jp` (§9.3 の Q-INF-3)。**dev の 2 件は未確定** (同項の派生①) |
+| Route53 レコード (API のホスト名 / **FE のホスト名**) | v3 API と FE の公開名 (INF-J) | dev / prod で別ホスト名 | TF (**ホストゾーンは参照のみ**) | **前提 (prod は確定)** — `api-v3.hassan.jp` / `app-v3.hassan.jp` (§9.3 の Q-INF-3。2026-09-16 に別名へ変更)。**dev の 2 件は未確定** (同項の派生①) |
 | ACM 証明書 | ALB の TLS | 環境ごとに発行 | TF | 前提 |
 | tfstate 用 S3 バケット + KMS | state の保管 (INF-A) | 1 バケット・環境ごとにキー分離 | **手動** (§7 の例外 1 件) | 前提 |
 | Vercel プロジェクト・環境変数・独自ドメイン | FE のホスティング (C-6)。**staging / prod のみ** (dev = preview の FE は ECS。INF-U) | Preview (staging) / Production。**feature ブランチはビルドしない** (Ignored Build Step) | **外部** (§7) | 前提 |
@@ -369,22 +373,22 @@ backend 用ロールしか引き受けられず、frontend リポからは AWS �
 | ALB アクセスログ | 無効 | 無効 | **有効** | §3.2 の確認対象 |
 | アラート通知 (**通知先に繋ぐ範囲**) | AL-6 のみ (staging と同じ) | AL-6 (タスク異常) のみ | AL-1〜AL-7 全件 (critical / warning の 2 トピックに振り分け) | dev の通知過多を避ける。**この環境差と重大度分類の決定は [operations.md](operations.md) §7.5 が SSOT** (本書はそれを実装する側)。**アラーム自体は両環境で全件作る** (§3.5) |
 | **Fargate キャパシティ** | **Spot** | 通常 | 通常 | INF-U。中断されても使い捨て環境なので再起動で足りる |
-| **ALB の OIDC 認証** | **FE ホストに付ける (社内限定)** | なし | なし | INF-U。BE ホストはアプリの JWT + WAF |
+| **ALB の OIDC 認証** | **なし** (2026-09-16。**INF-W** で撤廃。旧: FE ホストに付けて社内限定) | なし | なし | **INF-W**。FE / BE とも認証はアプリ層 (JWT) + WAF のみ。preview は URL を知る誰でも到達できる |
 | **同時プレビュー数の上限** | **10** (超過時は新規構築を失敗させ PR にコメント) | — | — | INF-U。暫定値。リスナールール上限 (100) と RDS 接続数で見直す |
 
 ### 5.3 FE (Vercel) と BE (AWS) の環境対応 (D-1)
 
-| 論理環境 | BE | FE | DB | デプロイ契機 | 承認 |
-|---|---|---|---|---|---|
-| local | 開発者のマシン (docker compose 等) | `next dev` | ローカル PostgreSQL | — | — |
-| **dev (preview)** | `envs/dev` のクラスタ上に **PR ごとの ECS サービス** | **ECS** (Next.js standalone。Vercel を使わない) | dev の RDS 1 本を **PR 単位のスキーマ**で分離 | PR の `preview` ラベル ([operations.md](operations.md) §5.1.2) | なし (マイグレーション・Agent 発行も自動。使い捨て) |
-| **staging** | `envs/staging` の ECS | **`main` ブランチの Preview** | **v2 の既存 RDS インスタンス (スキーマ追加。INF-V)** | `main` への push | なし (継続デプロイ。非破壊マイグレーションのみ自動) |
-| **prod** | `envs/prod` の ECS | **`production` ブランチ = Production** | **v2 の既存 RDS インスタンス (スキーマ追加。INF-V)** | 手動起動 | H-2 / H-3 / H-4 |
+| 論理環境 | BE | FE | DB | アセットストレージ | デプロイ契機 | 承認 |
+|---|---|---|---|---|---|---|
+| local | 開発者のマシン (docker compose 等) | `next dev` | ローカル PostgreSQL | **MinIO** (S3 API 互換。docker compose。INF-Y) | — | — |
+| **dev (preview)** | `envs/dev` のクラスタ上に **PR ごとの ECS サービス** | **ECS** (Next.js standalone。Vercel を使わない) | dev の RDS 1 本を **PR 単位のスキーマ**で分離 | **実 AWS S3** (`modules/storage`。INF-Y) | PR の `preview` ラベル ([operations.md](operations.md) §5.1.2) | なし (マイグレーション・Agent 発行も自動。使い捨て) |
+| **staging** | `envs/staging` の ECS | **`main` ブランチの Preview** | **v2 の既存 RDS インスタンス (`public` スキーマを共有。INF-V / INF-X)** | **実 AWS S3** (`modules/storage`。INF-Y) | `main` への push | なし (継続デプロイ。非破壊マイグレーションのみ自動) |
+| **prod** | `envs/prod` の ECS | **`production` ブランチ = Production** | **v2 の既存 RDS インスタンス (`public` スキーマを共有。INF-V / INF-X)** | **実 AWS S3** (`modules/storage`。INF-Y) | 手動起動 | H-2 / H-3 / H-4 |
 
 - **FE の Production Branch を `main` にしない**のは既定値からの意図的な変更である
   ([../../templates/shared/.claude/rules/04-human-checkpoints.md](../../templates/shared/.claude/rules/04-human-checkpoints.md) §2.4 / §4.4)
 - **FE の環境変数 (API のベース URL) が両系統をつなぐ唯一の結び目**である。
-  Preview → staging の ALB ホスト名、Production → **`https://api.hassan.jp`** を Vercel 側に設定する。
+  Preview → staging の ALB ホスト名、Production → **`https://api-v3.hassan.jp`** を Vercel 側に設定する。
   **dev (preview) の FE は Vercel ではなく ECS で動くため、同じ変数を ECS タスク定義の `environment` で `https://pr-<N>-api.dev.<domain>` として注入する** (`deploy-preview.yml` が PR 番号から生成)
   (この値の管理は Vercel 側 = §7 の範囲外)。**変数名は段階で変わる** —
   **段階1 は `NEXT_PUBLIC_API_BASE_URL` (ブラウザに露出) / 段階2 は `API_BASE_URL` (サーバ専用)**
@@ -435,9 +439,9 @@ staging の段 1〜6 と同じ手順を `envs/dev` に対して行い、次を�
 | 段 | 内容 | 完了条件 (観測可能な形) |
 |---|---|---|
 | **P-1** | ワイルドカード ACM (`*.dev.<domain>`) + Route53 ワイルドカードレコード → ALB。HTTPS リスナーの既定アクションは 404 | 任意の `pr-0.dev.<domain>` が 404 で応答する (証明書エラーが出ない) |
-| **P-2** | FE 用 ECR + Fargate Spot キャパシティプロバイダ + OIDC 認証用 IdP クライアントの器 (Secrets Manager) | `aws ecr describe-repositories` で FE / BE の 2 本が見える。シークレットに値が投入済み |
+| **P-2** | FE 用 ECR + Fargate Spot キャパシティプロバイダ (**OIDC 認証用 IdP クライアントの器は作らない** — 2026-09-16。INF-W) | `aws ecr describe-repositories` で FE / BE の 2 本が見える |
 | **P-3** | `deploy-preview` ロール (§4.5) | `aws iam get-role` が成功し、信頼条件が `environment:dev-preview` のみ |
-| **P-4** | app リポの `deploy-preview.yml` で **試験 PR に `preview` ラベルを付ける** | FE / BE の URL が PR にコメントされ、OIDC ログイン後に FE が開き、API が応答する。**ラベルを外すとサービス・TG・ルール・スキーマ・Agent が消える** |
+| **P-4** | app リポの `deploy-preview.yml` で **試験 PR に `preview` ラベルを付ける** | FE / BE の URL が PR にコメントされ、**IdP ログインを挟まずに** FE が開き、API が応答する (2026-09-16。INF-W)。**ラベルを外すとサービス・TG・ルール・スキーマ・Agent が消える** |
 
 ### 6.2 prod 環境の構築 (開発完了後。C-15)
 
@@ -503,14 +507,15 @@ app モノレポ
 |---|---|---|
 | **D-8 IaC の管理範囲** | **回答** | §4 (分担・tfstate 連携・apply 主体) / §3 (要素ごとの管理主体) / §7 (範囲外と理由)。tfstate は S3 + ロック (INF-A)、apply は**人間** (§4.4)、v2 の import はしない (INF-O)。**アプリへ値を渡す出力の管理も範囲に含む** — 信頼プロキシ CIDR を Terraform の `output` として公開する (INF-P。手写しは §4.2 で却下済み) |
 | **AC-3.6** | **回答 (一覧は確認待ち)** | §3 に VPC / ALB / ECS / RDS / Secrets / ログ・監視 / OIDC / S3 / WAF / Vercel を洗い出し、管理主体と範囲外理由を付けた。**一覧の最終確定は §11.1 の `[Answer]:`** — 未確認の要素を確定として扱わない |
-| **D-1 環境** | **部分 (インフラ側は回答)** | §5.2 の環境差表と §5.3 の FE / BE 対応表 (**prod のホスト名は `app.hassan.jp` / `api.hassan.jp` = INF-J**。dev は Q-INF-3 派生①)。環境ごとの値は `envs/<env>` の変数 (INF-B)、秘密は Secrets Manager の器 + 値の分離 (INF-G)。**アプリ内の設定値の持ち方は [architecture.md](architecture.md) §3.9② が SSOT**。**環境で値が変わるインフラ由来の非秘密値の実例として信頼プロキシ CIDR を追加した** (INF-P。分類は [operations.md](operations.md) §3.3 の②) |
+| **D-1 環境** | **部分 (インフラ側は回答)** | §5.2 の環境差表と §5.3 の FE / BE 対応表 (**prod のホスト名は `app-v3.hassan.jp` / `api-v3.hassan.jp` = INF-J。2026-09-16 に別名へ変更**。dev は Q-INF-3 派生①)。環境ごとの値は `envs/<env>` の変数 (INF-B)、秘密は Secrets Manager の器 + 値の分離 (INF-G)。**アプリ内の設定値の持ち方は [architecture.md](architecture.md) §3.9② が SSOT**。**環境で値が変わるインフラ由来の非秘密値の実例として信頼プロキシ CIDR を追加した** (INF-P。分類は [operations.md](operations.md) §3.3 の②) |
 | **D-3 デプロイ手順** | **部分 (リソース前提を回答)** | §4.3 (初回作成で ALB 紐付けを含める) / §4.4 (実行主体) / §5.2 (サーキットブレーカーと登録解除待ち)。**手順そのものは [../../templates/app-monorepo/.github/workflows/deploy-backend.yml](../../templates/app-monorepo/.github/workflows/deploy-backend.yml) と [architecture.md](architecture.md) D-3 が SSOT** |
 | **D-5 シークレット管理** | **回答 (具体化)** | INF-G。**器 = Terraform / 値 = Terraform 管理外**。秘密は Secrets Manager、非秘密の環境依存値は SSM。方式の SSOT は [architecture.md](architecture.md) D-5、鍵の扱いは [auth.md](auth.md) §6.8 |
 | **O-1 構造化ログ** | **回答 (受け皿のみ)** | §3.5 / INF-N。ロググループを Terraform で明示作成し保持期間を設定する (**v2 の暗黙作成 F-9 を継承しない**)。ログの内容・必須フィールドは [observability.md](observability.md) §4.1 |
 | **O-5 SSE / 長時間処理** | **回答 (インフラ側)** | INF-C (アイドルタイムアウト 300 秒) / §5.2 (登録解除待ち)。**切断の検知と再接続の仕様は [observability.md](observability.md) §4.3 F-5 / [API/README.md](API/README.md) J-6** |
-| **O-7 アラート** | **回答 (受け皿のみ)** | §3.5 / INF-K。CloudWatch アラーム → SNS (**prod 2 本 / dev 1 本**) → Chatbot (Slack) + **prod critical はメール購読も併設**。**しきい値の SSOT は [observability.md](observability.md) §4.6 / 重大度分類・環境差・トピック本数の SSOT は [operations.md](operations.md) §7.5** (本書はどちらも参照する側) |
+| **O-7 アラート** | **回答 (受け皿のみ)** | §3.5 / INF-K。CloudWatch アラーム → SNS (**prod 2 本 / dev 1 本**) → Chatbot (Slack) + **prod critical はメール購読も併設**。**しきい値の SSOT は [observability.md](observability.md) §4.6 / 重大度分類・環境差・トピック本数の SSOT は [operations.md](operations.md) §7.5** (本書はどちらも参照する側)。**2026-09-16 (INF-W) の追記 — dev (preview) の異常アクセスには気付けない (部分解消)**: dev の通知は AL-6 (タスク異常) のみで、**WAF の `count` ヒット (共通脅威・既知の不正入力・Geo Match) を拾うアラームは無い**。**ただし dev の WAF ログ配信は 2026-09-16 に有効化した** (INF-L 追記) ため、**count ヒットの事後確認自体はできるようになった** — 「事後にも見えない」だった状態は「ログには残るがアラームは無い (見に行けば分かる)」に変わった。**ALB アクセスログは引き続き無効のまま** (§3.2 の B-3)。**リアルタイムのアラーム (CloudWatch アラーム → SNS) は本増分では設けない** (使い捨て環境に通知系を増やすと dev の通知過多を避けるという §5.2 の判断と衝突する) — INF-W ⑥ の見直し条件に到達した時点で追加を検討する。**先送り先: §11.3 の残課題** |
 | (関連) **O-3** | **参照 + 補足** | LLM コストの上限は設けない (C-12)。**AWS 利用料そのものの監視 (AWS Budgets) は §3.5 の確認対象**として別に提案する (LLM 費用は AWS 課金ではないため同じ仕組みで見えない) |
 | (関連) **API-Q1** | **回答** | INF-J。**v2 とは別ホスト名 (別 ALB)** を採る。[API/README.md](API/README.md) の「別ドメイン前提・パスプレフィックス無し」という API 設計の前提が成立する |
+| (関連) **dev (preview) の境界防御** (2026-09-16 追加。**INF-W**) | **回答** | **ALB OIDC の撤廃で、preview の FE / BE ホストはインターネットから直接到達可能になった**。インフラ側に残る境界防御は **WAF のみ** (レートベース・IP レピュテーション = `block` / 共通脅威・既知の不正入力・Geo Match = `count`。INF-L。2026-09-16 に IP レピュテーションを block へ追加)。**認証そのものはアプリ層 (JWT) が唯一の関門**であり、これは staging / prod と同じ構造である (staging / prod も ALB 前段の認証は持たない) — **preview だけが持っていた「未認証でも到達できない」という追加の層が無くなった**、というのが変化の全体である。**アプリ層の防御にも穴がある**: ログイン試行のレート制限は実装リポでミドルウェアの土台のみで signin route への配線が未完了 (§11.3)。**許容の根拠**: preview は使い捨てで、投入するのはデモデータのみ (Q-11 11-3)・DB は PR 単位スキーマで分離・環境は PR の close で消える・削除系 API が実装リポに存在しないため破壊的操作の経路が無い (2026-09-16 実測)。**十分と言い切れない点も明記する**: 共通脅威・既知の不正入力ルールと Geo Match が `count` である以上、**それらの攻撃パターンは拒否されない** (ただし dev の WAF ログは 2026-09-16 に有効化したため事後確認はできる)。この状態を許容できなくなる条件 (顧客の実データ投入 / 削除系 API の追加 / インシデント 1 件目) と改訂手順は INF-W ⑥ | **A-1〜A-7 そのものはアプリ層の設計**であり §8.2 のとおり [auth.md](auth.md) が SSOT。本行が回答するのは**インフラ側の境界が変わった事実とその代償**のみ。**A-6 (LLM への越境) の担保は ALB OIDC に依存していない** — custom tool のテナントスコープ検証はアプリ層にあり、preview でも staging / prod と同じコードが動く。**ただし preview のユーザー関連テーブルは `public` 共有 (Q-11 11-1 の `A`) であるため、「外部からログインされた場合に他 PR のスキーマへ越境しないこと」の担保は `search_path` 分離に依存する — 実装リポ側の確認事項** (§11.3 に残課題として記載) |
 | (関連) **auth.md の WAF 要否** | **回答** | INF-L。**prod = block / dev = count**。アプリ層のレート制限は置き換えない ([auth.md](auth.md) §6.11-3)。**Geo Match (JP のみ許可) を v2 から引き継ぐ** — **[frontend.md](frontend.md) の段階1 (ブラウザ直叩き) と対で成立する**判断であり、**段階2 へ移る増分で再設計が要る** |
 
 ### 8.2 本書では対象外とする ID (理由と先送り先)
@@ -547,30 +552,34 @@ app モノレポ
 **前提 (2026-09-09 に是正。F-13 の実測を反映)**: ~~v2 の API 公開エンドポイントは ALB の生 DNS 名であり (F-11)、
 API 用の Route53 レコードが存在しない~~ — **これは誤りだった** (F-11 は dev 環境の README 由来の記述を
 prod にも一般化した推測。F-13: **v2 prod は `api.hassan.jp` の Route53 レコードで公開されている**)。
-**API 側にも DNS レバーがある**。v3 は最初から別ホスト名 `api.hassan.jp` を使う設計 (INF-J) だが、
-**この名前は v2 prod が既に使っているため、全面切替時に v2 → v3 へレコードを付け替える必要がある**
-(Q-INF-3 の追記・案 B)。**切替・切り戻しのレバーは FE の公開ドメインと API (`api.hassan.jp`) の
-2 レコード (と Vercel の Promote)** になる。
+
+**2026-09-16 の方針転換 (INF-J) により前提が変わった**: v3 は最初から `api.hassan.jp` を使う設計だったため
+「v2 prod が既に使っている名前に切替時に付け替える」という前提で以下の A/B が書かれていたが、
+**v3 は最初から v2 と重ならない別名 `api-v3.hassan.jp` / `app-v3.hassan.jp` を使うことに変わった**
+(併用期間中の URL 安定のため)。そのため **API 側にも FE 側と同じ「エンドユーザーに最終的にどの URL を
+案内するか」という A/B の論点が新たに生じる** — 以前は API 側は「`api.hassan.jp` に付け替えるほぼ一択」
+だったが、今は FE 側と対称に選べる。**この A/B の選択そのものは未確定のまま**であり、下表は
+2026-08-29 時点 (旧ホスト名) の記述を新ホスト名に置き換えたものである。**API 側の A/B は本節の残課題として
+§11.1 に確認事項を追加する**。
 
 **公開方式は 2 ケースあり、どちらを採るかは未確定**。
-**2026-08-29 に Q-INF-3 が回答され、v3 のホスト名は `app.hassan.jp` (FE) / `api.hassan.jp` (BE) に確定した**
-が、**それは「v3 を別ホスト名で立てる」ことの確定であって、切替の方式 (A / B) の確定ではない**。
 **A / B を分けるのは「エンドユーザーに案内する URL を最終的にどれにするか」**である:
 
 | | ケース A | ケース B |
 |---|---|---|
-| 最終的に案内する URL | **v2 が今使っている FE の公開ドメイン** (`hassan.jp`。**2026-09-07 に実測確認済み** — `hassan-terraform` の `route53_records_app.tf` に `hassan.jp` A → Vercel の記録がある。F-13 と同じ実測) を v3 の Vercel へ向け替える | **`app.hassan.jp` のまま**案内する |
+| 最終的に案内する URL | **v2 が今使っている FE の公開ドメイン** (`hassan.jp`。**2026-09-07 に実測確認済み** — `hassan-terraform` の `route53_records_app.tf` に `hassan.jp` A → Vercel の記録がある。F-13 と同じ実測) を v3 の Vercel へ向け替える | **`app-v3.hassan.jp` のまま**案内する |
 | DNS 操作 | **あり** (FE のレコードのみ。切替時と切り戻し時) | **なし** |
 | 未確定の理由 | **v2 の FE がどのレコードで公開されているかが未確認**である (§11.3)。**確認できれば A を選べる** | — |
 
-(運用側の SSOT は [operations.md](operations.md) §6.3 の ⑥):
+(運用側の SSOT は [operations.md](operations.md) §6.3 の ⑥。**API 側の A/B が新たに未確定になったため、
+下表の「API」列も両ケースとも暫定 — API 側の A/B 確定後に改訂する**):
 
 | # | 手順 | ケース A (既存の公開ドメインを v3 へ付け替える) | ケース B (v3 を別 URL で公開する) |
 |---|---|---|---|
-| 1 | **切替前** | v3 の prod を §6.2 で構築し、**v3 のホスト名**で FE の Production を動作確認する (この時点で v2 は無変更のまま稼働) | 同左 |
-| 2 | **TTL の短縮** | **FE と API 両方の公開ドメインレコード**の TTL を 60 秒に下げ、旧 TTL の期間だけ待つ (**2026-09-09 追記: `api.hassan.jp` も対象に追加** = F-13 / Q-INF-3 案 B) | **API のみ** TTL を下げる (FE は既に `app.hassan.jp` で運用中のため対象外) |
-| 3 | **切替** | **FE の公開ドメインを v3 の Vercel Production へ向け、`api.hassan.jp` の A (alias) を v2 の ALB → v3 の ALB へ付け替える** (2026-09-09 追記。**この 2 レコードは同時に切り替える** — 片方だけ先行すると FE/BE の対向がずれる) | **`api.hassan.jp` を v2 の ALB → v3 の ALB へ付け替える**。**v3 の URL (`app.hassan.jp`) をユーザーへ案内する**。既存 FE ドメイン (`hassan.jp`) は v2 のまま |
-| 4 | **切り戻し (ロールバック)** | **FE と API 両方の公開ドメインレコードを旧レコード (v2) へ戻す** (TTL 60 秒のまま作業する)。v2 側は無変更のため再構築は不要 | **`api.hassan.jp` を v2 の ALB へ戻す**。**v3 FE の Production を利用停止の案内表示に Promote し、v2 の URL を案内する** |
+| 1 | **切替前** | v3 の prod を §6.2 で構築し、**v3 のホスト名 (`app-v3.hassan.jp` / `api-v3.hassan.jp`)** で FE / API の Production を動作確認する (この時点で v2 は無変更のまま稼働) | 同左 |
+| 2 | **TTL の短縮** | **FE の公開ドメインレコード**の TTL を 60 秒に下げ、旧 TTL の期間だけ待つ。**API 側 (`api.hassan.jp`) を付け替えるかは未確定** (上記の新論点) | 同左 (API 側は `api-v3.hassan.jp` で運用中のため対象外) |
+| 3 | **切替** | **FE の公開ドメインを v3 の Vercel Production へ向ける**。**API 側の扱いは未確定** — `api.hassan.jp` を v2 の ALB → v3 の ALB へ付け替えるか、`api-v3.hassan.jp` のまま案内するかは今後の確認事項 | **v3 の URL (`app-v3.hassan.jp` / `api-v3.hassan.jp`) をユーザーへ案内する**。既存 FE ドメイン (`hassan.jp`) と `api.hassan.jp` は v2 のまま (廃止時期は §9.1 の削除順序に従う) |
+| 4 | **切り戻し (ロールバック)** | **FE の公開ドメインレコードを旧レコード (v2) へ戻す** (TTL 60 秒のまま作業する)。v2 側は無変更のため再構築は不要 | **v3 FE の Production を利用停止の案内表示に Promote し、v2 の URL を案内する** |
 | 5 | **期間** | **切り戻し可能期間は v3 公開後 7 日**。**この定義と根拠は [operations.md](operations.md) §6.4 が SSOT** (Q-1 のデータ移行方式の確定に依存しない) | 同左 |
 | 6 | **v2 の停止** | 上記 7 日の経過後、§9.1 の順序で削除する | 同左 |
 
@@ -679,6 +688,21 @@ v2 は ALB の生 DNS 名を使っている (F-11) ため、v3 で独自ドメ�
 **2026-09-09 ユーザー回答: 案 B を採用**。段 5 (ALB / ACM / Route53) の staging 構築では `api-staging.hassan.jp` 等の別名で検証し、
 `api.hassan.jp` の付け替えは全面切替 (§9.2) のときに一度だけ行う。§9.2 を本回答に合わせて改訂した。
 
+**[Answer 2] (2026-09-16。方針転換 — 案 B を撤回し案 A を採用する)**。理由は「`api.hassan.jp` の衝突回避」
+から**「v2/v3 の併用期間中、v3 の URL を安定させる」に変わった** — 全面切替 (C-11) 自体は撤回しないが、
+**併用期間が長期化する前提に立ち、v3 は prod でも最初から `app-v3.hassan.jp` (FE) / `api-v3.hassan.jp` (BE)
+を使う** (staging の `app-staging.hassan.jp` / `api-staging.hassan.jp` と同じ命名パターンに揃える)。
+
+- **影響**: FE の CORS 許可オリジン ([frontend.md](frontend.md) §12.1 / §12.3) / Vercel 環境変数 /
+  §5.3 の対応表 / v2 側の CORS 許可オリジン配列に追加する値 ([frontend.md](frontend.md) W-5 / V2-CORS-1) を
+  `app.hassan.jp` → `app-v3.hassan.jp`、`api.hassan.jp` → `api-v3.hassan.jp` に変更する
+  (影響箇所の一覧は本書と [frontend.md](frontend.md) の該当箇所を参照。転記漏れを避けるため数え上げはしない — DR-9)
+- **全面切替時の扱いは未確定** — §9.2 に新たに生じた「API 側の A/B」を参照。**エンドユーザーに最終的に
+  `api.hassan.jp` (v2 の既存名を引き継ぐ) と `api-v3.hassan.jp` (v3 の恒常名のまま) のどちらを案内するかは、
+  FE 側の案内 URL (ケース A / B) と合わせて今後確定する**
+- **`api.hassan.jp` はそのまま v2 が使い続ける** (併用期間中は衝突しない。案 A への転換で当初の衝突自体が
+  解消したため、「衝突回避」という当初の論点は消えた)
+
 **Q-INF-3 派生①: staging (旧 dev) 環境のホスト名 2 件** (FE / BE)。
 **`dev.hassan.jp` は v2 の dev FE が使っている**ため使えない
 (`hassan-v2-backend/internal/corsutil/origin.go:14` の許可オリジンに存在する。
@@ -701,14 +725,16 @@ ACM 証明書の SAN、Vercel の独自ドメイン設定に使う。
 
 | ホスト名 | 状態 | 備考 |
 |---|---|---|
-| `api.hassan.jp` | **衝突 (v2 prod の ALB が使用中)** | 上記 Q-INF-3 の追記のとおり案 B (全面切替時に付け替え) で対応 |
-| `app.hassan.jp` / `app-dev.hassan.jp` / `api-dev.hassan.jp` | 2025-11 時点では空き | ただしスナップショット時点の情報であり、ライブ確認ではない |
+| `api.hassan.jp` | **衝突 (v2 prod の ALB が使用中)** | **2026-09-16 に案 A へ転換したため対応不要になった** — v3 は `api.hassan.jp` を使わず `api-v3.hassan.jp` を使う。全面切替時の扱いは §9.2 の新しい未確定事項 (API 側 A/B) 参照 |
+| `app.hassan.jp` / `app-dev.hassan.jp` / `api-dev.hassan.jp` | 2025-11 時点では空き | ただしスナップショット時点の情報であり、ライブ確認ではない。**`app.hassan.jp` は v3 prod のホスト名ではなくなった** (2026-09-16) — 全面切替でケース A を選んだ場合のみ関係する |
 | `app-staging.hassan.jp` / `api-staging.hassan.jp` (2026-09-09 に新規決定) | **未確認** | 上記 2025-11 スナップショットの調査対象に含まれていない新しい名前 |
+| **`app-v3.hassan.jp` / `api-v3.hassan.jp`** (2026-09-16 に新規決定) | **未確認** | v3 prod の恒常ホスト名。**§6.2 (prod 構築) の着手前に衝突確認が必要** |
 
 **本リポジトリから実行できないため、次の 1 手は人間が行う**:
 `aws route53 list-resource-record-sets --hosted-zone-id <id>` で `app` / `api` / `app-dev` / `api-dev` /
-`app-staging` / `api-staging` の現物を確認する。**§6.1 の段 5 (ALB / ACM / Route53) の着手前に実施する**
-(staging の段 5 着手前後どちらでもよいが、`api.hassan.jp` の付け替えは全面切替の直前に確認し直す)。
+`app-staging` / `api-staging` / **`app-v3` / `api-v3`** の現物を確認する。**§6.1 の段 5 (ALB / ACM / Route53) の
+着手前に実施する** (staging の段 5 着手前後どちらでもよいが、**prod 構築 (§6.2) 着手前に `app-v3` / `api-v3` の
+確認は必須**。`api.hassan.jp` の扱いは全面切替時の A/B 確定後に再確認する)。
 
 [Answer]: 方針は確定 (上記 2 表)。**ライブでの衝突確認は運用手順として残る** (段 5 着手前のチェックリスト項目。
 設計判断としてはここまでで完結する — 確認の結果ホスト名を変える必要が生じても INF-J の判断構造は変わらない)。
@@ -729,7 +755,9 @@ nightly E2E ([testing.md](testing.md) §7.4) との干渉が無く運用が単�
 2. **契機はラベル**: PR に `preview` ラベルを付けると構築、外す・close で破棄、付いた状態で push すると再デプロイ (§5.3 / [operations.md](operations.md) §5.1.2)
 3. **DB は RDS 1 本を PR 単位のスキーマで分離** (`br_pr_<N>`。`CREATE DATABASE` ではない)。マイグレーションは承認なしで自動
 4. **Managed Agent は PR 単位で発行** (dev 共有 1 本ではない) — prompt / tool schema を変える PR を検証するため
-5. **アクセス制限は ALB の OIDC 認証** (IP 許可リストではない)。IdP は Google Workspace を暫定既定
+5. ~~**アクセス制限は ALB の OIDC 認証** (IP 許可リストではない)。IdP は Google Workspace を暫定既定~~
+   → **2026-09-16 に撤回** ([../../aidlc-docs/inception/productionization/questions.md](../../aidlc-docs/inception/productionization/questions.md) Q-11 11-2 / **INF-W**)。
+   **ALB 側のアクセス制限は置かない** (WAF のみ。顧客にプレビューを触ってもらう前提が加わったため)
 6. **feature ブランチの Vercel Preview は使わない** (Ignored Build Step で `main` / `production` 以外をビルドしない)
 7. **preview のみ Fargate Spot** (コスト削減)。同時数の上限は **10** (暫定値。超過時は新規構築を失敗させ PR にコメント)
 
@@ -742,7 +770,7 @@ nightly E2E ([testing.md](testing.md) §7.4) との干渉が無く運用が単�
 | 項目 | 待っているもの | 決まると本書のどこが変わるか |
 |---|---|---|
 | マイグレーションの方式 | [architecture.md](architecture.md) D-4 (psqldef / golang-migrate) | INF-H の RunTask が実行するコマンド。**経路 (RunTask) は方式に依存しない** |
-| データ移行の方式 | ~~Q-1 (データ引き継ぎの要否)~~ — **解消 (2026-09-14。Q-1 [Answer 4] / INF-V)**。staging/prod は v2 の既存 RDS へ相乗りするため「転送」自体が不要になった (§9.1) | §9.1。**§9.2 の切り戻し可能期間は変わらず確定済み** (公開後 7 日。[operations.md](operations.md) §6.4 が SSOT) |
+| データ移行の方式 | ~~Q-1 (データ引き継ぎの要否)~~ — **解消 (2026-09-14。Q-1 [Answer 4] / INF-V)**。staging/prod は v2 の既存 RDS へ相乗りするため「転送」自体が不要になった (§9.1)。**2026-09-20 追記 (INF-X)**: 相乗り先が v2 の既存 `public` スキーマそのものになったため、identity・tenant 系は v2 の実テーブルをそのまま使う (コピーも移送も発生しない)。v3 の新規テーブルも同じ `public` に追加するため、**「転送」に加えて「二重化・1 回コピー」も無くなった** | §9.1。**§9.2 の切り戻し可能期間は変わらず確定済み** (公開後 7 日。[operations.md](operations.md) §6.4 が SSOT) |
 | 公開方式 (ケース A / B) | **v2 の FE がどの Route53 レコードで公開されているかの確認** (§11.3。**v3 のホスト名は Q-INF-3 で確定済み**) | §9.2 の手順 2〜4 (ケース A のみ DNS 操作がある) |
 | ~~Vercel の Preview URL の扱い~~ | **回答済み (2026-08-29)** — [frontend.md](frontend.md) §12.3 の決定 2 | §5.3 の CORS 許可オリジン: **可変 URL を許可せず、dev の固定ホスト名 1 件 + `localhost:3000` に限る**。**Preview から BE を叩く必要が生じたら Vercel の branch alias を 1 件足す** |
 | dev のホスト名 | §11.1 の Q-INF-3 派生① | §5.3 の対応表・ACM の SAN・BE の CORS 許可オリジン |
@@ -755,7 +783,13 @@ nightly E2E ([testing.md](testing.md) §7.4) との干渉が無く運用が単�
   v2 の実クラスタ種別・エンジンバージョン・インスタンスクラス・Multi-AZ の有無・VPC の subnet 構成
   (ピアリング可否・CIDR) は改めて未調査事項として再浮上する** — INF-V の実装 (staging 先行。§6.2) に
   着手する前に確認が必要 (F-12 のまま。踏み台 (INF-S) 経由での確認、または v2 の AWS コンソールでの
-  直接確認を想定)
+  直接確認を想定)。**2026-09-24 追加の確認理由**: [data-model.md](data-model.md) §6.4①(a) が
+  `activity_logs` / `event_logs` の enum に `ALTER TYPE ... ADD VALUE` で値を追加する設計を採ったが、
+  sqldef はこれを**トランザクション内で実行する** (`database/database.go:90-92` は `concurrently` の
+  場合のみ例外にする)。**PostgreSQL 12 未満では `ADD VALUE` をトランザクションブロック内で実行できず
+  エラーになる** ため、v2 RDS の実エンジンバージョンが 12 未満であれば §6.4①(a) の enum 値追加方式が
+  そのままでは成立しない。**staging 先行構築の着手条件に「v2 RDS のエンジンバージョンが 12 以上である
+  ことの確認」を含める**
 - **v2 の ALB のリスナー・ターゲットグループ・ヘルスチェック設定** — IaC が無いためリポジトリから
   確認できない (F-1)。INF-D の `/alive` は v2 のコードにエンドポイントが存在する事実
   ([../analysis/v2-deploy-observability.md](../analysis/v2-deploy-observability.md) の推測節) に基づく提案であり、
@@ -776,6 +810,23 @@ nightly E2E ([testing.md](testing.md) §7.4) との干渉が無く運用が単�
   **本リポジトリからは確認できない**。**v3 の段階1 の設計はこの事実に依存しない**
   (ブラウザ直叩きのため ALB に届くのは常にエンドユーザーの IP)。
   **[frontend.md](frontend.md) の段階2 へ移る前に必須の調査になる**
+- **dev (preview) の公開化 (INF-W) に伴う残課題** (2026-09-16 追加。同日中に②の一部と③を解消):
+  ①**`public` スキーマに共有したユーザー関連テーブル (Q-11 11-1 の `A`) が、外部からログインされた場合に
+  他 PR のスキーマへ越境しないこと**の担保は `search_path` 分離のみである — **実装リポ側の確認事項**
+  (Q-11 11-1 の `[Answer]` 自身が「共有行への操作の波及は未解消」と記録している)。**2026-09-16 実測で
+  緩和材料が判明**: 実装リポ `hassan-v3` に契約・アカウントの物理削除 API は存在しない (Q-10 で契約削除は
+  「持たない」、メンバー削除も「無効化のみ」に確定済み) ため、**波及の引き金となる削除操作の経路が現状無い**。
+  削除系 API が将来追加される場合は、この担保を作り直すまで preview 環境の管理者 API では禁止する等の
+  歯止めを設計に含めること。
+  ②**preview の初期ユーザーの資格情報の強度・使い回しの可否** — 公開化により総当たりの対象になるため、
+  実装リポ側で固定パスワードの強度と PR ごとの差異を決める必要がある (本書の管理対象外)。**ログイン試行の
+  レート制限が未配線であることが判明した** (2026-09-16 実測。`backend/common/auth/ratelimit.go` はミドルウェア
+  の土台のみで signin route への配線は別 issue 待ち。未認証系の IP 単位対象解決も ALB 信頼プロキシの扱いが
+  未確定のため意図的に未実装) — **資格情報の強度だけでなく、この配線の完了を実装リポ側の優先課題として
+  申し送る**。preview 公開自体はこの配線の完了を待たない (INF-W ⑤)。
+  ③~~**dev の WAF ログ有効化と `count` ヒットのアラーム**~~ — **解消 (2026-09-16)**。**WAF ログ配信は有効化した**
+  (INF-L / §3.2)。**リアルタイムのアラーム (CloudWatch アラーム → SNS) は本増分では設けない**方針は変えず、
+  INF-W ⑥ の見直し条件に到達した時点で検討する
 - **Terraform の S3 backend が持つロック機構の利用可否** — 採用する Terraform バージョンに依存する。
   infra リポ立ち上げ時に backend のドキュメントで確認する。**満たせない場合は DynamoDB ロックを併設**
   (INF-A に代替を明記済み)

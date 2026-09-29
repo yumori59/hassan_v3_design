@@ -55,6 +55,20 @@ PoC と v2 の双方に themes / assets / ideas / 企画書 が存在する (ギ
 
 **影響**: `docs/design/infrastructure.md` の X-8 / INF-O / INF-F 関連記述、§3 構成要素一覧 (VPC・Aurora PostgreSQL の行)、§5.2 環境差表 (RDS 構成・クラス・バックアップ・削除保護)、§5.3 環境対応表、§6.1/6.1.1 構築手順 (段4)、§9.1 (v2 との共存)、§10.1 モジュール構成、§11.3 未調査事実は本回答を受けて改訂済み。**残作業**: v2 の実 RDS インスタンス種別・エンジンバージョン・インスタンスクラス・Multi-AZ の有無・VPC subnet 構成 (ピアリング可否・CIDR) の調査 (§11.3)。`hassan-v3-infra` 側の Terraform 実装は、この調査結果を踏まえて通常の issue 起票 (H-5 相当の着手前計画承認) から着手する
 
+[Answer 5]:(2026-09-20) **方針転換 — [Answer 4] の「v3 用のスキーマ/DB を追加する」をさらに踏み込み、v2 の既存 `public` スキーマをそのまま拡張する**。staging / prod のみ対象 (dev (preview) は引き続き対象外 — INF-U / INF-V のまま `br_pr_<N>` の使い捨てスキーマ)。
+
+- **identity・tenant 系テーブル** (`contracts` / `accounts` / `auth_roles` / `companies` / `admin_accounts` / `admin_auth_roles` / `account_mfa_configs` / `signup_links` / `reset_password_requests` 等): **v2 の実テーブルをそのまま使う。v3 側にコピーを作らない**
+- **v3 の新規テーブル** (`themes` / `ideas` / `knowledge_*` / `assets` / `plans` / `activity_logs` 等): **同じ `public` スキーマに追加する**
+- **結果**: v2 → v3 のデータ移行は不要になる (二重化も起きない)。[Answer 4] の目的 (①データ移行の容易化 ②運用一元化) は「移行そのものが無くなる」形でさらに強く成立する
+- **[Answer 4] からの継続**: VPC ピアリング・v2 RDS の Terraform 管理外 (手動)・スキーマ追加前の手動スナップショット + 人間承認、の 3 点は変更しない
+
+**影響 (2026-09-20 に本回答へ grep で洗い出し。ヒット全件を確認した上での確定範囲)**:
+
+- `docs/design/infrastructure.md` **INF-V** (`:112`) — 「v3 専用のスキーマ/DB を追加する」が本回答と正面から食い違うため、新設 ID **INF-X** による上書きとして改訂
+- `docs/design/data-model.md` — **P-1** (`:40`)・**P-3 / P-4** (`:42`〜`:43`)・**§1.4 概念対応表の該当行** (`:94`)・**§4.2 アイデンティティ・テナント基盤** (`:436`〜)・**§6.4 既存データの移行** (`:1143`〜)・**§6.5 アカウント基盤の二重化** (`:1199`〜) が旧方針 (v2 相乗りしない / v2→v3 コピー / 二重化して RL-3 で一本化) のまま。改訂は本回答を受けて実施中 (担当: 同ファイル)
+- **未反映のまま残す (本回答の範囲外。別途 grep で検出したが今回は改訂しない)**: `docs/design/operations.md:589` (§6.2 冒頭。P-1 と同文言の「全て新規で相乗りしない」) / `docs/design/architecture.md:1054` (P-1 を前提にした記述)。**data-model.md 側の改訂が確定した後、この 2 箇所は data-model.md 担当または architecture/operations 担当セッションへの是正要求として別途起票が必要** (DR-8 の受信欄参照)
+- **新たに顕在化した設計論点 (実装リポからの報告)**: v3 の `backend/db/schema.sql` は psqldef で宣言的に適用される。v2 の `public` に対して適用すると、`schema.sql` に定義の無い v2 専用テーブル (v2 36 テーブル / v3 定義 35 テーブル。`business_plans` 系など) が **psqldef の drop 差分の対象になり得る** (`--enable-drop` 等の抑止設定は実装リポ全体を grep しても 0 件で未検証)。**この問題は data-model.md 側で選択肢と代償を整理し、[Answer] 空欄の Q として置く** (本回答では決定しない)
+
 ---
 
 ## Q-2. リポジトリ構成
@@ -464,6 +478,111 @@ v3 側で再実装する対象になるため:
   `/admin/signin` `/admin/accounts` `/admin/admins` だけで、契約を作る画面が無かった
 - **移行スクリプトは不要にならない** — 既存契約の移送 ([data-model.md](../../../docs/design/data-model.md) §6.4 / §6.5) は引き続き必要で、
   新規作成 API はそれと**並存**する (上の 9 が両経路の重複防止を要求する理由)
+
+---
+
+## Q-11. dev (PR プレビュー) の初期ユーザーと公開範囲 (実装リポ issue #387 起票。2026-09-16 追加)
+
+**起票の経緯**: 実装リポ hassan-v3 issue [#387](https://github.com/yumori59/hassan-v3/issues/387)
+(`blocked-by-design` + `needs-human`)。dev (PR プレビュー) は PR 単位のスキーマ (`br_pr_<N>`) で
+DB を分離する設計 ([infrastructure.md](../../../docs/design/infrastructure.md) INF-U / X-11) だが、
+`accounts` / `contracts` / `companies` もスキーマ内テーブルのため、プレビューを作るたびに
+**ログイン可能なユーザーが 0 人になる**。加えて「顧客にもプレビューをテストしてもらう」という
+前提が新たに加わり (2026-09-16 オーナー発言)、INF-U が定める **ALB OIDC (Google Workspace) による
+社内限定**という前提と衝突している。
+
+**該当基準**: 実装リポ `.claude/rules/01-construction-loop.md` §4.1 の基準 1 (記述が無い —
+プレビューの初期ユーザーについて設計は何も定めていない) + 基準 3 (解釈が2つ以上成り立ち、
+外部公開範囲に影響する)。
+
+**該当箇所**: [infrastructure.md](../../../docs/design/infrastructure.md) INF-U / §5、
+[operations.md](../../../docs/design/operations.md) §5.1.2、
+[testing.md](../../../docs/design/testing.md) §7.3 (E2E アカウントの記述はあるが、プレビューの
+アカウントは該当節なし)。
+
+---
+
+### 11-1. プレビューのユーザーをどう持つか
+
+- **A. ユーザー関連テーブルだけ共有スキーマ (`public`) を使う** — `search_path = br_pr_<N>, public`
+  のフォールスルー。アプリのコード変更不要
+- **B. provision のたびに専用 seed で固定ユーザーを作る** — 資格情報は固定
+- **C. 認証を外部 IdP に寄せる** — 却下済み (2026-09-16 オーナー。実装し直す規模のため)
+- D. Other
+
+> 推奨: **B**。理由: A は `contracts` / `accounts` を `public` に共有配置するため、
+> **1 つの PR のテスト操作 (例: 管理者機能で契約・アカウントを削除) が、その行を FK で参照する
+> 他 PR のスキーマ (`br_pr_<N>`) の feature テーブルまで `ON DELETE CASCADE` (DM-2 —
+> [data-model.md](../../../docs/design/data-model.md)) で巻き込む**設計になる —
+> PostgreSQL の CASCADE はスキーマを跨いで効くため、共有行への操作が全プレビューへ波及する。
+> **PR 破棄自体** (`DROP SCHEMA br_pr_<N> CASCADE`。[operations.md](../../../docs/design/operations.md) §5.1.2)
+> は当該 PR のスキーマ内で完結し `public` には波及しないが、上記の「共有行への書き込みが波及する」
+> リスクは残る。
+
+[Answer]:(2026-09-16) **A — ユーザー関連テーブルは共有 `public` schema に置く** (推奨 B を退けて採用)。
+**留意点 (未解消のまま採用)**: 推奨で指摘した「共有行の削除・更新が FK 経由で全 PR スキーマの
+feature テーブルへ CASCADE で波及する」リスクは解消していない。実装リポ側で許容するか、
+`public.contracts` / `public.accounts` に対する削除操作をプレビュー環境の管理者 API では
+禁止する等の緩和策を取るかは**実装リポ側の設計判断として持ち帰る**(本 Q の回答範囲外)。
+
+---
+
+### 11-2. プレビューの公開範囲 (顧客テスト)
+
+- **a. Google Workspace に顧客を招待する**
+- **b. 顧客に見せるプレビューだけ ALB OIDC を外す (ラベル分離)**
+- **c. 顧客テストは staging で行う** (プレビューは社内限定のまま)
+- **d. 全プレビュー共通で ALB OIDC を撤廃する** (2026-09-16 追加 — 回答時にオーナーが選択)
+- E. Other
+
+> 推奨: **c**。理由: b は「OIDC を外したプレビューだけ全世界公開」という**PR 単位で公開/非公開が
+> 切り替わる経路**を新設することになり、INF-U が前提とする
+> 「ALB の OIDC 認証で FE ホストを社内限定に閉じる」設計
+> ([infrastructure.md](../../../docs/design/infrastructure.md) INF-U / §5 環境差表) に穴を開ける。
+
+[Answer]:(2026-09-16) **d — 全プレビュー共通で ALB OIDC を撤廃する**。推奨 c ではなく、
+「社内限定」という前提そのものを外す判断 (AskUserQuestion で b/c/a のいずれでもないことを確認済み)。
+
+### 回答の含意 (2026-09-16 追記 → **同日 `infrastructure.md` INF-W で改訂済み**)
+
+- **本回答は INF-U の前提を変更した** — INF-U (2026-09-07 決定) は「FE ホストのリスナールールに
+  ALB の OIDC 認証を付けて社内に閉じる」を dev (preview) の設計の一部として明記していた
+  ([infrastructure.md](../../../docs/design/infrastructure.md) INF-U)。本回答による撤回は
+  **[infrastructure.md](../../../docs/design/infrastructure.md) の `INF-W`** として起草済み
+  (INF-U を直接書き換えず、INF-V と同じ上書き形式)。**反映済みの箇所**: INF-U 本文 (撤回の打ち消し) /
+  §3 冒頭の差分要素の列挙 / §3.2 の「ALB リスナールール (PR 単位)」行 (`authenticate-oidc` の削除) /
+  §3.2 の「ALB の OIDC 認証用 IdP クライアント」行 (撤廃) / §5.2 環境差表の「ALB の OIDC 認証」行 /
+  §6.1.1 の P-2・P-4 / §8.1 (境界防御と O-7) / §9 の Q-INF-6 `[Answer]` 5 項 / §11.3 の残課題、
+  および [frontend.md](../../../docs/design/frontend.md) §12.5 の「認証 (ALB)」行
+- **OIDC を撤廃すると、preview の FE/BE ホストがインターネットに露出する** — この点は INF-W ④〜⑥ が回答した。
+  残る境界防御は **WAF のみ** (レートベースは既に dev でも `block`、マネージドルールと Geo Match は `count` のまま)。
+  **代償として「URL を知る誰でも到達できる」「既知の攻撃パターンは検知されるだけで拒否されない」「dev は
+  WAF ログ・ALB アクセスログとも無効なので事後にも見えない」を明記し、見直し条件
+  (顧客の実データ投入 / インシデント 1 件目) を INF-W ⑥ に置いた**
+- **A-6 (LLM への越境)** の担保は ALB OIDC に依存していなかった (custom tool のテナントスコープ検証はアプリ層)。
+  ただし 11-1 の `A` (ユーザー関連テーブルの `public` 共有) と組み合わさるため、
+  「外部からログインされた場合に他 PR のスキーマへ越境しないこと」の確認を
+  `infrastructure.md` §11.3 の残課題として実装リポへ申し送った
+- **残るアクション**: 本改訂の `design-reviewer` レビュー (`04-review.md`。別セッション) と、
+  実装リポ `hassan-v3` issue #387 への回答転記
+
+---
+
+### 11-3. 初期データの範囲と寿命
+
+- **A. アカウント種のみ投入 (管理者・メンバー)、デモデータなし**
+- **B. A に加えテーマ・企画書等のデモデータも投入する**
+- C. Other
+
+> 推奨: **A**。理由: デモデータは会話型フロー・企画書生成の初期状態を作り込む工数がかかる一方、
+> プレビューの主目的は「この PR の変更が動くか」の確認であり、空の状態から動作確認する方が
+> 実運用に近い。**顧客が入れたデータは PR のマージ・close でスキーマごと破棄される**挙動を許容する
+> (使い捨て前提。INF-U と整合)。**#29 (実装リポの別 issue。本 Q 起票元の issue #387 が言及したもの) とは
+> 別経路**にする — #29 の内容 (「dev/prod への seed 配線」) は本セッションからは確認できておらず
+> (実装リポ hassan-v3 へのネットワーク到達が本セッションのサンドボックスから不可)、**backend-0e からの
+> 伝聞情報**として扱う。
+
+[Answer]:(2026-09-16) **A — アカウント種のみ (管理者・メンバー)、デモデータなし** (推奨どおり)。
 
 ---
 

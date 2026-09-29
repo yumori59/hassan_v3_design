@@ -174,7 +174,8 @@ Vercel の Function になり、**Geo ルールは「通す」か「全断させ
 | 4 | SSE を Route Handler 中継に切り替える (§6.3 の許可リストを有効化する) + FE-Q2 の実測 | §6.3 / §16.1 FE-Q2 |
 | 5 | Geo / IP による境界制御を段階2 でどう置き換えるかの再設計 | §11.3.2 / [infrastructure.md](infrastructure.md) INF-L |
 
-**段階1 の間からドメインを `app.hassan.jp` / `api.hassan.jp` に揃えておく** (§12.1) —
+**段階1 の間からドメインを `app-v3.hassan.jp` / `api-v3.hassan.jp` に揃えておく** (§12.1。
+2026-09-16 に `app.hassan.jp` / `api.hassan.jp` から変更 — [infrastructure.md](infrastructure.md) INF-J) —
 段階2 の Cookie 化で `Domain=hassan.jp` を使えるようにし、**移行時にドメイン変更を伴わせない**ため。
 
 | # | 論点 | 採用案 | 却下案と理由 |
@@ -1153,7 +1154,7 @@ ALB が見る送信元 IP は**運用者のオフィスの IP ではなく Verce
 
 | 環境 | FE (Vercel) | BE (ALB) |
 |---|---|---|
-| prod | **`app.hassan.jp`** | **`api.hassan.jp`** |
+| prod | **`app-v3.hassan.jp`** | **`api-v3.hassan.jp`** |
 | staging (旧 dev。INF-U) | **未確定** (§16.1 の FE-Q12。[infrastructure.md](infrastructure.md) §11.1 の Q-INF-3 派生①が SSOT) | 同左 |
 | **dev (PR 単位プレビュー。FE も ECS)** | **`pr-<N>.dev.hassan.jp`** (ワイルドカード。暫定) | **`pr-<N>-api.dev.hassan.jp`** | 
 
@@ -1161,11 +1162,11 @@ ALB が見る送信元 IP は**運用者のオフィスの IP ではなく Verce
   **`Domain=hassan.jp` の Cookie を FE と BE で共有できる**ようにしておくため。
   **段階2 でドメイン変更を伴わせない** = 移行時に DNS・Vercel の独自ドメイン・
   ACM 証明書・BE の CORS 許可リストを同時に触らずに済む
-- **段階1 では `app.hassan.jp` → `api.hassan.jp` は別オリジンである** (ホストが違う)。
+- **段階1 では `app-v3.hassan.jp` → `api-v3.hassan.jp` は別オリジンである** (ホストが違う)。
   **同一親ドメインであることは CORS を不要にしない** — §12.3 の許可リストが必要
 - **`hassan.jp` の配下は v2 が既に使っている** — v2 BE の CORS 許可リストは
   `https://hassan.jp` / `https://v2.hassan.jp` / `https://dev.hassan.jp` / `https://sparkfield-ai.com` の 4 件
-  (`hassan-v2-backend/internal/corsutil/origin.go:10-15`)。**`app.` / `api.` は含まれていない**ので
+  (`hassan-v2-backend/internal/corsutil/origin.go:10-15`)。**`app-v3.` / `api-v3.` は含まれていない**ので
   ホスト名の衝突は起きない見込みだが、**これは CORS の許可リストであって DNS のレコード集合ではない** —
   **Route53 の実レコードとの衝突確認は未実施** ([infrastructure.md](infrastructure.md) §11.1 の
   Q-INF-3 派生②)。**`dev.hassan.jp` は v2 の dev FE が使っている**ため、
@@ -1180,7 +1181,7 @@ ALB が見る送信元 IP は**運用者のオフィスの IP ではなく Verce
 
 | 変数 | スコープ | 分類 | 値 |
 |---|---|---|---|
-| **`NEXT_PUBLIC_API_BASE_URL`** (**段階1**) | **ブラウザに露出** | 非秘密の環境値 | Preview → staging の BE / Production → `https://api.hassan.jp` / **dev (preview) → ECS タスク定義の `environment` で `https://pr-<N>-api.dev.hassan.jp`** ([operations.md](operations.md) §5.1.2)。**段階1 はブラウザが BE を直接叩くため公開が必要** (v2 と同じ。V-8) |
+| **`NEXT_PUBLIC_API_BASE_URL`** (**段階1**) | **ブラウザに露出** | 非秘密の環境値 | Preview → staging の BE / Production → `https://api-v3.hassan.jp` / **dev (preview) → ECS タスク定義の `environment` で `https://pr-<N>-api.dev.hassan.jp`** ([operations.md](operations.md) §5.1.2)。**段階1 はブラウザが BE を直接叩くため公開が必要** (v2 と同じ。V-8) |
 | `API_BASE_URL` (**段階2**) | **サーバのみ** (`NEXT_PUBLIC_` を付けない) | 非秘密の環境値 | 同上。段階2 で `NEXT_PUBLIC_` 版を廃止して置き換える |
 | `NEXTAUTH_URL` (または `AUTH_URL`) | サーバのみ | 非秘密 | 各環境の FE の URL |
 | `NEXTAUTH_SECRET` (または `AUTH_SECRET`) | **サーバのみ** | **秘密** | 環境ごとに別値。Vercel の環境変数 (暗号化) に置く |
@@ -1229,7 +1230,7 @@ ALB が見る送信元 IP は**運用者のオフィスの IP ではなく Verce
 | **Vercel 固有機能を使わない** | Image Optimization (`next/image` は `unoptimized: true` か自前 loader) / ISR・On-Demand Revalidation / Edge Runtime / Vercel KV・Blob / Vercel Analytics。**使うと dev で検証できない挙動が staging で初めて現れる** |
 | 環境変数 | Vercel の環境変数と同じ名前をタスク定義の `environment` で渡す (§12.2)。**`NEXT_PUBLIC_*` はビルド時に埋め込まれる**ため、preview イメージは PR ごとにビルドする (staging / prod のイメージを流用しない) |
 | ヘルスチェック | `GET /api/health` (Route Handler。認証なし・200 固定) を ALB の TG ヘルスチェックに使う |
-| 認証 (ALB) | FE ホストは ALB の OIDC 認証を通る。**アプリの認証 (next-auth) はその内側で従来どおり動く** (二重ログインになるが、社内限定のための代償として受容) |
+| 認証 (ALB) | **ALB 側の認証は無い** (2026-09-16。[infrastructure.md](infrastructure.md) **INF-W** で ALB OIDC を撤廃)。**FE の認証はアプリの認証だけで成立する** — staging / prod と同じ経路になり、**二重ログインという代償自体が消えた**。**代わりに preview は URL を知る誰でも到達できる**ため、FE 側で「未認証で見える画面」を preview 前提で緩めないこと (サインイン前に出す情報の範囲は staging / prod と同一に保つ)。~~旧: FE ホストは ALB の OIDC 認証を通る (二重ログインは社内限定のための代償として受容)~~ |
 | リスク | Vercel と Node コンテナで `headers()` / `cookies()` / ミドルウェアの挙動が一致しない箇所が出たら、**dev ではなく Vercel 側 (staging) の挙動を正**とし、差分を §16 の残課題に起票する |
 
 **却下案**: dev の FE も Vercel の Preview で出し BE だけ ECS にする — 旧方針。FE / BE を同時に変える PR の検証が
@@ -1238,7 +1239,7 @@ Vercel Preview + 共有 dev BE に分かれ、BE 側の変更を PR ごとに分
 ### 12.3 CORS (段階1 の決定。2026-08-29)
 
 **段階1 はブラウザ → BE のクロスオリジン要求が全経路に発生する** (§12.1 のとおり
-`app.hassan.jp` と `api.hassan.jp` は別オリジン)。
+`app-v3.hassan.jp` と `api-v3.hassan.jp` は別オリジン)。
 **v2 は許可リストをハードコードしている** (`hassan-v2-backend/internal/corsutil/origin.go` の
 `productionWebOrigins` — [API/README.md](API/README.md) F-14) が、これは旧 FE-D が
 却下 (a) の理由に挙げていた問題そのものである。**段階1 ではこれが自分たちの代償になる**ので、
@@ -1266,7 +1267,7 @@ Vercel Preview + 共有 dev BE に分かれ、BE 側の変更を PR ごとに分
   ([infrastructure.md](infrastructure.md) §3.3 の S3 CORS の要確認項目に対する FE 側の回答:
   **FE はダウンロード URL をブラウザで直接開く前提で設計する**)
 - **v2 併用期間中の「FE → v2 BE」のクロスオリジンは §12.4** が扱う。
-  **§12.3 が決めているのは v3 BE (`api.hassan.jp`) の CORS だけ**である
+  **§12.3 が決めているのは v3 BE (`api-v3.hassan.jp`) の CORS だけ**である
 
 ### 12.4 段階1 における v2 併用期間の扱い (FE → v2 BE のクロスオリジン)
 
@@ -1282,7 +1283,7 @@ Vercel Preview + 共有 dev BE に分かれ、BE 側の変更を PR ごとに分
 | **W-2** | **RL-3** (本番リリース) は全ユーザー一斉だが、**未移植の v2 機能は RL-4 の完了条件 (「v2 側の当該機能への新規アクセスが 0 件」) を満たすまで v2 が提供し続ける** | [operations.md](operations.md) §6.1 の RL-3 / RL-4 行 |
 | **W-3** | **併用期間中は FE から見て API が 2 系統残る** (**D-ST-7**)。エラー形式 (`{"code","msg"}` vs `{"code","message","request_id"}`) と 404/403 の本文の差を吸収する変換層が「未移植の v2 機能を FE が叩く間だけ」必要になる | [API/settings.md](API/settings.md) の D-ST-7 行 / §4.1 の「エラー形式」「404/403 の本文」行 |
 | **W-4** | 併用期間中は v2 と v3 でトークンが別になり、**FE が両系統のトークンを保持する** (保持方式は未決 = 同書の **R-2 前半**) | [auth.md](auth.md) §10.2 の R-2 行 |
-| **W-5** | v2 の CORS 許可オリジンは **4 件のハードコード** (`https://v2.hassan.jp` / `https://hassan.jp` / `https://sparkfield-ai.com` / `https://dev.hassan.jp`) で、**`app.hassan.jp` を含まない**。**この配列は dev / prod で共通**であり、環境で分かれるのは `allowLocalhost` の実引数だけ (`localCors` = `true` / `cors` = `false`) | `hassan-v2-backend/internal/corsutil/origin.go:10-15` / `hassan-v2-backend/router/router.go:249` `:266` |
+| **W-5** | v2 の CORS 許可オリジンは **4 件のハードコード** (`https://v2.hassan.jp` / `https://hassan.jp` / `https://sparkfield-ai.com` / `https://dev.hassan.jp`) で、**`app-v3.hassan.jp` (旧 `app.hassan.jp`) を含まない**。**この配列は dev / prod で共通**であり、環境で分かれるのは `allowLocalhost` の実引数だけ (`localCors` = `true` / `cors` = `false`) | `hassan-v2-backend/internal/corsutil/origin.go:10-15` / `hassan-v2-backend/router/router.go:249` `:266` |
 | **W-6** | v2 は **`Access-Control-Allow-Credentials` を返さず**、**`Access-Control-Request-Headers` をそのまま `Access-Control-Allow-Headers` に反射**し、**`OPTIONS` を CORS ミドルウェアで 200 + `Abort`** している。**`Access-Control-Max-Age` と `Access-Control-Expose-Headers` は無い** | `hassan-v2-backend/router/router.go:254` `:271` (反射) / `:256-259` `:273-276` (`OPTIONS` 終端) / `:246-278` (全体) |
 | **W-7** | v2 の `AllowJapanOnly` は特定パスのリスナールールではなく **WebACL レベル**で、**ALB に届く全リクエストが対象** (オーナー確認済み) | §16.3 の仮定 8 |
 
@@ -1296,7 +1297,7 @@ Vercel Preview + 共有 dev BE に分かれ、BE 側の変更を PR ごとに分
 
 | # | 決定 | 却下案と理由 |
 |---|---|---|
-| **4** | **(条件付き。§12.4.4 の判定で「叩く v2 ドメインが 1 本以上」が確定した場合に実行する。0 本なら却下 (b) に切り替わり本決定は取り下げる)** **v2 の許可オリジン配列に v3 FE のホスト名を追加する** (`productionWebOrigins` に prod = `https://app.hassan.jp`、dev = FE-Q12 で確定する v3 dev の FE ホスト名の **2 行**)。**「v2 は改修しない」方針 ([auth.md](auth.md) §9.3 Q-A3) の明示的な例外**として扱い、**例外の範囲を「許可オリジン配列への 2 行の追加」に限定する** — v2 の認証・エラー形式・ミドルウェア構成・`Max-Age` / `Expose-Headers` には一切手を入れない。**FE 側は v2 のベース URL を持つだけで、経路の分岐を持たない** (§12.4.3 の条件付き変数) | (a)〜(d) は下の箇条 |
+| **4** | **(条件付き。§12.4.4 の判定で「叩く v2 ドメインが 1 本以上」が確定した場合に実行する。0 本なら却下 (b) に切り替わり本決定は取り下げる)** **v2 の許可オリジン配列に v3 FE のホスト名を追加する** (`productionWebOrigins` に prod = `https://app-v3.hassan.jp` (2026-09-16 に `https://app.hassan.jp` から変更)、dev = FE-Q12 で確定する v3 dev の FE ホスト名の **2 行**)。**「v2 は改修しない」方針 ([auth.md](auth.md) §9.3 Q-A3) の明示的な例外**として扱い、**例外の範囲を「許可オリジン配列への 2 行の追加」に限定する** — v2 の認証・エラー形式・ミドルウェア構成・`Max-Age` / `Expose-Headers` には一切手を入れない。**FE 側は v2 のベース URL を持つだけで、経路の分岐を持たない** (§12.4.3 の条件付き変数) | (a)〜(d) は下の箇条 |
 | **5** | **(条件付き。決定 4 と同じ条件。§12.4.4 の判定が「1 本以上」で確定した場合に実行する)** **v2 側の変更を先にリリースし、疎通を確認してから RL-3 を行う** (逆順にすると、RL-3 の瞬間に未移植機能が全滅する)。**撤去は「RL-5 (v2 の廃止)」または「段階2 への移行」のいずれか早い方**で、そのとき配列から 2 行を消す。**要求の起票は §16.2-8 の 8-l** ([operations.md](operations.md) §6.1 / §6.3 が受け皿) | (e) **撤去時期を決めない**: v2 が廃止されるまで誰も消さず、**v3 の FE ホスト名が v2 の許可リストに残り続ける**。RL-5 の削除順序 ([infrastructure.md](infrastructure.md) §9.1) と同じ扱いで、撤去の契機を決めておく |
 
 **決定 4・5 は条件付きである** (2026-08-29 の再々レビュー 中 2)。**どちらも §12.4.4 の判定
@@ -1346,7 +1347,7 @@ Vercel Preview + 共有 dev BE に分かれ、BE 側の変更を PR ごとに分
 
 | # | 変更 | 対象 | 備考 |
 |---|---|---|---|
-| **V2-CORS-1** | `productionWebOrigins` に **`https://app.hassan.jp`** を追加 | `hassan-v2-backend/internal/corsutil/origin.go:10-15` | 反射方式 (`ReflectAllowedOrigin`) なので、**他の変更は要らない** |
+| **V2-CORS-1** | `productionWebOrigins` に **`https://app-v3.hassan.jp`** (2026-09-16 に `https://app.hassan.jp` から変更) を追加 | `hassan-v2-backend/internal/corsutil/origin.go:10-15` | 反射方式 (`ReflectAllowedOrigin`) なので、**他の変更は要らない** |
 | **V2-CORS-2** | 同配列に **v3 の dev FE ホスト名** (FE-Q12 で確定) を追加 | 同上 | **配列は dev / prod 共通** (W-5) なので、**prod のバイナリでも v3 dev のオリジンが許可される**。v2 の API は認証必須のため資格情報なしでは読めないが、**許可を環境ごとに分けたい場合は配列の環境変数化 (= v2 の改修範囲の拡大) が必要**になる。**本設計は採らない** — 例外を 2 行に留める方を優先する |
 | **V2-CORS-3** | **変更しない (確認のみ)** | `hassan-v2-backend/router/router.go:254` `:271` `:256-259` `:273-276` | `Access-Control-Allow-Headers` は要求ヘッダの反射なので **`X-Token` / `X-Request-Id` は追加設定なしで通る**。`OPTIONS` は認証より前で終端する。**`Access-Control-Max-Age` が無いためプリフライトが毎回飛ぶ** — v2 向けの往復が 2 倍になるが、**併用期間限定なので許容する** (v2 に手を入れる範囲を最小化する方を採る) |
 
@@ -1413,7 +1414,7 @@ Vercel Preview + 共有 dev BE に分かれ、BE 側の変更を PR ごとに分
 | **O-5** | **§6.4**: 切断・無通信 45 秒・ローリング更新の 3 経路すべてに画面の振る舞いと復元手順 (履歴 GET + 再購読)。自動再接続は却下 | [API/README.md](API/README.md) J-7 |
 | **O-6** | **対象外 (BE の責務)** | [observability.md](observability.md) §4.5 |
 | **O-7** | **対象外 (BE / インフラの責務)**。**先送り先**: FE 起点のエラーをどこに送るか (§16 FE-Q4) が決まればアラート対象に追加を検討する。**段階1 でこの穴が広がった** — 段階2 なら Route Handler / Server Action の失敗が Vercel のログに残るが、段階1 は残らない (O-4 の行)。**穴の一部は BE 側で塞ぐ**: `OPTIONS` の 4xx 率をアラート対象に加える要求を **§16.2-9 の 9-b** として起票した (**段階1 でのみ有効なアラート**) | — |
-| **D-1** | **§12.1 / §12.2 / §12.3**: ①**ドメインを `app.hassan.jp` / `api.hassan.jp` に確定** (段階2 の Cookie 共有を見越した同一親ドメイン。dev のホスト名は FE-Q12) ②環境変数の分類 (**段階1 は `NEXT_PUBLIC_API_BASE_URL` が復活 = 許可リストが 2 件**。雛形の `ALLOWED` と [testing.md](testing.md) の F-C5 は 2026-08-29 に 2 件へ是正済み = §16.2-8 の 8-a / 8-b) ③**CORS の許可オリジンを BE の環境別設定ファイルで持ち、Preview の可変 URL を許可しない** ④**v2 併用期間中の FE → v2 のクロスオリジンを §12.4 で確定** (v2 の許可オリジンに 2 行追加。ベース URL 用の `NEXT_PUBLIC_` 変数は**条件付きで 3 件目**になる = §16.2-8 の 8-m)。環境の対応表は [operations.md](operations.md) §3.2 / [infrastructure.md](infrastructure.md) §5.3 | ホスト名の SSOT は [infrastructure.md](infrastructure.md) INF-J |
+| **D-1** | **§12.1 / §12.2 / §12.3**: ①**ドメインを `app-v3.hassan.jp` / `api-v3.hassan.jp` に確定** (2026-09-16 に `app.hassan.jp` / `api.hassan.jp` から変更。段階2 の Cookie 共有を見越した同一親ドメイン。dev のホスト名は FE-Q12) ②環境変数の分類 (**段階1 は `NEXT_PUBLIC_API_BASE_URL` が復活 = 許可リストが 2 件**。雛形の `ALLOWED` と [testing.md](testing.md) の F-C5 は 2026-08-29 に 2 件へ是正済み = §16.2-8 の 8-a / 8-b) ③**CORS の許可オリジンを BE の環境別設定ファイルで持ち、Preview の可変 URL を許可しない** ④**v2 併用期間中の FE → v2 のクロスオリジンを §12.4 で確定** (v2 の許可オリジンに 2 行追加。ベース URL 用の `NEXT_PUBLIC_` 変数は**条件付きで 3 件目**になる = §16.2-8 の 8-m)。環境の対応表は [operations.md](operations.md) §3.2 / [infrastructure.md](infrastructure.md) §5.3 | ホスト名の SSOT は [infrastructure.md](infrastructure.md) INF-J |
 | **D-2** | **§3.3 / §7.2 / §8.2 / §11.2.3 / §12**: 検査 7 種を CI ゲートにする。**雛形の実装状況と残りは §16.2-1 の表**が SSOT (2026-07-30 に eslint 設定 + CI 検査 4 本が入り、**2026-07-30 に tailwind プラグインの 2 ルールと `X-Admin-Token` の局所化検査も追加され、7 検査すべてに機構が入った**)。**段とマージ条件の SSOT は [testing.md](testing.md) §9 / §10** であり、**FE の検査を同書に登録する是正要求を §16.2-1 に出した** | 登録しないと「SSOT の外にある検査」になる (§8.2) |
 | **D-3** | **参照**: FE のデプロイ手順・BE との互換順序は [operations.md](operations.md) §5.1 / §5.4。**本書が新しく課す順序制約が 2 件ある**: ①FE の公開ホスト名の追加・変更は **BE の許可オリジン設定の反映を先に出す** (§16.2-8 の 8-j) ②**v2 の許可オリジンへの追加を RL-3 より先にリリースし、疎通を確認する** (§12.4.2 の決定 5 / 8-l) | 本書では手順自体を再定義しない。順序制約のみ起票 |
 | **D-4 / D-5 / D-6 / D-7 / D-8** | **対象外**。DB マイグレーション・シークレットの保管基盤・Managed Agent のライフサイクル・段階リリース・IaC は FE の責務外。**先送り先**: [operations.md](operations.md) / [infrastructure.md](infrastructure.md) | FE に関わる範囲 (Vercel の環境変数・フラグによる導線の非表示) のみ §12 で扱った |
@@ -1752,7 +1753,7 @@ Vercel Preview + 共有 dev BE に分かれ、BE 側の変更を PR ごとに分
   そこで入れる場合も §4.1 の「再取得キー」の宣言はライブラリのキーに読み替えるだけにする
 
 - **FE-Q12: dev 環境の FE / BE のホスト名 (新規 2026-08-29)**。
-  prod は `app.hassan.jp` / `api.hassan.jp` で確定した (§12.1) が、**dev の 2 件は未確定**である。
+  prod は `app-v3.hassan.jp` / `api-v3.hassan.jp` で確定した (§12.1。2026-09-16 に別名へ変更) が、**dev の 2 件は未確定**である。
   **`dev.hassan.jp` は v2 の dev FE が使っている** (`hassan-v2-backend/internal/corsutil/origin.go:14`) ため
   そのままは使えない。**SSOT は [infrastructure.md](infrastructure.md) §11.1 の Q-INF-3 派生①**であり、
   本書は §12.3 の決定 2 (dev の BE が許可するオリジン 2 件) の入力として待っている。
@@ -1863,7 +1864,7 @@ Vercel Preview + 共有 dev BE に分かれ、BE 側の変更を PR ごとに分
    | 8-a | `ci.yml` の `frontend` ジョブ「検査 3」の `ALLOWED` | **`NEXT_PUBLIC_APP_ENV NEXT_PUBLIC_API_BASE_URL` の 2 件にする**。**直さないと段階1 の設計どおりに実装した CI が必ず落ちる** (DR-9) | **実施済み (2026-08-29)** — 同じ差分で [ci.yml](../../templates/app-monorepo/.github/workflows/ci.yml) の `ALLOWED` を 2 件に更新した (是正要求として残さず機構を追随させた) |
    | 8-b | [testing.md](testing.md) §9.1 の **F-C5** (`ALLOWED` の値を転記している) | 8-a と同じ値に更新する | **実施済み (2026-08-29)** — 同書 F-C5 の転記を 2 件へ更新し、値の SSOT が §12.2 であることを併記した |
    | 8-c | [testing.md](testing.md) §7.1 の **E-1** (「**CORS は E-1 の対象から外す**見込み」と書いてある) | **反転する** — 段階1 では **CORS が E-1 の担保対象に戻る**。同行が「不成立なら CORS は E-1 の担保対象に戻る」と条件付きで書いていたため、**条件の側が実現した**形 | **実施済み (2026-08-29)** — 同書 §7.1 の E-1 行を書き換え、**段階1 では CORS が担保対象である**ことと、SSOT が本書 §2.0 / §12.3 であることを明記した (`FE-Q2 の実測後に確定` という条件も削除 — 段階1 は中継を作らないため FE-Q2 に依存しない) |
-   | 8-d | [testing.md](testing.md) の E2E に **CORS の疎通 (プリフライト含む) を明示的に載せる** | §15.1 の段 0 で 1 回確認するだけでは、**許可オリジンの設定ミスが後で入ったときに検知できない**。E-1 が実ブラウザで BE を叩けば自動的に担保されるが、**「担保していること」を同書に書く**必要がある (BE-10 の読む側 / 書く側) | **実施済み (2026-08-29)** — 8-c と同じ行に「E-1 が実ブラウザで `app.hassan.jp` から `api.hassan.jp` を叩くため、**許可オリジン・許可ヘッダ・プリフライトの疎通を E-1 が担保する**」を明記した。**v2 向けの CORS は E-1 の対象外** (v2 は E2E 環境に無い。§12.4.4) |
+   | 8-d | [testing.md](testing.md) の E2E に **CORS の疎通 (プリフライト含む) を明示的に載せる** | §15.1 の段 0 で 1 回確認するだけでは、**許可オリジンの設定ミスが後で入ったときに検知できない**。E-1 が実ブラウザで BE を叩けば自動的に担保されるが、**「担保していること」を同書に書く**必要がある (BE-10 の読む側 / 書く側) | **実施済み (2026-08-29)** — 8-c と同じ行に「E-1 が実ブラウザで `app-v3.hassan.jp` から `api-v3.hassan.jp` を叩くため (2026-09-16 に別名へ変更)、**許可オリジン・許可ヘッダ・プリフライトの疎通を E-1 が担保する**」を明記した。**v2 向けの CORS は E-1 の対象外** (v2 は E2E 環境に無い。§12.4.4) |
    | 8-e | BE 側 (実装リポ / [API/README.md](API/README.md)) + **[auth.md](auth.md) §6.7** (②の設計上の宛先) | **①CORS の許可オリジンを設定ファイル化する ②`OPTIONS` を認証の対象外にする (= プリフライトを CORS ミドルウェアで終端し abort する。系統宣言と CI の系統一致検査の対象外) ③`Access-Control-Max-Age` を設定する ④許可ヘッダに `X-Token` / `X-Admin-Token` / `X-Request-Id` / `Content-Type` を含める ⑤`Access-Control-Expose-Headers` に `Retry-After` を含める (§9 の 429 行が読む) ⑥許可オリジンは反射し `Vary: Origin` を付ける** (①〜⑥はいずれも §12.3 の決定 1・3)。**v2 のハードコード (F-14) を移植しない** | **②は設計側実施済み (2026-08-29)** — [auth.md](auth.md) §6.7 に終端位置を追記し、同書 §10.3 の **R-FE-1** ④ として受信済み。**①③④⑤⑥ は未対応** (実装リポの作業) |
    | 8-f | [infrastructure.md](infrastructure.md) §6.3 のリポ間依存 | **FE の着手条件に「BE の CORS 許可オリジン設定が入っていること」を加える** (§15.2 の末尾) | **未対応** |
    | 8-g | [templates/app-monorepo/frontend/CLAUDE.md.tmpl](../../templates/app-monorepo/frontend/CLAUDE.md.tmpl) `:37` | 「`fetch` には `AbortSignal` を渡し」の記述は、**段階1 ではそのまま正しい** (ブラウザから叩くため)。**§16.2-2 の①で「サーバ経由に直す」と要求していたのを取り下げる** | **取り下げ (2026-08-29)** |
