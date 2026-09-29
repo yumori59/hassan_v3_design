@@ -418,6 +418,19 @@ MR-3 が空振りする** (2026-08-04 の design-reviewer 指摘 重大 1)。
 
 **却下案**: ①PR コメント `/deploy` で起動 (`issue_comment`) — default ブランチの workflow 定義で動くためブランチ側の workflow 変更を試せず、コメント権限を持つ全員が起動できる。②ラベルの付け直しを再デプロイの手段にする — `unlabeled` で破棄されスキーマも消えるため「更新」にならない。再デプロイは push か `workflow_dispatch`。
 
+**FE/BE の接続先 PR 上書き** ([questions.md](../../aidlc-docs/inception/productionization/questions.md) Q-12 = B。2026-09-21。実装リポ hassan-v3 issue #420):
+
+既定は現状どおり **同一 PR 番号 N の FE/BE セット**。必要なときだけ、消費者 PR（FE の向き先を変える側）が別 PR の preview BE に繋ぐ。新しい環境は作らない。
+
+- **入力**: 消費者 PR **本文**の HTML コメント 1 つだけ。形式は `<!-- preview-connect be=<N> -->`（例: `<!-- preview-connect be=420 -->`）。`fe=` は置かない（BE の env を変えないため）。provision / redeploy のたびに本文を読み直す。未指定、または `be=` が自分自身の番号なら同一 PR ペア（no-op）
+- **変える値**: FE タスクの **`BACKEND_ORIGIN` だけ**（`https://pr-<接続先>-api.dev.<domain>`）。preview FE は BFF なのでブラウザ → BE の CORS は通常発火しない。BE の `ALLOWED_ORIGINS` / `FRONTEND_BASE_URL` は接続先・接続元とも変えない。[infrastructure.md](infrastructure.md) §5.3 の「dev (preview) の BE は `https://pr-<N>.dev.<domain>` の 1 件だけを許可する」は、クロス接続でも BE 側を触らないためそのまま成立する。INF-U の書き換えは不要
+- **データ**: 接続先 BE のスキーマ `br_pr_<N>`（接続元 PR のスキーマではない）
+- **fail-closed**（構築ジョブを失敗させ PR に理由をコメントする）: 存在しない PR / ECS 上に BE サービス `hassan-v3-preview-be-pr-<N>` が無い / コメントが 2 つ以上または未知キー / **fork PR**。生存判定に SSM `/hassan-v3/dev/pr-<N>/active` は使わない — teardown が SSM をまだ消さないため、「マーカーがある = 生きている」は成立しない
+- **接続先の teardown**: 接続元を同一 PR ペアへ**自動では戻さない**。接続元 PR に「向き先が消えた」とコメントし、接続元の次回 provision / redeploy は fail-closed。コメントを本文から消せば同一 PR ペアに戻る
+- **同時プレビュー上限 10**: カウントは変えない（新しい環境を作らない。[infrastructure.md](infrastructure.md) §5.2）
+
+**本項の却下案**: ①`workflow_dispatch` 入力で接続先を渡す — 次の push で同一 PR ペアに戻ってしまい、向き先が残らない。本文コメントなら次の push でも残る。②BE の `ALLOWED_ORIGINS` に接続元 FE を足す — preview FE は BFF なので CORS は発火せず、足すと「1 件だけ許可」が壊れ接続元のたびに BE 再デプロイが要る。③接続先 teardown で接続元を自動復帰させる — 向き先が黙って変わり、接続元の検証結果が別 BE を指していたことに気付けない。④`/active` マーカーで生存判定する — teardown が SSM を消さない現状では常に生きていると誤判定する。⑤上記の `/deploy` コメント起動に相乗りする — 今回の入力は PR **本文のメタデータ**であり `issue_comment` イベントでは起動しない。
+
 ### 5.2 Managed Agent の発行・更新をどこで行うか (AC-3.3 / D-6)
 
 | 位置 | 内容 |

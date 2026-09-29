@@ -586,4 +586,43 @@ feature テーブルへ CASCADE で波及する」リスクは解消していな
 
 ---
 
+## Q-12. preview で FE/BE の接続先 PR を任意指定するか (hassan-v3 #420)
 
+**起票の経緯**: 実装リポ hassan-v3 issue [#420](https://github.com/aillio-dev-org/hassan-v3/issues/420)
+(`blocked-by-design`)。PR プレビューは [operations.md](../../../docs/design/operations.md) §5.1.2 が
+**1 PR = FE/BE セット**を前提にしており、別 PR の preview へ繋ぐ経路が設計にも実装にも無い。
+モノレポでは FE-only / BE-only PR が日常的で、同一 PR の相手側 head では足りないことがある
+(例: BE PR の API を、既にある FE PR の画面から叩く)。
+
+**該当基準**: 実装リポ `.claude/rules/01-construction-loop.md` §4.1 の基準 1 (記述が無い) +
+基準 3 (解釈が注入する env・破棄時の振る舞いに影響する)。
+
+**該当箇所**: [operations.md](../../../docs/design/operations.md) §5.1.2、
+[infrastructure.md](../../../docs/design/infrastructure.md) §5.3 の CORS 行
+(「dev (preview) の BE は `https://pr-<N>.dev.<domain>` の 1 件だけを許可する」)。
+
+既定は 1 PR = FE/BE セットのまま、必要なときだけ別 PR の preview に繋ぐ。
+
+- **A.** 認めない（同一 PR ペアのみ）
+- **B.** 認める。入力は対象 PR 本文の HTML コメント（例: `<!-- preview-connect be=420 -->`）。変えるのは FE の `BACKEND_ORIGIN` のみ。接続先破棄時は接続元を自動では戻さず、次回再デプロイで fail-closed
+- E. Other
+
+> 推奨: **B**。モノレポでは FE-only / BE-only PR が日常的で、同一 PR の相手側 head では足りないことがある。preview FE は BFF なので CORS（`ALLOWED_ORIGINS`）は触らない。
+
+[Answer]:(2026-09-21) **B**
+
+### 回答の含意 (2026-09-21)
+
+- **反映先は [operations.md](../../../docs/design/operations.md) §5.1.2**（同差分で本文を追加）
+- **[infrastructure.md](../../../docs/design/infrastructure.md) の INF-U / §5.3 CORS 行は書き換えない** —
+  クロス接続でも BE 側 (`ALLOWED_ORIGINS` / `FRONTEND_BASE_URL`) は変えないため、「BE は 1 件だけ許可」は
+  そのまま成立する。注記は operations.md 側に置く
+- **変える値は消費者 PR の FE タスクの `BACKEND_ORIGIN` だけ**。preview FE は BFF なので
+  ブラウザ → BE の CORS は通常発火しない。[frontend.md](../../../docs/design/frontend.md) §12.2 の
+  段階1 名 `NEXT_PUBLIC_API_BASE_URL` との名前差は本 Q の範囲外（preview 経路では `BACKEND_ORIGIN` が正）
+- **残るアクション**: 実装リポ hassan-v3 issue #420 へ本回答を転記し、S-3 の実装計画書き直しと
+  H-5（着手前承認）へ進む。本改訂の `design-reviewer` レビューは別セッション (`04-review.md`)
+
+---
+
+> 未回答のまま設計を進める場合、requirements.md に「既定採用 (推奨案)」と明記する。
